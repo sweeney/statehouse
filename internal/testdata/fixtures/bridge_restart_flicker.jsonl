@@ -1,0 +1,4 @@
+{"ts":"2026-05-13T12:00:00Z","topic":"zigbee2mqtt/kitchen_dishwasher","payload":{"state":"ON","power":1500,"energy":50.0,"linkquality":87}}
+{"ts":"2026-05-13T12:01:00Z","topic":"zigbee2mqtt/kitchen_dishwasher/availability","payload":"offline"}
+{"ts":"2026-05-13T12:01:08Z","topic":"zigbee2mqtt/kitchen_dishwasher/availability","payload":"online"}
+{"ts":"2026-05-13T12:01:09Z","topic":"zigbee2mqtt/kitchen_dishwasher","payload":{"state":"ON","power":1500,"energy":50.0,"linkquality":86}}

@@ -1,0 +1,4 @@
+{"ts":"2026-05-13T14:00:00Z","topic":"zigbee2mqtt/bridge/devices","payload":[{"ieee_address":"0x00158d0000000099","friendly_name":"old_plug","type":"EndDevice"}]}
+{"ts":"2026-05-13T14:00:01Z","topic":"zigbee2mqtt/old_plug","payload":{"state":"ON","power":42,"energy":5.0,"linkquality":80}}
+{"ts":"2026-05-13T14:05:00Z","topic":"zigbee2mqtt/bridge/devices","payload":[{"ieee_address":"0x00158d0000000099","friendly_name":"new_plug","type":"EndDevice"}]}
+{"ts":"2026-05-13T14:05:01Z","topic":"zigbee2mqtt/new_plug","payload":{"state":"ON","power":42,"energy":5.0,"linkquality":80}}
