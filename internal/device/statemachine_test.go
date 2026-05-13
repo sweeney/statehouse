@@ -166,3 +166,134 @@ func TestOnReading_NoPowerDoesNotTransition(t *testing.T) {
 		t.Fatalf("activity must not change without a power reading, got %+v", out)
 	}
 }
+
+// Binary-state class: tests state-driven transitions for boilers /
+// contact sensors / etc. PowerW is intentionally nil throughout —
+// these devices have no power telemetry.
+
+func ptrS(s string) *string { return &s }
+
+func TestBinary_OnTransitionsImmediatelyWhenSustainedZero(t *testing.T) {
+	now := time.Date(2026, 5, 13, 7, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassBinaryState, config.Thresholds{}, "")
+	out := rt.OnReading(now, model.Reading{Timestamp: now, State: ptrS("ON")})
+	if out.NewActivity != model.ActivityActive || !out.CycleStarted {
+		t.Fatalf("expected active + CycleStarted, got %+v", out)
+	}
+	if rt.Cycle() == nil || !rt.Cycle().Active {
+		t.Fatalf("expected active cycle")
+	}
+}
+
+func TestBinary_OffFinishesCycleWithDuration(t *testing.T) {
+	now := time.Date(2026, 5, 13, 7, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassBinaryState, config.Thresholds{}, "")
+	rt.OnReading(now, model.Reading{Timestamp: now, State: ptrS("ON")})
+	out := rt.OnReading(now.Add(30*time.Minute), model.Reading{Timestamp: now.Add(30 * time.Minute), State: ptrS("OFF")})
+	if !out.CycleFinished {
+		t.Fatalf("expected CycleFinished, got %+v", out)
+	}
+	if rt.Cycle() == nil || rt.Cycle().Active {
+		t.Fatalf("expected finished cycle")
+	}
+	if rt.Cycle().DurationSeconds != 30*60 {
+		t.Errorf("expected duration 1800s, got %d", rt.Cycle().DurationSeconds)
+	}
+	if rt.Cycle().Energy.SelectedKWh != 0 {
+		t.Errorf("binary cycle must report zero energy, got %v", rt.Cycle().Energy.SelectedKWh)
+	}
+}
+
+func TestBinary_SustainedWindowDebouncesBlip(t *testing.T) {
+	now := time.Date(2026, 5, 13, 7, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassBinaryState, config.Thresholds{
+		ActiveSustainedFor:   5 * time.Second,
+		InactiveSustainedFor: 5 * time.Second,
+	}, "")
+	rt.OnReading(now, model.Reading{Timestamp: now, State: ptrS("ON")})
+	// Blip back to OFF before window matures — must NOT activate.
+	rt.OnReading(now.Add(2*time.Second), model.Reading{Timestamp: now.Add(2 * time.Second), State: ptrS("OFF")})
+	out := rt.OnReading(now.Add(3*time.Second), model.Reading{Timestamp: now.Add(3 * time.Second), State: ptrS("OFF")})
+	if out.NewActivity == model.ActivityActive {
+		t.Fatalf("must not flip active from sub-window blip, got %+v", out)
+	}
+	// Now hold ON for the full window.
+	rt.OnReading(now.Add(10*time.Second), model.Reading{Timestamp: now.Add(10 * time.Second), State: ptrS("ON")})
+	out = rt.OnReading(now.Add(16*time.Second), model.Reading{Timestamp: now.Add(16 * time.Second), State: ptrS("ON")})
+	if out.NewActivity != model.ActivityActive {
+		t.Fatalf("expected active after sustained ON, got %+v", out)
+	}
+}
+
+func TestBinary_OffSeedsIdleFromUnknown(t *testing.T) {
+	// First contact with State=OFF should set ActivityIdle (rather
+	// than leaving it at unknown). This means a STARTUP snapshot
+	// with both channels OFF gives consumers a useful initial state.
+	now := time.Date(2026, 5, 13, 7, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassBinaryState, config.Thresholds{}, "")
+	out := rt.OnReading(now, model.Reading{Timestamp: now, State: ptrS("OFF")})
+	if out.NewActivity != model.ActivityIdle {
+		t.Fatalf("expected idle from first OFF reading, got %+v", out)
+	}
+}
+
+func TestBinary_NoStateIsNoOp(t *testing.T) {
+	now := time.Date(2026, 5, 13, 7, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassBinaryState, config.Thresholds{}, "")
+	rt.OnReading(now, model.Reading{Timestamp: now, State: ptrS("ON")})
+	// Reading without State — must not change activity.
+	prev := rt.Activity()
+	out := rt.OnReading(now.Add(time.Second), model.Reading{Timestamp: now.Add(time.Second)})
+	if out.NewActivity != prev {
+		t.Fatalf("missing State must not transition activity, got %+v", out)
+	}
+}
+
+// Sensor class: measurement-only devices. No cycles, no occupancy
+// signal — activity transitions unknown→reporting on first contact
+// and stays there.
+
+func TestSensor_FirstReadingFlipsToReporting(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassSensor, config.Thresholds{}, "")
+	temp := 21.4
+	out := rt.OnReading(now, model.Reading{Timestamp: now, TemperatureC: &temp})
+	if out.PrevActivity != model.ActivityUnknown {
+		t.Errorf("expected prev=unknown, got %q", out.PrevActivity)
+	}
+	if out.NewActivity != model.ActivityReporting {
+		t.Errorf("expected new=reporting, got %q", out.NewActivity)
+	}
+	if out.CycleStarted || out.CycleFinished {
+		t.Errorf("sensors must not emit cycle events, got %+v", out)
+	}
+	if out.Cycle != nil {
+		t.Errorf("sensors must not produce a Cycle, got %+v", out.Cycle)
+	}
+}
+
+func TestSensor_SubsequentReadingDoesNotRetransition(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassSensor, config.Thresholds{}, "")
+	temp := 21.4
+	rt.OnReading(now, model.Reading{Timestamp: now, TemperatureC: &temp})
+	// Second reading — activity unchanged; PrevActivity must equal
+	// NewActivity so the engine doesn't emit another transition event.
+	temp2 := 21.5
+	out := rt.OnReading(now.Add(5*time.Minute), model.Reading{Timestamp: now.Add(5 * time.Minute), TemperatureC: &temp2})
+	if out.PrevActivity != model.ActivityReporting || out.NewActivity != model.ActivityReporting {
+		t.Fatalf("expected reporting→reporting, got %q→%q", out.PrevActivity, out.NewActivity)
+	}
+}
+
+func TestSensor_NoPowerNeeded(t *testing.T) {
+	// A sensor reading carries no power; the power short-circuit in
+	// the power-based dispatcher must not affect sensor handling.
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassSensor, config.Thresholds{}, "")
+	hum := 55.0
+	out := rt.OnReading(now, model.Reading{Timestamp: now, HumidityPct: &hum})
+	if out.NewActivity != model.ActivityReporting {
+		t.Fatalf("expected reporting from humidity-only reading, got %q", out.NewActivity)
+	}
+}

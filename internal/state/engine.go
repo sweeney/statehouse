@@ -65,32 +65,33 @@ func (e *Engine) AddCanonicalSink(s CanonicalSink) {
 }
 
 // EnsureDiscovered idempotently registers a device with the engine.
-// Returns the engine-facing device id.
-func (e *Engine) EnsureDiscovered(ieee, friendlyName, sourceTopic string) string {
-	// Identity lookup first; this preserves runtime state across
-	// friendly-name renames where IEEE is stable.
-	id := e.store.LookupID(ieee, friendlyName)
+// Returns the engine-facing device id. Adapters call this whenever
+// they have a stable identity to share (typically from a protocol
+// discovery message like Z2M's bridge/devices), and again on every
+// IngestReading.
+func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic string) string {
+	// Identity lookup first; preserves runtime state across renames
+	// where the protocol-stable Primary key is stable.
+	id := e.store.LookupID(identity)
 	if id == "" {
-		id = e.resolver.ConfiguredID(ieee, friendlyName)
+		id = e.resolver.ConfiguredID(identity)
 		if id == "" {
-			id = deriveID(ieee, friendlyName)
+			id = deriveID(identity)
 		}
 	}
-	prof := e.resolver.Resolve(ieee, friendlyName)
+	prof := e.resolver.Resolve(identity)
 	prof.ID = id
 	dev := model.Device{
 		ID:           id,
 		DisplayName:  prof.DisplayName,
 		Class:        prof.Class,
 		Location:     prof.Location,
-		Identity:     model.DeviceIdentity{IEEEAddress: ieee, FriendlyName: friendlyName},
+		Identity:     identity,
 		SourceTopic:  sourceTopic,
 		Availability: model.AvailabilityUnknown,
 		Activity:     model.Activity{State: model.ActivityUnknown},
 		Unclassified: prof.Unclassified,
 	}
-	// If we already have a record, this preserves runtime state via
-	// Store.Upsert. Otherwise, create a runtime now.
 	if _, exists := e.store.Get(id); !exists {
 		rt := device.NewRuntime(prof, e.cfg.Energy.MaxIntegrationGap)
 		e.store.Upsert(id, dev, rt)
@@ -103,33 +104,35 @@ func (e *Engine) EnsureDiscovered(ieee, friendlyName, sourceTopic string) string
 			Summary:     fmt.Sprintf("Discovered device %s", id),
 		})
 	} else {
-		// Refresh identity/metadata but reuse runtime.
 		var rt *device.Runtime
+		var prevDisplay string
 		e.store.withEntry(id, func(ent *deviceEntry) {
 			rt = ent.Runtime
-			// If runtime class differs (e.g. config change), rebuild.
 			if rt == nil || rt.Profile.Class != prof.Class {
 				rt = device.NewRuntime(prof, e.cfg.Energy.MaxIntegrationGap)
 				ent.Runtime = rt
 			}
+			prevDisplay = ent.Device.Identity.Display
 		})
 		e.store.Upsert(id, dev, rt)
-		// Detect friendly-name rename for the same id.
-		if existing, ok := e.store.Get(id); ok && existing.Identity.FriendlyName != friendlyName && friendlyName != "" {
-			e.store.Rename(id, existing.Identity.FriendlyName, friendlyName)
+		// Detect display-name rename so the byDisplay index is rebuilt.
+		if identity.Display != "" && prevDisplay != "" && identity.Display != prevDisplay {
+			e.store.Rename(id, prevDisplay, identity.Display)
 		}
 	}
 	return id
 }
 
 // IngestReading is the canonical entry point: feed one parsed device
-// reading from one source topic into the engine.
-func (e *Engine) IngestReading(ieee, friendlyName, sourceTopic string, reading model.Reading) {
-	id := e.EnsureDiscovered(ieee, friendlyName, sourceTopic)
+// reading into the engine. Adapters call this with a normalised
+// identity and Reading struct; the protocol-specific details have
+// already been parsed away by the adapter.
+func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string, reading model.Reading) {
+	id := e.EnsureDiscovered(identity, sourceTopic)
 	if reading.Timestamp.IsZero() {
 		reading.Timestamp = e.clock.Now()
 	}
-	e.emitCanonicalForReading(id, ieee, friendlyName, sourceTopic, reading)
+	e.emitCanonicalForReading(id, identity, sourceTopic, reading)
 
 	var (
 		outcome device.Outcome
@@ -174,6 +177,10 @@ func (e *Engine) IngestReading(ieee, friendlyName, sourceTopic string, reading m
 		if reading.HumidityPct != nil {
 			v := *reading.HumidityPct
 			l.HumidityPct = &v
+		}
+		if reading.Battery != nil {
+			v := *reading.Battery
+			l.BatteryPct = &v
 		}
 		if reading.LinkQuality != nil {
 			v := *reading.LinkQuality
@@ -249,10 +256,11 @@ func (e *Engine) IngestReading(ieee, friendlyName, sourceTopic string, reading m
 	}
 }
 
-// SetAvailability is called when an availability MQTT message arrives.
-// Offline transitions are debounced; online transitions are immediate.
-func (e *Engine) SetAvailability(ieee, friendlyName, sourceTopic string, a model.Availability) {
-	id := e.EnsureDiscovered(ieee, friendlyName, sourceTopic)
+// SetAvailability is called when an availability transition is
+// reported by an adapter. Offline transitions are debounced; online
+// transitions are immediate.
+func (e *Engine) SetAvailability(identity model.DeviceIdentity, sourceTopic string, a model.Availability) {
+	id := e.EnsureDiscovered(identity, sourceTopic)
 	now := e.clock.Now()
 	var (
 		emitChange bool
@@ -393,6 +401,8 @@ func (e *Engine) emitCycleStarted(id string, profile device.Profile, ts time.Tim
 		t = model.EvtCycleStarted
 	case device.ClassContinuous:
 		t = model.EvtContinuousCycleStarted
+	case device.ClassBinaryState:
+		t = model.EvtCycleStarted
 	}
 	e.emitDerived(model.DerivedEvent{
 		ID: newEventID(), Timestamp: ts, Type: t,
@@ -408,6 +418,8 @@ func (e *Engine) emitCycleFinished(id string, profile device.Profile, ts time.Ti
 		t = model.EvtCycleFinished
 	case device.ClassContinuous:
 		t = model.EvtContinuousCycleFinished
+	case device.ClassBinaryState:
+		t = model.EvtCycleFinished
 	}
 	ev := model.DerivedEvent{
 		ID: newEventID(), Timestamp: ts, Type: t,
@@ -450,7 +462,7 @@ func (e *Engine) emitDerived(ev model.DerivedEvent) {
 	}
 }
 
-func (e *Engine) emitCanonicalForReading(id, ieee, friendlyName, sourceTopic string, r model.Reading) {
+func (e *Engine) emitCanonicalForReading(id string, identity model.DeviceIdentity, sourceTopic string, r model.Reading) {
 	e.mu.Lock()
 	sinks := append([]CanonicalSink(nil), e.canonicalSinks...)
 	e.mu.Unlock()
@@ -460,10 +472,10 @@ func (e *Engine) emitCanonicalForReading(id, ieee, friendlyName, sourceTopic str
 	emit := func(cap, attr string, value any, unit string) {
 		ev := model.CanonicalEvent{
 			Timestamp:   r.Timestamp,
-			Source:      "mqtt",
+			Source:      identity.Scheme,
 			SourceTopic: sourceTopic,
 			DeviceID:    id,
-			Identity:    model.DeviceIdentity{IEEEAddress: ieee, FriendlyName: friendlyName},
+			Identity:    identity,
 			Capability:  cap,
 			Attribute:   attr,
 			Value:       value,
@@ -497,20 +509,25 @@ func (e *Engine) emitCanonicalForReading(id, ieee, friendlyName, sourceTopic str
 	if r.HumidityPct != nil {
 		emit("humidity", "humidity_pct", *r.HumidityPct, "%")
 	}
+	if r.Battery != nil {
+		emit("battery", "battery_pct", *r.Battery, "%")
+	}
 }
 
 // deriveID generates a stable engine-facing id when none is
-// configured. Prefer the IEEE address (compact form, no 0x prefix);
-// fall back to the friendly name.
-func deriveID(ieee, friendlyName string) string {
-	if friendlyName != "" {
-		return friendlyName
+// configured. Display name is preferred (human-meaningful) when
+// present; otherwise we fall back to the scheme-specific primary key
+// with a "dev_" prefix and any "0x" prefix stripped for readability.
+func deriveID(identity model.DeviceIdentity) string {
+	if identity.Display != "" {
+		return identity.Display
 	}
-	if len(ieee) > 2 && (ieee[:2] == "0x" || ieee[:2] == "0X") {
-		return "dev_" + ieee[2:]
+	primary := identity.Primary
+	if len(primary) > 2 && (primary[:2] == "0x" || primary[:2] == "0X") {
+		primary = primary[2:]
 	}
-	if ieee != "" {
-		return "dev_" + ieee
+	if primary != "" {
+		return "dev_" + primary
 	}
 	return "dev_unknown"
 }

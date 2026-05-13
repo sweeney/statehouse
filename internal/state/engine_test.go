@@ -26,6 +26,12 @@ func (c *collector) findDerived(t model.DerivedEventType) (model.DerivedEvent, b
 	return model.DerivedEvent{}, false
 }
 
+// zid builds a zigbee-scheme identity for tests — keeps engine call
+// sites readable without locking the engine to Z2M vocabulary.
+func zid(primary, display string) model.DeviceIdentity {
+	return model.DeviceIdentity{Scheme: "zigbee", Primary: primary, Display: display}
+}
+
 func mkEngine() (*Engine, *Store, *collector, *testutil.FakeClock) {
 	cfg := config.Default()
 	cfg.Energy.DivergenceWarningPct = 20
@@ -53,13 +59,15 @@ func mkEngine() (*Engine, *Store, *collector, *testutil.FakeClock) {
 	}
 	cfg.Devices = map[string]config.DeviceConfig{
 		"kitchen_dishwasher": {
-			IEEEAddress: "0x00158d0000000001",
+			Scheme:      "zigbee",
+			Primary:     "0x00158d0000000001",
 			Class:       "cycle_power_device",
 			DisplayName: "Kitchen dishwasher",
 			Location:    "kitchen",
 		},
 		"kitchen_kettle": {
-			IEEEAddress: "0x00158d0000000009",
+			Scheme:      "zigbee",
+			Primary:     "0x00158d0000000009",
 			Class:       "short_burst_power_device",
 			DisplayName: "Kitchen kettle",
 			Location:    "kitchen",
@@ -76,10 +84,10 @@ func mkEngine() (*Engine, *Store, *collector, *testutil.FakeClock) {
 
 func ptr[T any](v T) *T { return &v }
 
-func TestEngine_DiscoversByIEEE_KeepsStateOnRename(t *testing.T) {
+func TestEngine_DiscoversByPrimary_KeepsStateOnDisplayRename(t *testing.T) {
 	engine, store, col, clock := mkEngine()
 	now := clock.Now()
-	engine.IngestReading("0x00158d0000000001", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher",
+	engine.IngestReading(zid("0x00158d0000000001", "kitchen_dishwasher"), "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: now, EnergyKWh: ptr(50.0)})
 	d, ok := store.Get("kitchen_dishwasher")
 	if !ok {
@@ -88,12 +96,12 @@ func TestEngine_DiscoversByIEEE_KeepsStateOnRename(t *testing.T) {
 	if d.Class != "cycle_power_device" {
 		t.Fatalf("expected configured class, got %q", d.Class)
 	}
-	// Same device, renamed in Z2M.
-	engine.IngestReading("0x00158d0000000001", "kitchen_dishwasher_new", "zigbee2mqtt/kitchen_dishwasher_new",
+	// Same device, display renamed in Z2M. Primary (IEEE) is stable.
+	engine.IngestReading(zid("0x00158d0000000001", "kitchen_dishwasher_new"), "zigbee2mqtt/kitchen_dishwasher_new",
 		model.Reading{Timestamp: now.Add(time.Second), EnergyKWh: ptr(50.5)})
 	d2, _ := store.Get("kitchen_dishwasher")
-	if d2.Identity.FriendlyName != "kitchen_dishwasher_new" {
-		t.Fatalf("expected friendly name renamed, got %q", d2.Identity.FriendlyName)
+	if d2.Identity.Display != "kitchen_dishwasher_new" {
+		t.Fatalf("expected display renamed, got %q", d2.Identity.Display)
 	}
 	if d2.SourceTopic == d.SourceTopic {
 		t.Fatalf("expected source topic updated, still %q", d2.SourceTopic)
@@ -113,22 +121,20 @@ func TestEngine_DiscoversByIEEE_KeepsStateOnRename(t *testing.T) {
 func TestEngine_AvailabilityDebounce(t *testing.T) {
 	engine, store, _, clock := mkEngine()
 	now := clock.Now()
-	engine.IngestReading("0x00158d0000000001", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher",
+	id := zid("0x00158d0000000001", "kitchen_dishwasher")
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: now, EnergyKWh: ptr(50.0)})
-	// Flicker offline.
-	engine.SetAvailability("", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOffline)
+	engine.SetAvailability(id, "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOffline)
 	d, _ := store.Get("kitchen_dishwasher")
 	if d.Availability != model.AvailabilityOfflinePending {
 		t.Fatalf("expected offline_pending, got %q", d.Availability)
 	}
-	// Comes back quickly - should clear pending without ever going to offline.
-	engine.SetAvailability("", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOnline)
+	engine.SetAvailability(id, "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOnline)
 	d, _ = store.Get("kitchen_dishwasher")
 	if d.Availability != model.AvailabilityOnline {
 		t.Fatalf("expected online after recover, got %q", d.Availability)
 	}
-	// Offline again, then tick after debounce should mature.
-	engine.SetAvailability("", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOffline)
+	engine.SetAvailability(id, "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOffline)
 	clock.Advance(31 * time.Second)
 	engine.Tick()
 	d, _ = store.Get("kitchen_dishwasher")
@@ -139,22 +145,17 @@ func TestEngine_AvailabilityDebounce(t *testing.T) {
 
 func TestEngine_DivergenceWarning(t *testing.T) {
 	engine, _, col, clock := mkEngine()
-	// Start with seed.
 	t0 := clock.Now()
-	engine.IngestReading("0x00158d0000000001", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher",
+	id := zid("0x00158d0000000001", "kitchen_dishwasher")
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: t0, EnergyKWh: ptr(100.0)})
-	// Begin cycle.
-	engine.IngestReading("0x00158d0000000001", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher",
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: t0.Add(2 * time.Second), PowerW: ptr(50.0), EnergyKWh: ptr(100.0)})
-	// Long quiet stretch where reporting is sparse: power reported as ~50W
-	// for only a single early sample, but the counter advances 1.0kWh. The
-	// integrated path will reflect ~50W * 2s and a clamped gap = effectively zero.
-	engine.IngestReading("0x00158d0000000001", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher",
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: t0.Add(2 * time.Hour), PowerW: ptr(50.0), EnergyKWh: ptr(101.0)})
-	// Now finish: drop to idle, sustain.
-	engine.IngestReading("0x00158d0000000001", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher",
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: t0.Add(2*time.Hour + time.Second), PowerW: ptr(1.0), EnergyKWh: ptr(101.0)})
-	engine.IngestReading("0x00158d0000000001", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher",
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: t0.Add(2*time.Hour + 30*time.Second), PowerW: ptr(1.0), EnergyKWh: ptr(101.0)})
 	if _, ok := col.findDerived(model.EvtCycleFinished); !ok {
 		t.Fatalf("expected cycle_finished event, derived=%v", col.derived)
@@ -167,13 +168,12 @@ func TestEngine_DivergenceWarning(t *testing.T) {
 func TestEngine_BridgeRestartFlickerDoesNotAlarm(t *testing.T) {
 	engine, _, col, clock := mkEngine()
 	now := clock.Now()
-	engine.IngestReading("0x00158d0000000001", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher",
+	id := zid("0x00158d0000000001", "kitchen_dishwasher")
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: now, EnergyKWh: ptr(50.0)})
-	// Bridge restart: offline + online inside debounce window.
-	engine.SetAvailability("", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOffline)
+	engine.SetAvailability(id, "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOffline)
 	clock.Advance(5 * time.Second)
-	engine.SetAvailability("", "kitchen_dishwasher", "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOnline)
-	// Count derived availability events: we expect pending + online but not offline.
+	engine.SetAvailability(id, "zigbee2mqtt/kitchen_dishwasher/availability", model.AvailabilityOnline)
 	var seen []string
 	for _, ev := range col.derived {
 		if ev.Type == model.EvtDeviceAvailabilityChanged {
@@ -190,9 +190,10 @@ func TestEngine_BridgeRestartFlickerDoesNotAlarm(t *testing.T) {
 func TestEngine_ShortBurstCycle(t *testing.T) {
 	engine, _, col, clock := mkEngine()
 	now := clock.Now()
-	engine.IngestReading("0x00158d0000000009", "kitchen_kettle", "zigbee2mqtt/kitchen_kettle",
+	id := zid("0x00158d0000000009", "kitchen_kettle")
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_kettle",
 		model.Reading{Timestamp: now, PowerW: ptr(2000.0)})
-	engine.IngestReading("0x00158d0000000009", "kitchen_kettle", "zigbee2mqtt/kitchen_kettle",
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_kettle",
 		model.Reading{Timestamp: now.Add(45 * time.Second), PowerW: ptr(0.0)})
 	if _, ok := col.findDerived(model.EvtCycleStarted); ok {
 		t.Logf("note: short-burst class also produced cycle_started")
@@ -205,10 +206,111 @@ func TestEngine_ShortBurstCycle(t *testing.T) {
 func TestEngine_HouseRecomputesOnActivity(t *testing.T) {
 	engine, store, _, clock := mkEngine()
 	now := clock.Now()
-	engine.IngestReading("0x00158d0000000009", "kitchen_kettle", "zigbee2mqtt/kitchen_kettle",
+	engine.IngestReading(zid("0x00158d0000000009", "kitchen_kettle"), "zigbee2mqtt/kitchen_kettle",
 		model.Reading{Timestamp: now, PowerW: ptr(2000.0)})
 	h := store.House()
 	if h.State != model.HouseActive {
 		t.Fatalf("expected house active while kettle running, got %q", h.State)
+	}
+}
+
+// TestEngine_SensorPopulatesBatteryAndReportingActivity verifies
+// the new sensor_device class: a climate sensor reading populates
+// Latest temp/humidity/battery, the device's activity flips
+// unknown→reporting, and the engine emits canonical events for each
+// measurement (including battery) so downstream sinks can record them.
+func TestEngine_SensorPopulatesBatteryAndReportingActivity(t *testing.T) {
+	cfg := config.Default()
+	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
+		"sensor_device": {
+			NameHints: []string{"climate"},
+		},
+	}
+	store := NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC))
+	engine := NewEngine(cfg, store, clock)
+	col := &collector{}
+	engine.AddDerivedSink(col)
+	engine.AddCanonicalSink(col)
+
+	engine.IngestReading(zid("0xaa", "bedroom_climate"), "zigbee2mqtt/bedroom_climate",
+		model.Reading{
+			Timestamp:    clock.Now(),
+			TemperatureC: ptr(21.4),
+			HumidityPct:  ptr(54.3),
+			Battery:      ptr(87.0),
+			LinkQuality:  ptr(156),
+		})
+
+	d, ok := store.Get("bedroom_climate")
+	if !ok {
+		t.Fatalf("expected device 'bedroom_climate' classified by name-hint")
+	}
+	if d.Class != "sensor_device" {
+		t.Fatalf("expected sensor_device class, got %q", d.Class)
+	}
+	if d.Activity.State != model.ActivityReporting {
+		t.Errorf("expected activity=reporting, got %q", d.Activity.State)
+	}
+	if d.Latest.TemperatureC == nil || *d.Latest.TemperatureC != 21.4 {
+		t.Errorf("expected Latest.TemperatureC=21.4, got %v", d.Latest.TemperatureC)
+	}
+	if d.Latest.HumidityPct == nil || *d.Latest.HumidityPct != 54.3 {
+		t.Errorf("expected Latest.HumidityPct=54.3, got %v", d.Latest.HumidityPct)
+	}
+	if d.Latest.BatteryPct == nil || *d.Latest.BatteryPct != 87.0 {
+		t.Errorf("expected Latest.BatteryPct=87, got %v", d.Latest.BatteryPct)
+	}
+	if d.Cycle != nil {
+		t.Errorf("sensor must not have a Cycle, got %+v", d.Cycle)
+	}
+
+	// Canonical events emitted: one each for temperature, humidity, battery.
+	attrs := map[string]int{}
+	for _, ce := range col.canonical {
+		attrs[ce.Attribute]++
+	}
+	for _, want := range []string{"temperature_c", "humidity_pct", "battery_pct"} {
+		if attrs[want] != 1 {
+			t.Errorf("expected exactly 1 canonical event with attribute=%q, got %d", want, attrs[want])
+		}
+	}
+}
+
+func TestEngine_SensorDoesNotMakeHouseActive(t *testing.T) {
+	// Sensors must not trip the house-state derivation into "active";
+	// they're measurement-only and report continuously regardless of
+	// presence.
+	cfg := config.Default()
+	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
+		"sensor_device": {NameHints: []string{"climate"}},
+	}
+	store := NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC))
+	engine := NewEngine(cfg, store, clock)
+
+	engine.IngestReading(zid("0xaa", "bedroom_climate"), "zigbee2mqtt/bedroom_climate",
+		model.Reading{Timestamp: clock.Now(), TemperatureC: ptr(21.4)})
+	h := store.House()
+	if h.State == model.HouseActive {
+		t.Fatalf("sensor reading must not make house active, got %q", h.State)
+	}
+}
+
+// TestEngine_SchemeAgnostic verifies the engine treats DeviceIdentity
+// generically — a synthetic "tasmota" scheme works identically to
+// "zigbee", which is the whole point of the adapter abstraction.
+func TestEngine_SchemeAgnostic(t *testing.T) {
+	engine, store, col, clock := mkEngine()
+	now := clock.Now()
+	// Hint-classify by display so we don't need a configured device.
+	id := model.DeviceIdentity{Scheme: "tasmota", Primary: "DVES_123ABC", Display: "kettle_tasmota"}
+	engine.IngestReading(id, "tasmota/kettle_tasmota/SENSOR",
+		model.Reading{Timestamp: now, PowerW: ptr(2000.0)})
+	if _, ok := col.findDerived(model.EvtDeviceDiscovered); !ok {
+		t.Fatalf("expected discovery for tasmota device, got %v", col.derived)
+	}
+	if _, ok := store.Get("kettle_tasmota"); !ok {
+		t.Fatalf("expected store record for tasmota device")
 	}
 }

@@ -35,15 +35,84 @@ MQTT topics published under `house/`:
 - `house/state/devices/{id}`    (retained, per device)
 - `house/events/derived`        (non-retained, one per derived event)
 
+## Capturing fixtures
+
+`cmd/fixture-capture` is a small CLI that subscribes to an MQTT broker
+and writes each received message as one JSON line, in the exact shape
+`internal/testdata/fixtures/*.jsonl` expects. Use it to record real
+Zigbee2MQTT traffic — including across deliberate broker restarts —
+for use as regression fixtures.
+
+```
+go build ./cmd/fixture-capture
+./fixture-capture \
+  -broker tcp://192.168.1.10:1883 \
+  -topics "zigbee2mqtt/#" \
+  -output internal/testdata/fixtures/my_capture.jsonl
+```
+
+It uses paho's auto-reconnect and emits synthetic marker records on
+disconnect/reconnect so the timing of broker outages is preserved in
+the fixture:
+
+```
+{"ts":"...","topic":"_capture/connection_lost","payload":{"error":"..."}}
+{"ts":"...","topic":"_capture/reconnected","payload":{"downtime_ms":4123}}
+```
+
+Replay can ignore topics under `_capture/` or, in reconnect-specific
+tests, assert on them. Output is flushed and fsynced after every line
+so SIGKILL doesn't lose data.
+
+Flags: `-broker`, `-client-id`, `-username`, `-password`, `-topics`
+(comma-separated), `-output` (`-` for stdout), `-duration` (0 = until
+SIGINT), `-qos`, `-mark-reconnects`.
+
+## Architecture
+
+The engine is protocol-agnostic. It accepts canonical `DeviceIdentity`
+records (`Scheme` + `Primary` + `Display`) and protocol-normalised
+`Reading` values; it does not know anything about Zigbee2MQTT,
+Tasmota, Shelly or any other source. Protocol-specific behaviour lives
+behind the `internal/adapter.Adapter` interface — one adapter per
+source. To add a new source (e.g. Tasmota or Shelly), write an
+adapter; the engine, store, energy code, and HTTP/MQTT outputs all
+stay untouched.
+
+Available adapters today:
+
+- `internal/adapter/zigbee2mqtt` — Z2M bridge/devices + per-device
+  payloads + availability.
+- `internal/adapter/boiler` — [sweeney/boiler-sensor](https://github.com/sweeney/boiler-sensor)
+  CH/HW relay events + lifecycle. Off by default; enable in config.
+
+Device classes today:
+
+- `short_burst_power_device` — kettles, toasters, microwaves.
+- `cycle_power_device` — dishwasher, washing machine, dryer.
+- `continuous_power_device` — fridge, freezer, dehumidifier.
+- `media_power_device` — TV, AV, speakers.
+- `binary_state_device` — boiler relays, contact sensors, motion
+  sensors, switches that report ON/OFF without power. Activity
+  derives from `Reading.State` not power; cycles record duration
+  but no energy.
+- `sensor_device` — measurement-only devices (climate sensors,
+  air-quality, illuminance). No cycle, no activity machine — once
+  the device transmits, `Activity` stays at `reporting`. Latest
+  temp / humidity / battery flow into the device record; Influx
+  receives `device_environment` and `device_battery` samples.
+
 ## Layout
 
 - `cmd/house-state-engine` — daemon entrypoint.
+- `cmd/fixture-capture` — MQTT-to-JSONL fixture recorder.
+- `internal/adapter` — protocol-agnostic Adapter interface.
+- `internal/adapter/zigbee2mqtt` — Z2M adapter.
+- `internal/adapter/boiler` — sweeney/boiler-sensor adapter.
 - `internal/config` — YAML config + defaults.
 - `internal/model` — canonical data types (Reading, Device, Event,
   Snapshot, House). Pointer fields keep the absent-vs-zero
   distinction.
-- `internal/zigbee2mqtt` — Z2M topic + payload parsers.
-- `internal/normalise` — reserved (currently merged into engine).
 - `internal/device` — device profiles, classification, state machines.
 - `internal/energy` — counter, power-time integration with gap clamp,
   strategy selection, divergence helper.

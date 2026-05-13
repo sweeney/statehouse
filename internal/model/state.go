@@ -31,6 +31,11 @@ const (
 	ActivityStandby          ActivityState = "standby"
 	ActivityNormalIdle       ActivityState = "normal_idle"
 	ActivityActiveCycle      ActivityState = "active_cycle"
+	// ActivityReporting describes measurement-only devices (climate
+	// sensors, air-quality, illuminance) that have no behavioural
+	// state — they just transmit readings periodically. Activity
+	// transitions unknown→reporting on first contact and stays there.
+	ActivityReporting ActivityState = "reporting"
 )
 
 // Activity is the activity sub-state of a device.
@@ -50,6 +55,7 @@ type Latest struct {
 	EnergyKWh    *float64  `json:"energy_kwh,omitempty"`
 	TemperatureC *float64  `json:"temperature_c,omitempty"`
 	HumidityPct  *float64  `json:"humidity_pct,omitempty"`
+	BatteryPct   *float64  `json:"battery_pct,omitempty"`
 	LinkQuality  *int      `json:"linkquality,omitempty"`
 	LastSeen     time.Time `json:"last_seen"`
 }

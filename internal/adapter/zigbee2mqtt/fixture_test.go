@@ -1,4 +1,4 @@
-package mqtt
+package zigbee2mqtt
 
 import (
 	"path/filepath"
@@ -46,7 +46,10 @@ type capture struct {
 func (c *capture) OnDerivedEvent(ev model.DerivedEvent)    { c.derived = append(c.derived, ev) }
 func (c *capture) OnCanonicalEvent(_ model.CanonicalEvent) {}
 
-func replay(t *testing.T, path string, clock *testutil.FakeClock, sub *Z2MSubscriber) {
+// replay feeds a JSONL fixture through the Z2M Adapter the same way
+// paho would in production. The fake clock is advanced to each
+// message's timestamp so debounce/hysteresis fire deterministically.
+func replay(t *testing.T, path string, clock *testutil.FakeClock, a *Adapter) {
 	t.Helper()
 	events, err := testutil.LoadFixture(path)
 	if err != nil {
@@ -56,8 +59,12 @@ func replay(t *testing.T, path string, clock *testutil.FakeClock, sub *Z2MSubscr
 		if !e.Timestamp.IsZero() {
 			clock.Set(e.Timestamp)
 		}
-		sub.HandleMessage(e.Topic, e.PayloadBytes(), false)
+		a.HandleMessage(e.Topic, e.PayloadBytes(), false)
 	}
+}
+
+func fixturePath(name string) string {
+	return filepath.Join("..", "..", "testdata", "fixtures", name)
 }
 
 func TestFixture_DishwasherCycleProducesCycleEvents(t *testing.T) {
@@ -67,10 +74,9 @@ func TestFixture_DishwasherCycleProducesCycleEvents(t *testing.T) {
 	engine := state.NewEngine(cfg, store, clock)
 	cap := &capture{}
 	engine.AddDerivedSink(cap)
-	sub := &Z2MSubscriber{Engine: engine, Base: "zigbee2mqtt"}
+	a := New(engine, "zigbee2mqtt", nil)
 
-	path := filepath.Join("..", "testdata", "fixtures", "dishwasher_cycle.jsonl")
-	replay(t, path, clock, sub)
+	replay(t, fixturePath("dishwasher_cycle.jsonl"), clock, a)
 
 	var sawStart, sawFinish bool
 	for _, ev := range cap.derived {
@@ -103,10 +109,9 @@ func TestFixture_KettleShortBurst(t *testing.T) {
 	engine := state.NewEngine(cfg, store, clock)
 	cap := &capture{}
 	engine.AddDerivedSink(cap)
-	sub := &Z2MSubscriber{Engine: engine, Base: "zigbee2mqtt"}
+	a := New(engine, "zigbee2mqtt", nil)
 
-	path := filepath.Join("..", "testdata", "fixtures", "kettle_short_burst.jsonl")
-	replay(t, path, clock, sub)
+	replay(t, fixturePath("kettle_short_burst.jsonl"), clock, a)
 
 	var sawBurst bool
 	for _, ev := range cap.derived {
@@ -126,10 +131,9 @@ func TestFixture_BridgeRestartFlickerDoesNotProduceOffline(t *testing.T) {
 	engine := state.NewEngine(cfg, store, clock)
 	cap := &capture{}
 	engine.AddDerivedSink(cap)
-	sub := &Z2MSubscriber{Engine: engine, Base: "zigbee2mqtt"}
+	a := New(engine, "zigbee2mqtt", nil)
 
-	path := filepath.Join("..", "testdata", "fixtures", "bridge_restart_flicker.jsonl")
-	replay(t, path, clock, sub)
+	replay(t, fixturePath("bridge_restart_flicker.jsonl"), clock, a)
 
 	for _, ev := range cap.derived {
 		if ev.Type == model.EvtDeviceAvailabilityChanged {
@@ -142,13 +146,10 @@ func TestFixture_BridgeRestartFlickerDoesNotProduceOffline(t *testing.T) {
 	if d.Availability != model.AvailabilityOnline {
 		t.Fatalf("expected online after flicker recovery, got %q", d.Availability)
 	}
-	_ = store
 }
 
 func TestFixture_RenameKeepsState(t *testing.T) {
 	cfg := fixtureCfg()
-	// classify "plug" devices as short-burst so they get processed; we
-	// only care about identity, not state-machine behaviour here.
 	cfg.DeviceClasses["short_burst_power_device"] = config.DeviceClassConfig{
 		NameHints: []string{"plug"},
 		DefaultThresholds: config.Thresholds{
@@ -162,21 +163,23 @@ func TestFixture_RenameKeepsState(t *testing.T) {
 	engine := state.NewEngine(cfg, store, clock)
 	cap := &capture{}
 	engine.AddDerivedSink(cap)
-	sub := &Z2MSubscriber{Engine: engine, Base: "zigbee2mqtt"}
+	a := New(engine, "zigbee2mqtt", nil)
 
-	path := filepath.Join("..", "testdata", "fixtures", "rename_friendlyname.jsonl")
-	replay(t, path, clock, sub)
+	replay(t, fixturePath("rename_friendlyname.jsonl"), clock, a)
 
 	devs := store.Devices()
 	if len(devs) != 1 {
 		t.Fatalf("expected exactly one device after rename, got %d: %v", len(devs), devs)
 	}
 	for _, d := range devs {
-		if d.Identity.FriendlyName != "new_plug" {
-			t.Fatalf("expected friendly name 'new_plug' after rename, got %q", d.Identity.FriendlyName)
+		if d.Identity.Scheme != SchemeName {
+			t.Errorf("expected scheme=%q, got %q", SchemeName, d.Identity.Scheme)
 		}
-		if d.Identity.IEEEAddress != "0x00158d0000000099" {
-			t.Fatalf("expected stable IEEE, got %q", d.Identity.IEEEAddress)
+		if d.Identity.Display != "new_plug" {
+			t.Errorf("expected display 'new_plug' after rename, got %q", d.Identity.Display)
+		}
+		if d.Identity.Primary != "0x00158d0000000099" {
+			t.Errorf("expected stable Primary IEEE, got %q", d.Identity.Primary)
 		}
 	}
 }

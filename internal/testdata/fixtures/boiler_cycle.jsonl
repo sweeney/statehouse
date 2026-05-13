@@ -1,0 +1,7 @@
+{"ts":"2026-05-13T07:00:00Z","topic":"energy/boiler/sensor/system","payload":{"status":{"event":"STARTUP","ch":"OFF","hw":"OFF","ready":true,"uptime_seconds":0,"start_time":"2026-05-13T07:00:00Z","timestamp":"2026-05-13T07:00:00Z","mqtt":{"connected":true,"broker":"tcp://broker:1883"},"event_counts":{"ch_on":0,"ch_off":0,"hw_on":0,"hw_off":0},"config":{"poll_ms":100,"debounce_ms":250,"heartbeat_ms":900000,"broker":"tcp://broker:1883","http_port":":80"}}}}
+{"ts":"2026-05-13T07:02:15Z","topic":"energy/boiler/sensor/events","payload":{"boiler":{"timestamp":"2026-05-13T07:02:15Z","event":"CH_ON","ch":{"state":"ON"},"hw":{"state":"OFF"}}}}
+{"ts":"2026-05-13T07:35:42Z","topic":"energy/boiler/sensor/events","payload":{"boiler":{"timestamp":"2026-05-13T07:35:42Z","event":"CH_OFF","ch":{"state":"OFF"},"hw":{"state":"OFF"}}}}
+{"ts":"2026-05-13T08:15:00Z","topic":"energy/boiler/sensor/events","payload":{"boiler":{"timestamp":"2026-05-13T08:15:00Z","event":"HW_ON","ch":{"state":"OFF"},"hw":{"state":"ON"}}}}
+{"ts":"2026-05-13T08:18:30Z","topic":"energy/boiler/sensor/events","payload":{"boiler":{"timestamp":"2026-05-13T08:18:30Z","event":"HW_OFF","ch":{"state":"OFF"},"hw":{"state":"OFF"}}}}
+{"ts":"2026-05-13T08:20:00Z","topic":"energy/boiler/sensor/system","payload":{"system":{"timestamp":"2026-05-13T08:20:00Z","event":"SHUTDOWN","reason":"MQTT_DISCONNECT","source":"last_will"}}}
+{"ts":"2026-05-13T08:22:30Z","topic":"energy/boiler/sensor/system","payload":{"system":{"timestamp":"2026-05-13T08:22:30Z","event":"RECONNECTED"}}}

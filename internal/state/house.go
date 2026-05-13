@@ -50,6 +50,11 @@ func DeriveHouseState(now time.Time, cfg config.HouseConfig, devices map[string]
 				anyActive = true
 				signals = append(signals, id+"_active")
 			}
+		case device.ClassBinaryState:
+			if d.Activity.State == model.ActivityActive {
+				anyActive = true
+				signals = append(signals, id+"_on")
+			}
 		case device.ClassContinuous:
 			// continuous devices do not on their own indicate occupancy
 		}
