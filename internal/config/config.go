@@ -38,6 +38,7 @@ type MQTTConfig struct {
 // protocol vocabulary, so each protocol gets its own settings block.
 type AdaptersConfig struct {
 	Zigbee2MQTT Zigbee2MQTTConfig `yaml:"zigbee2mqtt"`
+	Boiler      BoilerConfig      `yaml:"boiler"`
 }
 
 // Zigbee2MQTTConfig configures the Zigbee2MQTT adapter.
@@ -57,6 +58,28 @@ func (z Zigbee2MQTTConfig) IsEnabled() bool {
 		return true
 	}
 	return *z.Enabled
+}
+
+// BoilerConfig configures the sweeney/boiler-sensor adapter, which
+// listens on energy/boiler/sensor/{events,system}. It is OFF by
+// default — the boiler-sensor publisher isn't a generic protocol so
+// users opt in by enabling it.
+type BoilerConfig struct {
+	Enabled *bool `yaml:"enabled"`
+	// BaseTopic is the topic prefix the publisher uses; defaults to
+	// "energy/boiler/sensor". The adapter appends "/events" and
+	// "/system" for its two subscriptions.
+	BaseTopic string `yaml:"base_topic"`
+}
+
+// IsEnabled reports whether the boiler adapter should be wired.
+// Default is false — adapters that target a specific bespoke device
+// shouldn't auto-enable.
+func (b BoilerConfig) IsEnabled() bool {
+	if b.Enabled == nil {
+		return false
+	}
+	return *b.Enabled
 }
 
 type HTTPConfig struct {
@@ -191,6 +214,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Adapters.Zigbee2MQTT.BaseTopic == "" {
 		cfg.Adapters.Zigbee2MQTT.BaseTopic = "zigbee2mqtt"
+	}
+	if cfg.Adapters.Boiler.BaseTopic == "" {
+		cfg.Adapters.Boiler.BaseTopic = "energy/boiler/sensor"
 	}
 	// Normalise legacy Z2M shorthand on device entries.
 	for id, d := range cfg.Devices {

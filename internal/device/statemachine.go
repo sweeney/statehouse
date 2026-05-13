@@ -72,11 +72,26 @@ func (r *Runtime) OnReading(at time.Time, reading model.Reading) Outcome {
 	out := Outcome{PrevActivity: r.activity, NewActivity: r.activity}
 
 	// Update energy paths first; both run regardless of activity state.
+	// Binary devices simply never feed these — Reading.PowerW is nil.
 	if reading.PowerW != nil {
 		r.integrator.Update(at, *reading.PowerW)
 	}
 	if reading.EnergyKWh != nil {
 		r.counter.Update(*reading.EnergyKWh)
+	}
+
+	// Binary-state devices drive activity off Reading.State, not power.
+	// Dispatch them first so the power-based fallthrough doesn't kick.
+	if r.Profile.Class == ClassBinaryState {
+		if reading.State != nil {
+			r.stepBinary(at, *reading.State, &out)
+		}
+		if r.cycle != nil && r.cycle.Active {
+			r.refreshCycleEnergy(at)
+		}
+		out.NewActivity = r.activity
+		out.Cycle = r.cycle
+		return out
 	}
 
 	if reading.PowerW == nil {
@@ -224,6 +239,69 @@ func (r *Runtime) stepMedia(at time.Time, p float64, out *Outcome) {
 		out.CycleFinished = true
 		r.finishCycle(at)
 		return
+	}
+}
+
+// stepBinary implements the state-only model used by binary devices
+// (boiler relays, contact sensors, motion sensors, switches that
+// report state without power). The activity follows the reported
+// ON/OFF directly, with optional sustained-for windows so micro-
+// blips get debounced. "Cycles" are time-only — Energy fields stay
+// zero, but DurationSeconds tells the consumer how long the device
+// was on. Caller is responsible for normalising state to "ON"/"OFF".
+func (r *Runtime) stepBinary(at time.Time, state string, out *Outcome) {
+	switch r.activity {
+	case model.ActivityActive:
+		if state == "OFF" {
+			if r.candidate == nil || !r.candidate.belowPrevLo {
+				r.candidate = &candidateSample{at: at, belowPrevLo: true}
+				if r.Thresholds.InactiveSustainedFor <= 0 {
+					r.activity = model.ActivityIdle
+					out.NewActivity = model.ActivityIdle
+					out.CycleFinished = true
+					r.finishCycle(at)
+					r.candidate = nil
+				}
+				return
+			}
+			if at.Sub(r.candidate.at) >= r.Thresholds.InactiveSustainedFor {
+				r.activity = model.ActivityIdle
+				out.NewActivity = model.ActivityIdle
+				out.CycleFinished = true
+				r.finishCycle(at)
+				r.candidate = nil
+			}
+		} else if state == "ON" {
+			r.candidate = nil
+		}
+	default:
+		// idle / unknown
+		if state == "ON" {
+			if r.candidate == nil || !r.candidate.abovePrevHi {
+				r.candidate = &candidateSample{at: at, abovePrevHi: true}
+				if r.Thresholds.ActiveSustainedFor <= 0 {
+					r.activity = model.ActivityActive
+					out.NewActivity = model.ActivityActive
+					out.CycleStarted = true
+					r.startCycle(at)
+					r.candidate = nil
+				}
+				return
+			}
+			if at.Sub(r.candidate.at) >= r.Thresholds.ActiveSustainedFor {
+				r.activity = model.ActivityActive
+				out.NewActivity = model.ActivityActive
+				out.CycleStarted = true
+				r.startCycle(at)
+				r.candidate = nil
+			}
+		} else if state == "OFF" {
+			if r.activity == model.ActivityUnknown {
+				r.activity = model.ActivityIdle
+				out.NewActivity = model.ActivityIdle
+			}
+			r.candidate = nil
+		}
 	}
 }
 

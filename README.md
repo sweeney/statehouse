@@ -83,6 +83,19 @@ Available adapters today:
 
 - `internal/adapter/zigbee2mqtt` — Z2M bridge/devices + per-device
   payloads + availability.
+- `internal/adapter/boiler` — [sweeney/boiler-sensor](https://github.com/sweeney/boiler-sensor)
+  CH/HW relay events + lifecycle. Off by default; enable in config.
+
+Device classes today:
+
+- `short_burst_power_device` — kettles, toasters, microwaves.
+- `cycle_power_device` — dishwasher, washing machine, dryer.
+- `continuous_power_device` — fridge, freezer, dehumidifier.
+- `media_power_device` — TV, AV, speakers.
+- `binary_state_device` — boiler relays, contact sensors, motion
+  sensors, switches that report ON/OFF without power. Activity
+  derives from `Reading.State` not power; cycles record duration
+  but no energy.
 
 ## Layout
 
@@ -90,6 +103,7 @@ Available adapters today:
 - `cmd/fixture-capture` — MQTT-to-JSONL fixture recorder.
 - `internal/adapter` — protocol-agnostic Adapter interface.
 - `internal/adapter/zigbee2mqtt` — Z2M adapter.
+- `internal/adapter/boiler` — sweeney/boiler-sensor adapter.
 - `internal/config` — YAML config + defaults.
 - `internal/model` — canonical data types (Reading, Device, Event,
   Snapshot, House). Pointer fields keep the absent-vs-zero

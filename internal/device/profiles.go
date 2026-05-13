@@ -10,13 +10,18 @@ import (
 
 // Known device class identifiers. New classes can be added without
 // touching this file by extending config.DeviceClasses, but the engine
-// only understands the four canonical V1 classes for state-machine
+// only understands these canonical V1 classes for state-machine
 // behaviour.
 const (
 	ClassShortBurst   = "short_burst_power_device"
 	ClassCyclePower   = "cycle_power_device"
 	ClassContinuous   = "continuous_power_device"
 	ClassMedia        = "media_power_device"
+	// ClassBinaryState covers devices whose telemetry is a direct
+	// ON/OFF state rather than a power reading: a boiler relay, a
+	// contact sensor, a motion sensor, a smart switch reporting
+	// state without power. Activity derives from State, not PowerW.
+	ClassBinaryState  = "binary_state_device"
 	ClassUnclassified = "unclassified"
 )
 
