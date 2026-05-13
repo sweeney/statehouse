@@ -1,4 +1,4 @@
-# house-state-engine
+# Statehouse: a state engine for the home
 
 V1 Go daemon that turns Zigbee2MQTT telemetry into a canonical
 in-memory house/device state and derived MQTT events. See
