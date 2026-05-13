@@ -35,9 +35,43 @@ MQTT topics published under `house/`:
 - `house/state/devices/{id}`    (retained, per device)
 - `house/events/derived`        (non-retained, one per derived event)
 
+## Capturing fixtures
+
+`cmd/fixture-capture` is a small CLI that subscribes to an MQTT broker
+and writes each received message as one JSON line, in the exact shape
+`internal/testdata/fixtures/*.jsonl` expects. Use it to record real
+Zigbee2MQTT traffic — including across deliberate broker restarts —
+for use as regression fixtures.
+
+```
+go build ./cmd/fixture-capture
+./fixture-capture \
+  -broker tcp://192.168.1.10:1883 \
+  -topics "zigbee2mqtt/#" \
+  -output internal/testdata/fixtures/my_capture.jsonl
+```
+
+It uses paho's auto-reconnect and emits synthetic marker records on
+disconnect/reconnect so the timing of broker outages is preserved in
+the fixture:
+
+```
+{"ts":"...","topic":"_capture/connection_lost","payload":{"error":"..."}}
+{"ts":"...","topic":"_capture/reconnected","payload":{"downtime_ms":4123}}
+```
+
+Replay can ignore topics under `_capture/` or, in reconnect-specific
+tests, assert on them. Output is flushed and fsynced after every line
+so SIGKILL doesn't lose data.
+
+Flags: `-broker`, `-client-id`, `-username`, `-password`, `-topics`
+(comma-separated), `-output` (`-` for stdout), `-duration` (0 = until
+SIGINT), `-qos`, `-mark-reconnects`.
+
 ## Layout
 
 - `cmd/house-state-engine` — daemon entrypoint.
+- `cmd/fixture-capture` — MQTT-to-JSONL fixture recorder.
 - `internal/config` — YAML config + defaults.
 - `internal/model` — canonical data types (Reading, Device, Event,
   Snapshot, House). Pointer fields keep the absent-vs-zero
