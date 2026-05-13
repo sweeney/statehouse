@@ -21,7 +21,13 @@ const (
 	// ON/OFF state rather than a power reading: a boiler relay, a
 	// contact sensor, a motion sensor, a smart switch reporting
 	// state without power. Activity derives from State, not PowerW.
-	ClassBinaryState  = "binary_state_device"
+	ClassBinaryState = "binary_state_device"
+	// ClassSensor covers measurement-only devices (climate, air
+	// quality, illuminance) that have no behavioural state. They
+	// just periodically emit readings; Activity stays at "reporting"
+	// once the engine has seen at least one reading. No cycles, no
+	// hysteresis, no occupancy contribution.
+	ClassSensor       = "sensor_device"
 	ClassUnclassified = "unclassified"
 )
 
