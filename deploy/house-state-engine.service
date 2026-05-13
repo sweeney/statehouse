@@ -1,0 +1,14 @@
+[Unit]
+Description=House State Engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/house-state-engine -config /etc/house-state-engine/config.yaml
+Restart=always
+RestartSec=5
+User=house-state
+Group=house-state
+
+[Install]
+WantedBy=multi-user.target

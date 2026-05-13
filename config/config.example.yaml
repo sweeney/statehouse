@@ -1,0 +1,90 @@
+mqtt:
+  broker: tcp://localhost:1883
+  client_id: house-state-engine
+  subscribe:
+    - zigbee2mqtt/#
+  publish_prefix: house
+  zigbee2mqtt_base: zigbee2mqtt
+
+http:
+  listen: :8080
+
+recent_log:
+  path: /var/lib/house-state-engine/events.jsonl
+  retention_hours: 72
+  max_size_mb: 256
+
+influx:
+  enabled: false
+  url: http://localhost:8086
+  org: home
+  bucket: house
+  token_file: /etc/house-state-engine/influx-token
+
+energy:
+  divergence_warning_pct: 20
+  max_integration_gap: 30m
+
+availability:
+  offline_debounce: 30s
+
+house:
+  quiet_after: 30m
+  empty_after: 6h
+
+device_classes:
+  short_burst_power_device:
+    name_hints: [kettle, toaster, microwave]
+    default_thresholds:
+      idle_below_w: 5
+      active_above_w: 50
+      active_sustained_for: 3s
+      inactive_sustained_for: 10s
+    energy_strategy: integration
+
+  cycle_power_device:
+    name_hints: [dishwasher, washing_machine, washer, tumble_dryer, dryer]
+    default_thresholds:
+      idle_below_w: 5
+      active_above_w: 20
+      active_sustained_for: 10s
+      inactive_sustained_for: 5m
+    energy_strategy: counter
+
+  continuous_power_device:
+    name_hints: [fridge, freezer, dehumidifier]
+    default_thresholds:
+      idle_below_w: 5
+      active_above_w: 25
+      compressor_above_w: 25
+      active_sustained_for: 10s
+      inactive_sustained_for: 30s
+    energy_strategy: counter
+
+  media_power_device:
+    name_hints: [tv, television, av, amplifier, receiver, apple_tv, speakers]
+    default_thresholds:
+      idle_below_w: 5
+      active_above_w: 20
+      active_sustained_for: 10s
+      inactive_sustained_for: 60s
+    energy_strategy: integration
+
+devices:
+  kitchen_dishwasher:
+    ieee_address: "0x00158d0000000001"
+    class: cycle_power_device
+    display_name: Kitchen dishwasher
+    location: kitchen
+
+  utility_dishwasher:
+    ieee_address: "0x00158d0000000002"
+    class: cycle_power_device
+    display_name: Utility dishwasher
+    location: utility
+
+  garage_freezer:
+    ieee_address: "0x00158d0000000003"
+    class: continuous_power_device
+    display_name: Garage freezer
+    location: garage

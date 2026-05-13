@@ -1,0 +1,8 @@
+{"ts":"2026-05-13T09:00:00Z","topic":"zigbee2mqtt/bridge/devices","payload":[{"ieee_address":"0x00158d0000000001","friendly_name":"kitchen_dishwasher","type":"EndDevice"}]}
+{"ts":"2026-05-13T09:00:01Z","topic":"zigbee2mqtt/kitchen_dishwasher","payload":{"state":"ON","linkquality":87,"energy":100.0}}
+{"ts":"2026-05-13T09:00:30Z","topic":"zigbee2mqtt/kitchen_dishwasher","payload":{"state":"ON","power":1850,"voltage":242.1,"energy":100.0,"linkquality":86}}
+{"ts":"2026-05-13T09:00:45Z","topic":"zigbee2mqtt/kitchen_dishwasher","payload":{"state":"ON","power":1820,"voltage":242.0,"energy":100.1,"linkquality":86}}
+{"ts":"2026-05-13T09:30:00Z","topic":"zigbee2mqtt/kitchen_dishwasher","payload":{"state":"ON","power":1500,"voltage":241.5,"energy":100.7,"linkquality":85}}
+{"ts":"2026-05-13T10:00:00Z","topic":"zigbee2mqtt/kitchen_dishwasher","payload":{"state":"ON","power":1200,"voltage":241.8,"energy":101.2,"linkquality":86}}
+{"ts":"2026-05-13T10:30:00Z","topic":"zigbee2mqtt/kitchen_dishwasher","payload":{"state":"ON","power":0.5,"voltage":241.0,"energy":101.5,"linkquality":86}}
+{"ts":"2026-05-13T10:36:00Z","topic":"zigbee2mqtt/kitchen_dishwasher","payload":{"state":"ON","power":0.4,"voltage":241.0,"energy":101.5,"linkquality":86}}
