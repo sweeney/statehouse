@@ -1,6 +1,7 @@
 package ups
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -141,6 +142,27 @@ func TestAdapter_NoComputedBlock(t *testing.T) {
 	}
 	if l.VoltageV == nil || *l.VoltageV != 240 {
 		t.Errorf("VoltageV = %v, want 240", l.VoltageV)
+	}
+}
+
+// TestAdapter_FutureTimestampRejected verifies that a UPS state payload with a
+// timestamp 50 years in the future is rejected and the reading timestamp falls
+// back to approximately now.
+func TestAdapter_FutureTimestampRejected(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	future := time.Now().Add(50 * 365 * 24 * time.Hour).Format(time.RFC3339)
+	payload := fmt.Sprintf(`{"timestamp":%q,"ups_name":"cyberpower","variables":{},"computed":{"load_watts":72,"battery_runtime_mins":74.5,"on_battery":false}}`, future)
+	before := time.Now()
+	a.HandleMessage("ups/cyberpower/state", []byte(payload), false)
+	after := time.Now()
+
+	dev, ok := store.Get("cyberpower")
+	if !ok {
+		t.Fatal("device cyberpower not found in store")
+	}
+	ts := dev.Latest.LastSeen
+	if ts.Before(before.Add(-time.Second)) || ts.After(after.Add(time.Second)) {
+		t.Errorf("future timestamp not sanitised: got %v, want close to now (%v..%v)", ts, before, after)
 	}
 }
 

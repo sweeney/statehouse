@@ -1,6 +1,7 @@
 package meter
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -147,6 +148,48 @@ func TestAdapter_GlowSensorPartialPayload(t *testing.T) {
 	}
 	if l.RSSI != nil {
 		t.Errorf("RSSI should be nil when rssi is absent, got %v", *l.RSSI)
+	}
+}
+
+// TestAdapter_FutureMeterTimestampRejected verifies that an electricity meter
+// payload with a timestamp 50 years in the future is sanitised to approximately
+// now.
+func TestAdapter_FutureMeterTimestampRejected(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	future := time.Now().Add(50 * 365 * 24 * time.Hour).Format(time.RFC3339)
+	payload := fmt.Sprintf(`{"electricitymeter":{"timestamp":%q,"energy":{"import":{"cumulative":100.0}},"power":{"value":1.0}}}`, future)
+	before := time.Now()
+	a.HandleMessage("energy/AABBCCDDEEFF/SENSOR/electricitymeter", []byte(payload), false)
+	after := time.Now()
+
+	dev, ok := store.Get("AABBCCDDEEFF")
+	if !ok {
+		t.Fatal("meter device not found in store")
+	}
+	ts := dev.Latest.LastSeen
+	if ts.Before(before.Add(-time.Second)) || ts.After(after.Add(time.Second)) {
+		t.Errorf("future meter timestamp not sanitised: got %v, want close to now (%v..%v)", ts, before, after)
+	}
+}
+
+// TestAdapter_FutureGlowSensorTimestampRejected verifies that a glow sensor
+// payload with a timestamp 50 years in the future is sanitised to approximately
+// now.
+func TestAdapter_FutureGlowSensorTimestampRejected(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	future := time.Now().Add(50 * 365 * 24 * time.Hour).Format(time.RFC3339)
+	payload := fmt.Sprintf(`{"glowsensorth1":{"040D00000000":{"timestamp":%q,"temperature":{"value":20.0},"humidity":{"value":50.0}}}}`, future)
+	before := time.Now()
+	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/040D00000000", []byte(payload), false)
+	after := time.Now()
+
+	dev, ok := store.Get("040D00000000")
+	if !ok {
+		t.Fatal("glow sensor device not found in store")
+	}
+	ts := dev.Latest.LastSeen
+	if ts.Before(before.Add(-time.Second)) || ts.After(after.Add(time.Second)) {
+		t.Errorf("future glow sensor timestamp not sanitised: got %v, want close to now (%v..%v)", ts, before, after)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sweeney/statehouse/internal/adapter/timeutil"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
@@ -106,10 +107,11 @@ func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
 		return
 	}
 
-	ts := time.Now().UTC()
+	now := time.Now().UTC()
+	ts := now
 	if raw := p.ElectricityMeter.Timestamp; raw != "" {
 		if t, err := time.Parse(time.RFC3339, raw); err == nil {
-			ts = t
+			ts = timeutil.Sanitise(t, now)
 		}
 	}
 
@@ -140,10 +142,11 @@ func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial st
 		return
 	}
 
-	ts := time.Now().UTC()
+	now := time.Now().UTC()
+	ts := now
 	if entry.Timestamp != "" {
 		if t, err := time.Parse(time.RFC3339, entry.Timestamp); err == nil {
-			ts = t
+			ts = timeutil.Sanitise(t, now)
 		}
 	}
 

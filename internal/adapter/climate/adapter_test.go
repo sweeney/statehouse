@@ -1,6 +1,7 @@
 package climate
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -151,6 +152,67 @@ func TestAdapter_PartialObservation(t *testing.T) {
 	}
 	if l.UVIndex != nil {
 		t.Errorf("UVIndex should be nil for partial payload, got %v", *l.UVIndex)
+	}
+}
+
+// TestAdapter_FutureObservationTimestampRejected verifies that a payload
+// timestamp 50 years in the future is rejected and the reading timestamp
+// falls back to approximately now.
+func TestAdapter_FutureObservationTimestampRejected(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	futureUnix := time.Now().Add(50 * 365 * 24 * time.Hour).Unix()
+	payload := fmt.Sprintf(`{"timestamp":%d,"temperature_c":20.0,"humidity_pct":50.0}`, futureUnix)
+	before := time.Now()
+	a.HandleMessage("climate/home/observation", []byte(payload), false)
+	after := time.Now()
+
+	dev, ok := store.Get("home")
+	if !ok {
+		t.Fatal("climate/home device not found in store")
+	}
+	ts := dev.Latest.LastSeen
+	if ts.Before(before.Add(-time.Second)) || ts.After(after.Add(time.Second)) {
+		t.Errorf("future timestamp not sanitised: got %v, want close to now (%v..%v)", ts, before, after)
+	}
+}
+
+// TestAdapter_FutureDeviceStatusTimestampRejected verifies that a device/status
+// payload with a 50-year-future timestamp is sanitised to approximately now.
+func TestAdapter_FutureDeviceStatusTimestampRejected(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	futureUnix := time.Now().Add(50 * 365 * 24 * time.Hour).Unix()
+	payload := fmt.Sprintf(`{"timestamp":%d,"rssi_dbm":-60}`, futureUnix)
+	before := time.Now()
+	a.HandleMessage("climate/home/device/status", []byte(payload), false)
+	after := time.Now()
+
+	dev, ok := store.Get("home")
+	if !ok {
+		t.Fatal("climate/home device not found after device/status")
+	}
+	ts := dev.Latest.LastSeen
+	if ts.Before(before.Add(-time.Second)) || ts.After(after.Add(time.Second)) {
+		t.Errorf("future device/status timestamp not sanitised: got %v, want close to now (%v..%v)", ts, before, after)
+	}
+}
+
+// TestAdapter_UnixMsTimestampRejected verifies that a unix-millisecond value
+// accidentally supplied as unix-seconds is rejected (it would produce year ~58319).
+func TestAdapter_UnixMsTimestampRejected(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	unixMs := time.Now().UnixMilli() // milliseconds — far above 4e9 seconds
+	payload := fmt.Sprintf(`{"timestamp":%d,"temperature_c":20.0}`, unixMs)
+	before := time.Now()
+	a.HandleMessage("climate/home/observation", []byte(payload), false)
+	after := time.Now()
+
+	dev, ok := store.Get("home")
+	if !ok {
+		t.Fatal("climate/home device not found in store")
+	}
+	ts := dev.Latest.LastSeen
+	if ts.Before(before.Add(-time.Second)) || ts.After(after.Add(time.Second)) {
+		t.Errorf("unix-ms timestamp not sanitised: got %v, want close to now (%v..%v)", ts, before, after)
 	}
 }
 

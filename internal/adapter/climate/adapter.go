@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sweeney/statehouse/internal/adapter/timeutil"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
@@ -85,9 +86,10 @@ func (a *Adapter) handleObservation(location, topic string, payload []byte) {
 		}
 		return
 	}
-	ts := time.Now().UTC()
+	now := time.Now().UTC()
+	ts := now
 	if p.Timestamp != 0 {
-		ts = time.Unix(p.Timestamp, 0).UTC()
+		ts = timeutil.UnixSeconds(p.Timestamp, now)
 	}
 	r := model.Reading{
 		Timestamp:      ts,
@@ -113,9 +115,10 @@ func (a *Adapter) handleDeviceStatus(location, topic string, payload []byte) {
 		}
 		return
 	}
-	ts := time.Now().UTC()
+	now := time.Now().UTC()
+	ts := now
 	if p.Timestamp != 0 {
-		ts = time.Unix(p.Timestamp, 0).UTC()
+		ts = timeutil.UnixSeconds(p.Timestamp, now)
 	}
 	r := model.Reading{Timestamp: ts, RSSI: &p.RSSI}
 	id := a.identity(location)

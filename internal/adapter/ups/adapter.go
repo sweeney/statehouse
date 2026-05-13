@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sweeney/statehouse/internal/adapter/timeutil"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
@@ -88,10 +89,11 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 		}
 	}
 
-	ts := time.Now().UTC()
+	now := time.Now().UTC()
+	ts := now
 	if p.Timestamp != "" {
 		if t, err := time.Parse(time.RFC3339, p.Timestamp); err == nil {
-			ts = t
+			ts = timeutil.Sanitise(t, now)
 		}
 	}
 
