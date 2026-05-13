@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sweeney/statehouse/internal/adapter"
+	"github.com/sweeney/statehouse/internal/adapter/boiler"
 	"github.com/sweeney/statehouse/internal/adapter/zigbee2mqtt"
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
@@ -64,6 +65,9 @@ func main() {
 	var adapters []adapter.Adapter
 	if cfg.Adapters.Zigbee2MQTT.IsEnabled() {
 		adapters = append(adapters, zigbee2mqtt.New(engine, cfg.Adapters.Zigbee2MQTT.BaseTopic, logger))
+	}
+	if cfg.Adapters.Boiler.IsEnabled() {
+		adapters = append(adapters, boiler.New(engine, cfg.Adapters.Boiler.BaseTopic, logger))
 	}
 	for _, a := range adapters {
 		for _, filter := range a.Subscriptions() {

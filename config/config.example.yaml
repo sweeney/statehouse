@@ -11,6 +11,12 @@ adapters:
   zigbee2mqtt:
     enabled: true
     base_topic: zigbee2mqtt
+  # sweeney/boiler-sensor — publishes CH/HW relay state on
+  # energy/boiler/sensor/{events,system}. Off by default; enable
+  # explicitly because the publisher targets specific hardware.
+  boiler:
+    enabled: false
+    base_topic: energy/boiler/sensor
 
 http:
   listen: :8080
@@ -76,6 +82,15 @@ device_classes:
       inactive_sustained_for: 60s
     energy_strategy: integration
 
+  # State-only devices: boiler relays, contact sensors, motion
+  # sensors, smart switches that report state without power. The
+  # sustained-for windows debounce short blips; sensors that
+  # already debounce upstream (like boiler-sensor) can use 0.
+  binary_state_device:
+    default_thresholds:
+      active_sustained_for: 0s
+      inactive_sustained_for: 0s
+
 devices:
   kitchen_dishwasher:
     ieee_address: "0x00158d0000000001"
@@ -94,3 +109,18 @@ devices:
     class: continuous_power_device
     display_name: Garage freezer
     location: garage
+
+  # boiler-sensor devices — Scheme/Primary identify the channels
+  # the adapter emits. Display name is what /state/devices shows.
+  central_heating:
+    scheme: boiler
+    primary: ch
+    class: binary_state_device
+    display_name: Central heating
+    location: house
+  hot_water:
+    scheme: boiler
+    primary: hw
+    class: binary_state_device
+    display_name: Hot water
+    location: house

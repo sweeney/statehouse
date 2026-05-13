@@ -397,6 +397,8 @@ func (e *Engine) emitCycleStarted(id string, profile device.Profile, ts time.Tim
 		t = model.EvtCycleStarted
 	case device.ClassContinuous:
 		t = model.EvtContinuousCycleStarted
+	case device.ClassBinaryState:
+		t = model.EvtCycleStarted
 	}
 	e.emitDerived(model.DerivedEvent{
 		ID: newEventID(), Timestamp: ts, Type: t,
@@ -412,6 +414,8 @@ func (e *Engine) emitCycleFinished(id string, profile device.Profile, ts time.Ti
 		t = model.EvtCycleFinished
 	case device.ClassContinuous:
 		t = model.EvtContinuousCycleFinished
+	case device.ClassBinaryState:
+		t = model.EvtCycleFinished
 	}
 	ev := model.DerivedEvent{
 		ID: newEventID(), Timestamp: ts, Type: t,
