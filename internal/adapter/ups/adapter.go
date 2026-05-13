@@ -75,8 +75,15 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 		}
 		return
 	}
-	if p.UPSName != "" {
-		upsName = p.UPSName
+	// The device identity is always derived from the MQTT topic (trusted).
+	// A payload-supplied ups_name is informational only; if it disagrees with
+	// the topic name, log a warning for diagnostics but never override the
+	// topic-derived identity (see issue #5: spoofing / identity confusion).
+	if p.UPSName != "" && p.UPSName != upsName {
+		if a.logger != nil {
+			a.logger.Warn("ups payload ups_name disagrees with topic; ignoring payload name",
+				"topic_name", upsName, "payload_name", p.UPSName, "topic", topic)
+		}
 	}
 
 	ts := time.Now().UTC()
