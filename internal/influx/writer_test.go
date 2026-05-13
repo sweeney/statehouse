@@ -40,7 +40,7 @@ func seedDevice(t *testing.T, store *state.Store, id, class, location string) {
 		ID:       id,
 		Class:    class,
 		Location: location,
-		Identity: model.DeviceIdentity{IEEEAddress: "0x1", FriendlyName: id},
+		Identity: model.DeviceIdentity{Scheme: "zigbee", Primary: "0x1", Display: id},
 	}, rt)
 }
 

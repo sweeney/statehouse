@@ -10,28 +10,53 @@ import (
 
 // Config is the top-level service configuration loaded from YAML.
 type Config struct {
-	MQTT          MQTTConfig                  `yaml:"mqtt"`
-	HTTP          HTTPConfig                  `yaml:"http"`
-	RecentLog     RecentLogConfig             `yaml:"recent_log"`
-	Influx        InfluxConfig                `yaml:"influx"`
-	Energy        EnergyConfig                `yaml:"energy"`
-	Availability  AvailabilityConfig          `yaml:"availability"`
-	House         HouseConfig                 `yaml:"house"`
+	MQTT          MQTTConfig                   `yaml:"mqtt"`
+	HTTP          HTTPConfig                   `yaml:"http"`
+	RecentLog     RecentLogConfig              `yaml:"recent_log"`
+	Influx        InfluxConfig                 `yaml:"influx"`
+	Energy        EnergyConfig                 `yaml:"energy"`
+	Availability  AvailabilityConfig           `yaml:"availability"`
+	House         HouseConfig                  `yaml:"house"`
+	Adapters      AdaptersConfig               `yaml:"adapters"`
 	DeviceClasses map[string]DeviceClassConfig `yaml:"device_classes"`
 	Devices       map[string]DeviceConfig      `yaml:"devices"`
 }
 
-// MQTTConfig describes broker connectivity and subscription set.
+// MQTTConfig describes broker connectivity. Per-adapter subscription
+// topics are now owned by the adapter blocks below, not by MQTT.
 type MQTTConfig struct {
-	Broker    string   `yaml:"broker"`
-	ClientID  string   `yaml:"client_id"`
-	Username  string   `yaml:"username"`
-	Password  string   `yaml:"password"`
-	Subscribe []string `yaml:"subscribe"`
+	Broker   string `yaml:"broker"`
+	ClientID string `yaml:"client_id"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 	// PublishPrefix is prepended to derived MQTT topics. Defaults to "house".
 	PublishPrefix string `yaml:"publish_prefix"`
-	// Zigbee2MQTTBase is the base topic of the Z2M bridge. Defaults to "zigbee2mqtt".
-	Zigbee2MQTTBase string `yaml:"zigbee2mqtt_base"`
+}
+
+// AdaptersConfig groups per-protocol adapter configuration. Adapters
+// translate raw MQTT messages into engine calls that don't carry
+// protocol vocabulary, so each protocol gets its own settings block.
+type AdaptersConfig struct {
+	Zigbee2MQTT Zigbee2MQTTConfig `yaml:"zigbee2mqtt"`
+}
+
+// Zigbee2MQTTConfig configures the Zigbee2MQTT adapter.
+type Zigbee2MQTTConfig struct {
+	// Enabled defaults to true if the block is present at all. Set to
+	// false to disable the adapter without removing the block.
+	Enabled *bool `yaml:"enabled"`
+	// BaseTopic is the topic prefix of the Z2M bridge ("zigbee2mqtt").
+	BaseTopic string `yaml:"base_topic"`
+}
+
+// IsEnabled reports whether the adapter should be wired. Defaults to
+// true when the Adapters block is absent — the simplest config
+// (broker + nothing else) still gets a working Z2M adapter.
+func (z Zigbee2MQTTConfig) IsEnabled() bool {
+	if z.Enabled == nil {
+		return true
+	}
+	return *z.Enabled
 }
 
 type HTTPConfig struct {
@@ -90,9 +115,22 @@ type DeviceClassConfig struct {
 }
 
 // DeviceConfig overrides classification for a specific known device.
+// The canonical fields are Scheme + Primary (and Display). The legacy
+// `ieee_address` / `friendly_name` fields are kept as Z2M-shorthand so
+// existing YAML keeps working — Load() normalises them.
 type DeviceConfig struct {
-	IEEEAddress string      `yaml:"ieee_address"`
-	FriendlyName string     `yaml:"friendly_name"`
+	// Canonical identity fields. Scheme names the adapter that owns
+	// the device ("zigbee", "tasmota", "shelly", ...). Primary is the
+	// adapter's stable identifier. Display is the human-readable name.
+	Scheme  string `yaml:"scheme"`
+	Primary string `yaml:"primary"`
+	Display string `yaml:"display"`
+
+	// Legacy Z2M shorthand. Load() converts these to scheme=zigbee +
+	// primary=ieee_address / display=friendly_name.
+	IEEEAddress  string `yaml:"ieee_address"`
+	FriendlyName string `yaml:"friendly_name"`
+
 	Class       string      `yaml:"class"`
 	DisplayName string      `yaml:"display_name"`
 	Location    string      `yaml:"location"`
@@ -104,17 +142,18 @@ type DeviceConfig struct {
 func Default() Config {
 	return Config{
 		MQTT: MQTTConfig{
-			Broker:          "tcp://localhost:1883",
-			ClientID:        "house-state-engine",
-			Subscribe:       []string{"zigbee2mqtt/#"},
-			PublishPrefix:   "house",
-			Zigbee2MQTTBase: "zigbee2mqtt",
+			Broker:        "tcp://localhost:1883",
+			ClientID:      "house-state-engine",
+			PublishPrefix: "house",
 		},
 		HTTP: HTTPConfig{Listen: ":8080"},
 		RecentLog: RecentLogConfig{
 			Path:           "/var/lib/house-state-engine/events.jsonl",
 			RetentionHours: 72,
 			MaxSizeMB:      256,
+		},
+		Adapters: AdaptersConfig{
+			Zigbee2MQTT: Zigbee2MQTTConfig{BaseTopic: "zigbee2mqtt"},
 		},
 		Energy: EnergyConfig{
 			DivergenceWarningPct: 20,
@@ -150,8 +189,21 @@ func Load(path string) (Config, error) {
 	if cfg.MQTT.PublishPrefix == "" {
 		cfg.MQTT.PublishPrefix = "house"
 	}
-	if cfg.MQTT.Zigbee2MQTTBase == "" {
-		cfg.MQTT.Zigbee2MQTTBase = "zigbee2mqtt"
+	if cfg.Adapters.Zigbee2MQTT.BaseTopic == "" {
+		cfg.Adapters.Zigbee2MQTT.BaseTopic = "zigbee2mqtt"
+	}
+	// Normalise legacy Z2M shorthand on device entries.
+	for id, d := range cfg.Devices {
+		if d.Scheme == "" && (d.IEEEAddress != "" || d.FriendlyName != "") {
+			d.Scheme = "zigbee"
+		}
+		if d.Primary == "" && d.IEEEAddress != "" {
+			d.Primary = d.IEEEAddress
+		}
+		if d.Display == "" && d.FriendlyName != "" {
+			d.Display = d.FriendlyName
+		}
+		cfg.Devices[id] = d
 	}
 	return cfg, nil
 }

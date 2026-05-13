@@ -59,7 +59,7 @@ func TestHandleStateAndDevices(t *testing.T) {
 	mux := newMux(srv)
 	ts := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 	p := 2000.0
-	engine.IngestReading("0xabc", "kettle", "zigbee2mqtt/kettle",
+	engine.IngestReading(model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc", Display: "kettle"}, "zigbee2mqtt/kettle",
 		model.Reading{Timestamp: ts, PowerW: &p})
 
 	r := httptest.NewRequest(http.MethodGet, "/state", nil)
@@ -95,7 +95,7 @@ func TestHandleRecent(t *testing.T) {
 	mux := newMux(srv)
 	ts := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 	p := 2000.0
-	engine.IngestReading("0xabc", "kettle", "zigbee2mqtt/kettle",
+	engine.IngestReading(model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc", Display: "kettle"}, "zigbee2mqtt/kettle",
 		model.Reading{Timestamp: ts, PowerW: &p})
 
 	r := httptest.NewRequest(http.MethodGet, "/events/recent?limit=5", nil)
@@ -119,7 +119,7 @@ func TestHandleMetrics(t *testing.T) {
 	mux := newMux(srv)
 	ts := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 	p := 2000.0
-	engine.IngestReading("0xabc", "kettle", "zigbee2mqtt/kettle",
+	engine.IngestReading(model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc", Display: "kettle"}, "zigbee2mqtt/kettle",
 		model.Reading{Timestamp: ts, PowerW: &p})
 
 	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)

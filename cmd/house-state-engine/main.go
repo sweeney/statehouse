@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sweeney/statehouse/internal/adapter"
+	"github.com/sweeney/statehouse/internal/adapter/zigbee2mqtt"
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
 	"github.com/sweeney/statehouse/internal/httpapi"
@@ -55,15 +57,21 @@ func main() {
 		logger.Warn("mqtt connect failed; will retry in background", "error", err)
 	}
 
-	subscriber := &mqtt.Z2MSubscriber{
-		Engine: engine,
-		Base:   cfg.MQTT.Zigbee2MQTTBase,
-		Logger: logger,
+	// Adapter registry. Each adapter knows its protocol's quirks and
+	// translates them into engine calls; the engine itself knows
+	// nothing about Z2M, Tasmota, Shelly, etc. To add a new source,
+	// add an adapter and append it here.
+	var adapters []adapter.Adapter
+	if cfg.Adapters.Zigbee2MQTT.IsEnabled() {
+		adapters = append(adapters, zigbee2mqtt.New(engine, cfg.Adapters.Zigbee2MQTT.BaseTopic, logger))
 	}
-	for _, topic := range cfg.MQTT.Subscribe {
-		if err := mqttClient.Subscribe(topic, 0, subscriber.HandleMessage); err != nil {
-			logger.Warn("mqtt subscribe failed", "topic", topic, "error", err)
+	for _, a := range adapters {
+		for _, filter := range a.Subscriptions() {
+			if err := mqttClient.Subscribe(filter, 0, a.HandleMessage); err != nil {
+				logger.Warn("mqtt subscribe failed", "adapter", a.Name(), "topic", filter, "error", err)
+			}
 		}
+		logger.Info("adapter ready", "name", a.Name(), "subscriptions", a.Subscriptions())
 	}
 
 	publisher := &mqtt.Publisher{

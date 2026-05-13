@@ -22,7 +22,7 @@ func newPublisherTest(t *testing.T) (*Publisher, *FakeClient, *state.Store) {
 		ID:          "kitchen_dishwasher",
 		DisplayName: "Kitchen dishwasher",
 		Class:       device.ClassCyclePower,
-		Identity:    model.DeviceIdentity{IEEEAddress: "0x1", FriendlyName: "kitchen_dishwasher"},
+		Identity:    model.DeviceIdentity{Scheme: "zigbee", Primary: "0x1", Display: "kitchen_dishwasher"},
 	}, rt)
 	client := NewFakeClient()
 	pub := &Publisher{Client: client, Prefix: "house", Store: store}
@@ -152,7 +152,7 @@ func TestPublisher_SurvivesFaultClientWindow(t *testing.T) {
 	// that boiler-sensor's faultReader pattern inspired.
 	store := state.NewStore()
 	rt := device.NewRuntime(device.Profile{Class: device.ClassCyclePower}, 30*time.Minute)
-	store.Upsert("k", model.Device{ID: "k", Class: device.ClassCyclePower, Identity: model.DeviceIdentity{FriendlyName: "k"}}, rt)
+	store.Upsert("k", model.Device{ID: "k", Class: device.ClassCyclePower, Identity: model.DeviceIdentity{Scheme: "zigbee", Primary: "k", Display: "k"}}, rt)
 	inner := NewFakeClient()
 	fault := &FaultClient{Inner: inner, FaultStart: 0, FaultEnd: 3}
 	pub := &Publisher{Client: fault, Prefix: "house", Store: store}
