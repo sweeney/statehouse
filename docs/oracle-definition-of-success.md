@@ -160,7 +160,7 @@ Success means devices do not flap between active and idle because of noise, comp
 
 ### 6. Energy calculation uses two paths
 
-Statehouse must not implement naive `watts Ã elapsed time` integration as the only energy source.
+Statehouse must not implement naive `watts × elapsed time` integration as the only energy source.
 
 It should support both:
 
