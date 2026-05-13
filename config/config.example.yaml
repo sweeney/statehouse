@@ -1,10 +1,16 @@
 mqtt:
   broker: tcp://localhost:1883
   client_id: house-state-engine
-  subscribe:
-    - zigbee2mqtt/#
   publish_prefix: house
-  zigbee2mqtt_base: zigbee2mqtt
+
+# Adapters translate protocol-specific MQTT traffic into engine calls.
+# The engine itself is protocol-agnostic — to add Tasmota / Shelly /
+# Homie / raw-topic sensors, add an adapter block here once those
+# adapters exist.
+adapters:
+  zigbee2mqtt:
+    enabled: true
+    base_topic: zigbee2mqtt
 
 http:
   listen: :8080

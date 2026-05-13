@@ -68,16 +68,32 @@ Flags: `-broker`, `-client-id`, `-username`, `-password`, `-topics`
 (comma-separated), `-output` (`-` for stdout), `-duration` (0 = until
 SIGINT), `-qos`, `-mark-reconnects`.
 
+## Architecture
+
+The engine is protocol-agnostic. It accepts canonical `DeviceIdentity`
+records (`Scheme` + `Primary` + `Display`) and protocol-normalised
+`Reading` values; it does not know anything about Zigbee2MQTT,
+Tasmota, Shelly or any other source. Protocol-specific behaviour lives
+behind the `internal/adapter.Adapter` interface — one adapter per
+source. To add a new source (e.g. Tasmota or Shelly), write an
+adapter; the engine, store, energy code, and HTTP/MQTT outputs all
+stay untouched.
+
+Available adapters today:
+
+- `internal/adapter/zigbee2mqtt` — Z2M bridge/devices + per-device
+  payloads + availability.
+
 ## Layout
 
 - `cmd/house-state-engine` — daemon entrypoint.
 - `cmd/fixture-capture` — MQTT-to-JSONL fixture recorder.
+- `internal/adapter` — protocol-agnostic Adapter interface.
+- `internal/adapter/zigbee2mqtt` — Z2M adapter.
 - `internal/config` — YAML config + defaults.
 - `internal/model` — canonical data types (Reading, Device, Event,
   Snapshot, House). Pointer fields keep the absent-vs-zero
   distinction.
-- `internal/zigbee2mqtt` — Z2M topic + payload parsers.
-- `internal/normalise` — reserved (currently merged into engine).
 - `internal/device` — device profiles, classification, state machines.
 - `internal/energy` — counter, power-time integration with gap clamp,
   strategy selection, divergence helper.

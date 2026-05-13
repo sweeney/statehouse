@@ -10,36 +10,49 @@ import (
 
 // Store holds the in-memory state of all known devices plus the
 // current whole-house state. Access is serialised through an RWMutex.
+//
+// Devices are indexed by two scheme-aware keys:
+//
+//   - byPrimary maps "scheme:primary" (e.g. "zigbee:0x00158d...") to
+//     the engine-facing device id. This is the stable canonical index.
+//   - byDisplay maps "scheme:display" (e.g. "zigbee:kitchen_kettle")
+//     to the device id. It exists for the case where a device's
+//     payload arrives before its protocol-stable id is known — the
+//     adapter falls back to Primary=Display, and the engine merges
+//     the records when the real Primary is later learned.
 type Store struct {
-	mu     sync.RWMutex
-	dev    map[string]*deviceEntry
-	byIEEE map[string]string // ieee -> device id
-	byName map[string]string // friendly_name -> device id
-	house  model.House
+	mu        sync.RWMutex
+	dev       map[string]*deviceEntry
+	byPrimary map[string]string
+	byDisplay map[string]string
+	house     model.House
 }
 
 type deviceEntry struct {
 	Device  model.Device
 	Runtime *device.Runtime
 
-	// availabilityOfflineAt is non-nil once Z2M signalled offline; it
-	// stays in offline_pending until the debounce elapses.
+	// availabilityOfflineAt is non-nil once the adapter signalled
+	// offline; it stays in offline_pending until the debounce elapses.
 	availabilityOfflineAt *time.Time
 }
 
 // NewStore returns an empty store with whole-house state = unknown.
 func NewStore() *Store {
 	return &Store{
-		dev:    make(map[string]*deviceEntry),
-		byIEEE: make(map[string]string),
-		byName: make(map[string]string),
-		house:  model.House{State: model.HouseUnknown},
+		dev:       make(map[string]*deviceEntry),
+		byPrimary: make(map[string]string),
+		byDisplay: make(map[string]string),
+		house:     model.House{State: model.HouseUnknown},
 	}
 }
 
 // Upsert installs a device record at id with the given runtime. It is
 // idempotent: subsequent calls update identity/profile metadata
-// without resetting runtime state.
+// without resetting runtime state. Empty identity fields don't
+// overwrite previously-known non-empty ones — a device payload that
+// arrives without the canonical Primary keeps the IEEE we already
+// learned from bridge/devices.
 func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -48,10 +61,6 @@ func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 		entry = &deviceEntry{Device: d, Runtime: rt}
 		s.dev[id] = entry
 	} else {
-		// Preserve mutable runtime state; refresh metadata only.
-		// Do not overwrite identity fields with empty values — a
-		// device payload from MQTT doesn't carry IEEE, but we may
-		// already know it from a bridge/devices announcement.
 		if d.DisplayName != "" {
 			entry.Device.DisplayName = d.DisplayName
 		}
@@ -61,58 +70,67 @@ func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 		if d.Location != "" {
 			entry.Device.Location = d.Location
 		}
-		if d.Identity.IEEEAddress != "" {
-			entry.Device.Identity.IEEEAddress = d.Identity.IEEEAddress
+		if d.Identity.Scheme != "" {
+			entry.Device.Identity.Scheme = d.Identity.Scheme
 		}
-		if d.Identity.FriendlyName != "" {
-			entry.Device.Identity.FriendlyName = d.Identity.FriendlyName
+		if d.Identity.Primary != "" {
+			entry.Device.Identity.Primary = d.Identity.Primary
+		}
+		if d.Identity.Display != "" {
+			entry.Device.Identity.Display = d.Identity.Display
 		}
 		if d.SourceTopic != "" {
 			entry.Device.SourceTopic = d.SourceTopic
 		}
 		entry.Device.Unclassified = d.Unclassified
 	}
-	if d.Identity.IEEEAddress != "" {
-		s.byIEEE[d.Identity.IEEEAddress] = id
+	// Refresh indexes from the merged identity, not from the raw input
+	// — that way a partial Upsert doesn't drop indexes set earlier.
+	merged := entry.Device.Identity
+	if merged.Scheme != "" && merged.Primary != "" {
+		s.byPrimary[merged.Scheme+":"+merged.Primary] = id
 	}
-	if d.Identity.FriendlyName != "" {
-		s.byName[d.Identity.FriendlyName] = id
+	if merged.Scheme != "" && merged.Display != "" {
+		s.byDisplay[merged.Scheme+":"+merged.Display] = id
 	}
 }
 
-// LookupID resolves identity (IEEE preferred, friendly name as
-// fallback) to a stored device id. Returns "" if not found.
-func (s *Store) LookupID(ieee, friendlyName string) string {
+// LookupID resolves an identity to a stored device id. It checks the
+// canonical "scheme:primary" index first, then "scheme:display" as a
+// fallback. Returns "" if no record matches.
+func (s *Store) LookupID(identity model.DeviceIdentity) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if ieee != "" {
-		if id, ok := s.byIEEE[ieee]; ok {
+	if identity.Scheme != "" && identity.Primary != "" {
+		if id, ok := s.byPrimary[identity.Scheme+":"+identity.Primary]; ok {
 			return id
 		}
 	}
-	if friendlyName != "" {
-		if id, ok := s.byName[friendlyName]; ok {
+	if identity.Scheme != "" && identity.Display != "" {
+		if id, ok := s.byDisplay[identity.Scheme+":"+identity.Display]; ok {
 			return id
 		}
 	}
 	return ""
 }
 
-// Rename moves the friendly-name index for a device from oldName to
-// newName. No-op if the device is not known.
-func (s *Store) Rename(id, oldName, newName string) {
+// Rename updates the display-name index for a device. No-op if the
+// device is not known. Adapters call this when an upstream protocol
+// renames a device (e.g. a Z2M friendly_name change).
+func (s *Store) Rename(id, oldDisplay, newDisplay string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.dev[id]
 	if !ok {
 		return
 	}
-	if oldName != "" {
-		delete(s.byName, oldName)
+	scheme := entry.Device.Identity.Scheme
+	if oldDisplay != "" && scheme != "" {
+		delete(s.byDisplay, scheme+":"+oldDisplay)
 	}
-	if newName != "" {
-		s.byName[newName] = id
-		entry.Device.Identity.FriendlyName = newName
+	if newDisplay != "" && scheme != "" {
+		s.byDisplay[scheme+":"+newDisplay] = id
+		entry.Device.Identity.Display = newDisplay
 	}
 }
 
@@ -127,7 +145,7 @@ func (s *Store) Get(id string) (model.Device, bool) {
 	return entry.Device, true
 }
 
-// Devices returns a sorted-by-id snapshot map of all devices.
+// Devices returns a snapshot map of all devices.
 func (s *Store) Devices() map[string]model.Device {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -161,7 +179,6 @@ func (s *Store) Snapshot() model.Snapshot {
 }
 
 // withEntry is a helper that runs fn while holding the write lock.
-// Used by the engine to mutate a single device's record.
 func (s *Store) withEntry(id string, fn func(*deviceEntry)) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
