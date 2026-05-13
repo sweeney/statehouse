@@ -50,14 +50,31 @@ type Activity struct {
 // device is currently active. nil-able fields keep the
 // "absent vs zero" distinction.
 type Latest struct {
-	PowerW       *float64  `json:"power_w,omitempty"`
-	VoltageV     *float64  `json:"voltage_v,omitempty"`
-	EnergyKWh    *float64  `json:"energy_kwh,omitempty"`
-	TemperatureC *float64  `json:"temperature_c,omitempty"`
-	HumidityPct  *float64  `json:"humidity_pct,omitempty"`
-	BatteryPct   *float64  `json:"battery_pct,omitempty"`
-	LinkQuality  *int      `json:"linkquality,omitempty"`
-	LastSeen     time.Time `json:"last_seen"`
+	// Power / energy
+	PowerW    *float64 `json:"power_w,omitempty"`
+	VoltageV  *float64 `json:"voltage_v,omitempty"`
+	EnergyKWh *float64 `json:"energy_kwh,omitempty"`
+
+	// Environment
+	TemperatureC   *float64 `json:"temperature_c,omitempty"`
+	HumidityPct    *float64 `json:"humidity_pct,omitempty"`
+	PressureHPa    *float64 `json:"pressure_hpa,omitempty"`
+	WindSpeedMS    *float64 `json:"wind_speed_ms,omitempty"`
+	WindDirDeg     *float64 `json:"wind_dir_deg,omitempty"`
+	RainfallMM     *float64 `json:"rainfall_mm,omitempty"`
+	IlluminanceLux *float64 `json:"illuminance_lux,omitempty"`
+	UVIndex        *float64 `json:"uv_index,omitempty"`
+
+	// UPS
+	BatteryRuntimeMins *float64 `json:"battery_runtime_mins,omitempty"`
+	OnBattery          *bool    `json:"on_battery,omitempty"`
+
+	// Device health
+	BatteryPct  *float64 `json:"battery_pct,omitempty"`
+	LinkQuality *int     `json:"linkquality,omitempty"`
+	RSSI        *int     `json:"rssi_dbm,omitempty"`
+
+	LastSeen time.Time `json:"last_seen"`
 }
 
 // CycleEnergy summarises the two parallel energy estimates for a
@@ -89,7 +106,6 @@ type Device struct {
 	Class        string         `json:"class"`
 	Location     string         `json:"location,omitempty"`
 	Identity     DeviceIdentity `json:"identity"`
-	SourceTopic  string         `json:"source_topic,omitempty"`
 	Availability Availability   `json:"availability"`
 	Activity     Activity       `json:"activity"`
 	Latest       Latest         `json:"latest"`

@@ -1,0 +1,114 @@
+package ups
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/sweeney/statehouse/internal/config"
+	"github.com/sweeney/statehouse/internal/state"
+	"github.com/sweeney/statehouse/internal/testutil"
+)
+
+func sensorCfg() config.Config {
+	cfg := config.Default()
+	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
+		"sensor_device": {},
+	}
+	return cfg
+}
+
+func mkAdapter(t *testing.T) (*Adapter, *state.Store, *testutil.FakeClock) {
+	t.Helper()
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 21, 57, 0, 0, time.UTC))
+	engine := state.NewEngine(sensorCfg(), store, clock)
+	return New(engine, "ups", nil), store, clock
+}
+
+func TestAdapter_Name(t *testing.T) {
+	a, _, _ := mkAdapter(t)
+	if a.Name() != "ups" {
+		t.Errorf("Name() = %q, want ups", a.Name())
+	}
+}
+
+func TestAdapter_Subscriptions(t *testing.T) {
+	a, _, _ := mkAdapter(t)
+	subs := a.Subscriptions()
+	if len(subs) != 1 || subs[0] != "ups/+/state" {
+		t.Errorf("Subscriptions() = %v, want [ups/+/state]", subs)
+	}
+}
+
+const sampleState = `{"timestamp":"2026-05-13T21:57:06Z","ups_name":"cyberpower","variables":{"battery.charge":"100","input.voltage":"244"},"computed":{"load_watts":72,"battery_runtime_mins":74.5,"on_battery":false,"low_battery":false}}`
+
+func TestAdapter_ParsesStatePayload(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	a.HandleMessage("ups/cyberpower/state", []byte(sampleState), false)
+
+	dev, ok := store.Get("cyberpower")
+	if !ok {
+		t.Fatal("device cyberpower not found in store")
+	}
+	l := dev.Latest
+	if l.PowerW == nil || *l.PowerW != 72 {
+		t.Errorf("PowerW = %v, want 72", l.PowerW)
+	}
+	if l.BatteryRuntimeMins == nil || *l.BatteryRuntimeMins != 74.5 {
+		t.Errorf("BatteryRuntimeMins = %v, want 74.5", l.BatteryRuntimeMins)
+	}
+	if l.OnBattery == nil || *l.OnBattery != false {
+		t.Errorf("OnBattery = %v, want false", l.OnBattery)
+	}
+	if l.BatteryPct == nil || *l.BatteryPct != 100 {
+		t.Errorf("BatteryPct = %v, want 100", l.BatteryPct)
+	}
+	if l.VoltageV == nil || *l.VoltageV != 244 {
+		t.Errorf("VoltageV = %v, want 244", l.VoltageV)
+	}
+}
+
+func TestAdapter_IgnoresUnrelatedTopics(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	a.HandleMessage("ups/cyberpower/battery/charge", []byte(`100`), false)
+	a.HandleMessage("zigbee2mqtt/something", []byte(`{}`), false)
+	a.HandleMessage("ups/cyberpower/state", []byte(`not json`), false)
+	if n := len(store.Devices()); n != 0 {
+		t.Errorf("expected 0 devices after invalid input, got %d", n)
+	}
+}
+
+func TestAdapter_MultipleUPS(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	a.HandleMessage("ups/cyberpower/state", []byte(sampleState), false)
+	payload2 := `{"ups_name":"apc","variables":{},"computed":{"load_watts":50,"battery_runtime_mins":30,"on_battery":true}}`
+	a.HandleMessage("ups/apc/state", []byte(payload2), false)
+	if n := len(store.Devices()); n != 2 {
+		t.Errorf("expected 2 UPS devices, got %d", n)
+	}
+}
+
+func TestAdapter_FixtureReplay(t *testing.T) {
+	a, store, clock := mkAdapter(t)
+	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "ups_readings.jsonl"))
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	for _, e := range events {
+		if !e.Timestamp.IsZero() {
+			clock.Set(e.Timestamp)
+		}
+		a.HandleMessage(e.Topic, e.PayloadBytes(), false)
+	}
+	dev, ok := store.Get("cyberpower")
+	if !ok {
+		t.Fatal("cyberpower not found after fixture replay")
+	}
+	if dev.Latest.PowerW == nil {
+		t.Error("expected PowerW to be set after fixture replay")
+	}
+	if dev.Latest.BatteryRuntimeMins == nil {
+		t.Error("expected BatteryRuntimeMins to be set after fixture replay")
+	}
+}

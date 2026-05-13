@@ -87,7 +87,6 @@ func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic str
 		Class:        prof.Class,
 		Location:     prof.Location,
 		Identity:     identity,
-		SourceTopic:  sourceTopic,
 		Availability: model.AvailabilityUnknown,
 		Activity:     model.Activity{State: model.ActivityUnknown},
 		Unclassified: prof.Unclassified,
@@ -178,6 +177,38 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			v := *reading.HumidityPct
 			l.HumidityPct = &v
 		}
+		if reading.PressureHPa != nil {
+			v := *reading.PressureHPa
+			l.PressureHPa = &v
+		}
+		if reading.WindSpeedMS != nil {
+			v := *reading.WindSpeedMS
+			l.WindSpeedMS = &v
+		}
+		if reading.WindDirDeg != nil {
+			v := *reading.WindDirDeg
+			l.WindDirDeg = &v
+		}
+		if reading.RainfallMM != nil {
+			v := *reading.RainfallMM
+			l.RainfallMM = &v
+		}
+		if reading.IlluminanceLux != nil {
+			v := *reading.IlluminanceLux
+			l.IlluminanceLux = &v
+		}
+		if reading.UVIndex != nil {
+			v := *reading.UVIndex
+			l.UVIndex = &v
+		}
+		if reading.BatteryRuntimeMins != nil {
+			v := *reading.BatteryRuntimeMins
+			l.BatteryRuntimeMins = &v
+		}
+		if reading.OnBattery != nil {
+			v := *reading.OnBattery
+			l.OnBattery = &v
+		}
 		if reading.Battery != nil {
 			v := *reading.Battery
 			l.BatteryPct = &v
@@ -185,6 +216,10 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		if reading.LinkQuality != nil {
 			v := *reading.LinkQuality
 			l.LinkQuality = &v
+		}
+		if reading.RSSI != nil {
+			v := *reading.RSSI
+			l.RSSI = &v
 		}
 		// Activity sub-state.
 		if outcome.NewActivity != outcome.PrevActivity {

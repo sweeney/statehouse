@@ -103,9 +103,6 @@ func TestEngine_DiscoversByPrimary_KeepsStateOnDisplayRename(t *testing.T) {
 	if d2.Identity.Display != "kitchen_dishwasher_new" {
 		t.Fatalf("expected display renamed, got %q", d2.Identity.Display)
 	}
-	if d2.SourceTopic == d.SourceTopic {
-		t.Fatalf("expected source topic updated, still %q", d2.SourceTopic)
-	}
 	// Discovered event should only fire once.
 	discovered := 0
 	for _, ev := range col.derived {

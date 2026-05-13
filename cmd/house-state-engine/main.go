@@ -12,6 +12,9 @@ import (
 
 	"github.com/sweeney/statehouse/internal/adapter"
 	"github.com/sweeney/statehouse/internal/adapter/boiler"
+	"github.com/sweeney/statehouse/internal/adapter/climate"
+	"github.com/sweeney/statehouse/internal/adapter/meter"
+	"github.com/sweeney/statehouse/internal/adapter/ups"
 	"github.com/sweeney/statehouse/internal/adapter/zigbee2mqtt"
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
@@ -68,6 +71,15 @@ func main() {
 	}
 	if cfg.Adapters.Boiler.IsEnabled() {
 		adapters = append(adapters, boiler.New(engine, cfg.Adapters.Boiler.BaseTopic, logger))
+	}
+	if cfg.Adapters.UPS.IsEnabled() {
+		adapters = append(adapters, ups.New(engine, cfg.Adapters.UPS.BaseTopic, logger))
+	}
+	if cfg.Adapters.Climate.IsEnabled() {
+		adapters = append(adapters, climate.New(engine, cfg.Adapters.Climate.BaseTopic, logger))
+	}
+	if cfg.Adapters.Meter.IsEnabled() {
+		adapters = append(adapters, meter.New(engine, cfg.Adapters.Meter.BaseTopic, logger))
 	}
 	for _, a := range adapters {
 		for _, filter := range a.Subscriptions() {

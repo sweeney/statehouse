@@ -18,11 +18,13 @@ type rawDevicePayload struct {
 	Energy       *float64 `json:"energy"`
 	Temperature  *float64 `json:"temperature"`
 	Humidity     *float64 `json:"humidity"`
-	LinkQuality  *int     `json:"linkquality"`
-	Battery      *float64 `json:"battery"`
-	Occupancy    *bool    `json:"occupancy"`
-	Contact      *bool    `json:"contact"`
-	LastSeen     *string  `json:"last_seen"`
+	LinkQuality *int     `json:"linkquality"`
+	Battery     *float64 `json:"battery"`
+	Occupancy   *bool    `json:"occupancy"`
+	Contact     *bool    `json:"contact"`
+	// last_seen is deliberately omitted — devices send it as either a
+	// unix-millisecond integer or a string depending on Z2M config, and
+	// we derive timing from the engine clock rather than the payload.
 }
 
 // ParseDevicePayload turns a Z2M device payload into a Reading. Any

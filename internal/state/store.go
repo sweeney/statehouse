@@ -79,9 +79,6 @@ func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 		if d.Identity.Display != "" {
 			entry.Device.Identity.Display = d.Identity.Display
 		}
-		if d.SourceTopic != "" {
-			entry.Device.SourceTopic = d.SourceTopic
-		}
 		entry.Device.Unclassified = d.Unclassified
 	}
 	// Refresh indexes from the merged identity, not from the raw input

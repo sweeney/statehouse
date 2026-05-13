@@ -39,6 +39,9 @@ type MQTTConfig struct {
 type AdaptersConfig struct {
 	Zigbee2MQTT Zigbee2MQTTConfig `yaml:"zigbee2mqtt"`
 	Boiler      BoilerConfig      `yaml:"boiler"`
+	UPS         UPSConfig         `yaml:"ups"`
+	Climate     ClimateConfig     `yaml:"climate"`
+	Meter       MeterConfig       `yaml:"meter"`
 }
 
 // Zigbee2MQTTConfig configures the Zigbee2MQTT adapter.
@@ -80,6 +83,45 @@ func (b BoilerConfig) IsEnabled() bool {
 		return false
 	}
 	return *b.Enabled
+}
+
+// UPSConfig configures the NUT-via-MQTT UPS adapter.
+type UPSConfig struct {
+	Enabled   *bool  `yaml:"enabled"`
+	BaseTopic string `yaml:"base_topic"`
+}
+
+func (u UPSConfig) IsEnabled() bool {
+	if u.Enabled == nil {
+		return false
+	}
+	return *u.Enabled
+}
+
+// ClimateConfig configures the weather station adapter.
+type ClimateConfig struct {
+	Enabled   *bool  `yaml:"enabled"`
+	BaseTopic string `yaml:"base_topic"`
+}
+
+func (c ClimateConfig) IsEnabled() bool {
+	if c.Enabled == nil {
+		return false
+	}
+	return *c.Enabled
+}
+
+// MeterConfig configures the Glow/SMETS2 smart meter adapter.
+type MeterConfig struct {
+	Enabled   *bool  `yaml:"enabled"`
+	BaseTopic string `yaml:"base_topic"`
+}
+
+func (m MeterConfig) IsEnabled() bool {
+	if m.Enabled == nil {
+		return false
+	}
+	return *m.Enabled
 }
 
 type HTTPConfig struct {
@@ -217,6 +259,15 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Adapters.Boiler.BaseTopic == "" {
 		cfg.Adapters.Boiler.BaseTopic = "energy/boiler/sensor"
+	}
+	if cfg.Adapters.UPS.BaseTopic == "" {
+		cfg.Adapters.UPS.BaseTopic = "ups"
+	}
+	if cfg.Adapters.Climate.BaseTopic == "" {
+		cfg.Adapters.Climate.BaseTopic = "climate"
+	}
+	if cfg.Adapters.Meter.BaseTopic == "" {
+		cfg.Adapters.Meter.BaseTopic = "energy"
 	}
 	// Normalise legacy Z2M shorthand on device entries.
 	for id, d := range cfg.Devices {
