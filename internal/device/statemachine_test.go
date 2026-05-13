@@ -248,3 +248,52 @@ func TestBinary_NoStateIsNoOp(t *testing.T) {
 		t.Fatalf("missing State must not transition activity, got %+v", out)
 	}
 }
+
+// Sensor class: measurement-only devices. No cycles, no occupancy
+// signal — activity transitions unknown→reporting on first contact
+// and stays there.
+
+func TestSensor_FirstReadingFlipsToReporting(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassSensor, config.Thresholds{}, "")
+	temp := 21.4
+	out := rt.OnReading(now, model.Reading{Timestamp: now, TemperatureC: &temp})
+	if out.PrevActivity != model.ActivityUnknown {
+		t.Errorf("expected prev=unknown, got %q", out.PrevActivity)
+	}
+	if out.NewActivity != model.ActivityReporting {
+		t.Errorf("expected new=reporting, got %q", out.NewActivity)
+	}
+	if out.CycleStarted || out.CycleFinished {
+		t.Errorf("sensors must not emit cycle events, got %+v", out)
+	}
+	if out.Cycle != nil {
+		t.Errorf("sensors must not produce a Cycle, got %+v", out.Cycle)
+	}
+}
+
+func TestSensor_SubsequentReadingDoesNotRetransition(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassSensor, config.Thresholds{}, "")
+	temp := 21.4
+	rt.OnReading(now, model.Reading{Timestamp: now, TemperatureC: &temp})
+	// Second reading — activity unchanged; PrevActivity must equal
+	// NewActivity so the engine doesn't emit another transition event.
+	temp2 := 21.5
+	out := rt.OnReading(now.Add(5*time.Minute), model.Reading{Timestamp: now.Add(5 * time.Minute), TemperatureC: &temp2})
+	if out.PrevActivity != model.ActivityReporting || out.NewActivity != model.ActivityReporting {
+		t.Fatalf("expected reporting→reporting, got %q→%q", out.PrevActivity, out.NewActivity)
+	}
+}
+
+func TestSensor_NoPowerNeeded(t *testing.T) {
+	// A sensor reading carries no power; the power short-circuit in
+	// the power-based dispatcher must not affect sensor handling.
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassSensor, config.Thresholds{}, "")
+	hum := 55.0
+	out := rt.OnReading(now, model.Reading{Timestamp: now, HumidityPct: &hum})
+	if out.NewActivity != model.ActivityReporting {
+		t.Fatalf("expected reporting from humidity-only reading, got %q", out.NewActivity)
+	}
+}

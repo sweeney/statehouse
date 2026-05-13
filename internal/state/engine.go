@@ -178,6 +178,10 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			v := *reading.HumidityPct
 			l.HumidityPct = &v
 		}
+		if reading.Battery != nil {
+			v := *reading.Battery
+			l.BatteryPct = &v
+		}
 		if reading.LinkQuality != nil {
 			v := *reading.LinkQuality
 			l.LinkQuality = &v
@@ -504,6 +508,9 @@ func (e *Engine) emitCanonicalForReading(id string, identity model.DeviceIdentit
 	}
 	if r.HumidityPct != nil {
 		emit("humidity", "humidity_pct", *r.HumidityPct, "%")
+	}
+	if r.Battery != nil {
+		emit("battery", "battery_pct", *r.Battery, "%")
 	}
 }
 

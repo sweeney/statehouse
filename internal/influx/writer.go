@@ -139,6 +139,10 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 		if v, ok := ev.Value.(float64); ok {
 			p = write.NewPoint("device_environment", tags, map[string]any{"humidity_pct": v}, ev.Timestamp)
 		}
+	case "battery_pct":
+		if v, ok := ev.Value.(float64); ok {
+			p = write.NewPoint("device_battery", tags, map[string]any{"battery_pct": v}, ev.Timestamp)
+		}
 	}
 	if p != nil {
 		w.api.WritePoint(p)

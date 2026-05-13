@@ -214,6 +214,89 @@ func TestEngine_HouseRecomputesOnActivity(t *testing.T) {
 	}
 }
 
+// TestEngine_SensorPopulatesBatteryAndReportingActivity verifies
+// the new sensor_device class: a climate sensor reading populates
+// Latest temp/humidity/battery, the device's activity flips
+// unknown→reporting, and the engine emits canonical events for each
+// measurement (including battery) so downstream sinks can record them.
+func TestEngine_SensorPopulatesBatteryAndReportingActivity(t *testing.T) {
+	cfg := config.Default()
+	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
+		"sensor_device": {
+			NameHints: []string{"climate"},
+		},
+	}
+	store := NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC))
+	engine := NewEngine(cfg, store, clock)
+	col := &collector{}
+	engine.AddDerivedSink(col)
+	engine.AddCanonicalSink(col)
+
+	engine.IngestReading(zid("0xaa", "bedroom_climate"), "zigbee2mqtt/bedroom_climate",
+		model.Reading{
+			Timestamp:    clock.Now(),
+			TemperatureC: ptr(21.4),
+			HumidityPct:  ptr(54.3),
+			Battery:      ptr(87.0),
+			LinkQuality:  ptr(156),
+		})
+
+	d, ok := store.Get("bedroom_climate")
+	if !ok {
+		t.Fatalf("expected device 'bedroom_climate' classified by name-hint")
+	}
+	if d.Class != "sensor_device" {
+		t.Fatalf("expected sensor_device class, got %q", d.Class)
+	}
+	if d.Activity.State != model.ActivityReporting {
+		t.Errorf("expected activity=reporting, got %q", d.Activity.State)
+	}
+	if d.Latest.TemperatureC == nil || *d.Latest.TemperatureC != 21.4 {
+		t.Errorf("expected Latest.TemperatureC=21.4, got %v", d.Latest.TemperatureC)
+	}
+	if d.Latest.HumidityPct == nil || *d.Latest.HumidityPct != 54.3 {
+		t.Errorf("expected Latest.HumidityPct=54.3, got %v", d.Latest.HumidityPct)
+	}
+	if d.Latest.BatteryPct == nil || *d.Latest.BatteryPct != 87.0 {
+		t.Errorf("expected Latest.BatteryPct=87, got %v", d.Latest.BatteryPct)
+	}
+	if d.Cycle != nil {
+		t.Errorf("sensor must not have a Cycle, got %+v", d.Cycle)
+	}
+
+	// Canonical events emitted: one each for temperature, humidity, battery.
+	attrs := map[string]int{}
+	for _, ce := range col.canonical {
+		attrs[ce.Attribute]++
+	}
+	for _, want := range []string{"temperature_c", "humidity_pct", "battery_pct"} {
+		if attrs[want] != 1 {
+			t.Errorf("expected exactly 1 canonical event with attribute=%q, got %d", want, attrs[want])
+		}
+	}
+}
+
+func TestEngine_SensorDoesNotMakeHouseActive(t *testing.T) {
+	// Sensors must not trip the house-state derivation into "active";
+	// they're measurement-only and report continuously regardless of
+	// presence.
+	cfg := config.Default()
+	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
+		"sensor_device": {NameHints: []string{"climate"}},
+	}
+	store := NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC))
+	engine := NewEngine(cfg, store, clock)
+
+	engine.IngestReading(zid("0xaa", "bedroom_climate"), "zigbee2mqtt/bedroom_climate",
+		model.Reading{Timestamp: clock.Now(), TemperatureC: ptr(21.4)})
+	h := store.House()
+	if h.State == model.HouseActive {
+		t.Fatalf("sensor reading must not make house active, got %q", h.State)
+	}
+}
+
 // TestEngine_SchemeAgnostic verifies the engine treats DeviceIdentity
 // generically — a synthetic "tasmota" scheme works identically to
 // "zigbee", which is the whole point of the adapter abstraction.

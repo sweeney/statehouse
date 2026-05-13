@@ -94,6 +94,18 @@ func (r *Runtime) OnReading(at time.Time, reading model.Reading) Outcome {
 		return out
 	}
 
+	// Measurement-only sensors have no activity machine. Any reading
+	// transitions unknown→reporting once; subsequent readings update
+	// Latest values (in the engine) but don't transition activity.
+	if r.Profile.Class == ClassSensor {
+		if r.activity == model.ActivityUnknown {
+			r.activity = model.ActivityReporting
+		}
+		out.NewActivity = r.activity
+		out.Cycle = nil
+		return out
+	}
+
 	if reading.PowerW == nil {
 		// No power signal; activity state cannot change from this
 		// reading.

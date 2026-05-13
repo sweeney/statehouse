@@ -96,6 +96,11 @@ Device classes today:
   sensors, switches that report ON/OFF without power. Activity
   derives from `Reading.State` not power; cycles record duration
   but no energy.
+- `sensor_device` — measurement-only devices (climate sensors,
+  air-quality, illuminance). No cycle, no activity machine — once
+  the device transmits, `Activity` stays at `reporting`. Latest
+  temp / humidity / battery flow into the device record; Influx
+  receives `device_environment` and `device_battery` samples.
 
 ## Layout
 

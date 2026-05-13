@@ -91,6 +91,14 @@ device_classes:
       active_sustained_for: 0s
       inactive_sustained_for: 0s
 
+  # Measurement-only devices: climate sensors (Sonoff SNZB-02 etc.),
+  # air-quality, illuminance. No cycle, no activity machine —
+  # activity stays "reporting" while the device transmits. Latest
+  # values (temp / humidity / battery) flow into the device record
+  # and into Influx as device_environment / device_battery samples.
+  sensor_device:
+    name_hints: [climate, thsensor, snzb]
+
 devices:
   kitchen_dishwasher:
     ieee_address: "0x00158d0000000001"
@@ -124,3 +132,22 @@ devices:
     class: binary_state_device
     display_name: Hot water
     location: house
+
+  # Sonoff SNZB-02 climate sensors, one per floor. Each is its own
+  # Zigbee device with an IEEE address; the legacy ieee_address
+  # shorthand still works under the hood.
+  ground_floor_climate:
+    ieee_address: "0x00158d0000000010"
+    class: sensor_device
+    display_name: Ground floor climate
+    location: ground_floor
+  first_floor_climate:
+    ieee_address: "0x00158d0000000011"
+    class: sensor_device
+    display_name: First floor climate
+    location: first_floor
+  loft_climate:
+    ieee_address: "0x00158d0000000012"
+    class: sensor_device
+    display_name: Loft climate
+    location: loft

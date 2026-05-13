@@ -103,6 +103,30 @@ func TestWriter_TempAndHumidityGoToDeviceEnvironment(t *testing.T) {
 	}
 }
 
+func TestWriter_BatterySampleGoesToDeviceBattery(t *testing.T) {
+	w, api, store := newWriterTest(t)
+	seedDevice(t, store, "bedroom_climate", device.ClassSensor, "bedroom")
+	ts := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	w.OnCanonicalEvent(model.CanonicalEvent{
+		Timestamp: ts,
+		DeviceID:  "bedroom_climate",
+		Attribute: "battery_pct",
+		Value:     87.0,
+	})
+	got := api.PointsForMeasurement("device_battery")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 device_battery point, got %d", len(got))
+	}
+	p := got[0]
+	tags := tagMap(p)
+	if tags["device_id"] != "bedroom_climate" || tags["class"] != device.ClassSensor || tags["location"] != "bedroom" {
+		t.Errorf("battery tags wrong: %+v", tags)
+	}
+	if fieldMap(p)["battery_pct"] != 87.0 {
+		t.Errorf("battery fields wrong: %+v", fieldMap(p))
+	}
+}
+
 func TestWriter_UnsupportedAttributeIsDropped(t *testing.T) {
 	w, api, store := newWriterTest(t)
 	seedDevice(t, store, "x", "media_power_device", "")
