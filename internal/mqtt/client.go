@@ -43,20 +43,7 @@ func New(cfg Config) Client {
 }
 
 func (p *pahoClient) Connect() error {
-	opts := paho.NewClientOptions().
-		AddBroker(p.cfg.Broker).
-		SetClientID(p.cfg.ClientID).
-		SetAutoReconnect(true).
-		SetConnectRetry(true).
-		SetConnectRetryInterval(5 * time.Second).
-		SetCleanSession(true).
-		SetKeepAlive(30 * time.Second).
-		SetPingTimeout(10 * time.Second).
-		SetOrderMatters(false)
-	if p.cfg.Username != "" {
-		opts.SetUsername(p.cfg.Username)
-		opts.SetPassword(p.cfg.Password)
-	}
+	opts := buildClientOptions(p.cfg)
 	c := paho.NewClient(opts)
 	// Store the client immediately. paho will retry the connection in
 	// the background. We bound the initial wait so callers don't block
@@ -69,6 +56,27 @@ func (p *pahoClient) Connect() error {
 		return errors.New("mqtt connect timeout; retrying in background")
 	}
 	return tok.Error()
+}
+
+// buildClientOptions returns the paho ClientOptions used by Connect().
+// Extracted so unit tests can assert on broker, retry, keepalive and
+// auth settings without opening a network connection.
+func buildClientOptions(cfg Config) *paho.ClientOptions {
+	opts := paho.NewClientOptions().
+		AddBroker(cfg.Broker).
+		SetClientID(cfg.ClientID).
+		SetAutoReconnect(true).
+		SetConnectRetry(true).
+		SetConnectRetryInterval(5 * time.Second).
+		SetCleanSession(true).
+		SetKeepAlive(30 * time.Second).
+		SetPingTimeout(10 * time.Second).
+		SetOrderMatters(false)
+	if cfg.Username != "" {
+		opts.SetUsername(cfg.Username)
+		opts.SetPassword(cfg.Password)
+	}
+	return opts
 }
 
 func (p *pahoClient) Disconnect() {

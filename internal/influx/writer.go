@@ -7,12 +7,22 @@ import (
 	"sync/atomic"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
-	"github.com/influxdata/influxdb-client-go/v2/api"
 	"github.com/influxdata/influxdb-client-go/v2/api/write"
 
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
+
+// pointWriter is the minimal subset of influxdb-client-go's
+// api.WriteAPI that this package depends on. Defining it locally
+// means tests can substitute a hand-written fake without standing up
+// an Influx instance, and we never accidentally couple to API surface
+// we don't actually use.
+type pointWriter interface {
+	WritePoint(p *write.Point)
+	Flush()
+	Errors() <-chan error
+}
 
 // Writer publishes selected measurements and lifecycle summaries to
 // InfluxDB. Failure to write must not stop the engine, so all errors
@@ -23,7 +33,7 @@ type Writer struct {
 	Logger  *slog.Logger
 
 	client    influxdb2.Client
-	api       api.WriteAPI
+	api       pointWriter
 	failures  uint64
 	successes uint64
 	mu        sync.Mutex
@@ -65,13 +75,28 @@ func New(enabled bool, cfg Config, store *state.Store, logger *slog.Logger) *Wri
 	return w
 }
 
+// NewWithAPI constructs a Writer with a caller-supplied pointWriter.
+// This is the seam tests use to inject FakeWriteAPI; production code
+// should use New. The Writer takes no ownership of api — Close() will
+// flush it but won't close any underlying network client.
+func NewWithAPI(api pointWriter, store *state.Store, logger *slog.Logger) *Writer {
+	return &Writer{
+		Enabled: true,
+		Store:   store,
+		Logger:  logger,
+		api:     api,
+	}
+}
+
 // Close flushes pending writes and disconnects.
 func (w *Writer) Close() {
-	if w == nil || !w.Enabled || w.client == nil {
+	if w == nil || !w.Enabled || w.api == nil {
 		return
 	}
 	w.api.Flush()
-	w.client.Close()
+	if w.client != nil {
+		w.client.Close()
+	}
 }
 
 // OnCanonicalEvent implements state.CanonicalSink. We write power,
