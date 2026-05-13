@@ -122,6 +122,34 @@ func TestAdapter_SerialExtractedFromTopic(t *testing.T) {
 	}
 }
 
+// TestAdapter_GlowSensorPartialPayload verifies that absent "battery" and
+// "rssi" keys in a glow sensor entry do not produce false-zero readings.
+func TestAdapter_GlowSensorPartialPayload(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	// Payload has temperature and humidity but no battery or rssi fields.
+	partial := `{"glowsensorth1":{"040D00000000":{"timestamp":"2026-05-13T23:03:55Z","temperature":{"value":19.073,"units":"°C"},"humidity":{"value":46,"units":"%"}}}}`
+	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/040D00000000", []byte(partial), false)
+
+	dev, ok := store.Get("040D00000000")
+	if !ok {
+		t.Fatal("glow sensor device not found in store")
+	}
+	l := dev.Latest
+	if l.TemperatureC == nil || *l.TemperatureC != 19.073 {
+		t.Errorf("TemperatureC = %v, want 19.073", l.TemperatureC)
+	}
+	if l.HumidityPct == nil || *l.HumidityPct != 46 {
+		t.Errorf("HumidityPct = %v, want 46", l.HumidityPct)
+	}
+	// Absent fields must not produce zero readings.
+	if l.BatteryPct != nil {
+		t.Errorf("BatteryPct should be nil when battery is absent, got %v", *l.BatteryPct)
+	}
+	if l.RSSI != nil {
+		t.Errorf("RSSI should be nil when rssi is absent, got %v", *l.RSSI)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "meter_readings.jsonl"))

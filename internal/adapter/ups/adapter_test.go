@@ -112,6 +112,38 @@ func TestAdapter_PayloadCannotOverrideTopicName(t *testing.T) {
 	}
 }
 
+// TestAdapter_NoComputedBlock verifies that when the "computed" block is
+// entirely absent from a UPS payload, PowerW and BatteryRuntimeMins are nil
+// rather than false-zero readings.
+func TestAdapter_NoComputedBlock(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"timestamp":"2026-05-13T21:57:06Z","ups_name":"cyberpower","variables":{"battery.charge":"80","input.voltage":"240"}}`
+	a.HandleMessage("ups/cyberpower/state", []byte(payload), false)
+
+	dev, ok := store.Get("cyberpower")
+	if !ok {
+		t.Fatal("device cyberpower not found in store")
+	}
+	l := dev.Latest
+	// Without a computed block, derived fields must be absent (nil).
+	if l.PowerW != nil {
+		t.Errorf("PowerW should be nil when computed block is absent, got %v", *l.PowerW)
+	}
+	if l.BatteryRuntimeMins != nil {
+		t.Errorf("BatteryRuntimeMins should be nil when computed block is absent, got %v", *l.BatteryRuntimeMins)
+	}
+	if l.OnBattery != nil {
+		t.Errorf("OnBattery should be nil when computed block is absent, got %v", *l.OnBattery)
+	}
+	// Variables-derived fields must still be present.
+	if l.BatteryPct == nil || *l.BatteryPct != 80 {
+		t.Errorf("BatteryPct = %v, want 80", l.BatteryPct)
+	}
+	if l.VoltageV == nil || *l.VoltageV != 240 {
+		t.Errorf("VoltageV = %v, want 240", l.VoltageV)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "ups_readings.jsonl"))

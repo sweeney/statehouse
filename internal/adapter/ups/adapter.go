@@ -46,17 +46,19 @@ func (a *Adapter) Subscriptions() []string {
 	return []string{a.base + "/+/state"}
 }
 
+type upsComputed struct {
+	LoadWatts                *float64 `json:"load_watts"`
+	BatteryRuntimeMins       *float64 `json:"battery_runtime_mins"`
+	OnBattery                *bool    `json:"on_battery"`
+	LowBattery               *bool    `json:"low_battery"`
+	InputVoltageDeviationPct *float64 `json:"input_voltage_deviation_pct"`
+}
+
 type upsPayload struct {
 	Timestamp string            `json:"timestamp"`
 	UPSName   string            `json:"ups_name"`
 	Variables map[string]string `json:"variables"`
-	Computed  struct {
-		LoadWatts              float64 `json:"load_watts"`
-		BatteryRuntimeMins     float64 `json:"battery_runtime_mins"`
-		OnBattery              bool    `json:"on_battery"`
-		LowBattery             bool    `json:"low_battery"`
-		InputVoltageDeviationPct float64 `json:"input_voltage_deviation_pct"`
-	} `json:"computed"`
+	Computed  *upsComputed      `json:"computed"`
 }
 
 func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
@@ -93,15 +95,11 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 		}
 	}
 
-	loadW := p.Computed.LoadWatts
-	runtimeMins := p.Computed.BatteryRuntimeMins
-	onBattery := p.Computed.OnBattery
-
-	r := model.Reading{
-		Timestamp:          ts,
-		PowerW:             &loadW,
-		BatteryRuntimeMins: &runtimeMins,
-		OnBattery:          &onBattery,
+	r := model.Reading{Timestamp: ts}
+	if p.Computed != nil {
+		r.PowerW = p.Computed.LoadWatts
+		r.BatteryRuntimeMins = p.Computed.BatteryRuntimeMins
+		r.OnBattery = p.Computed.OnBattery
 	}
 	if v, ok := p.Variables["battery.charge"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {

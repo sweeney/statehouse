@@ -68,15 +68,15 @@ type meterPayload struct {
 }
 
 type glowSensorMeasurement struct {
-	Value float64 `json:"value"`
+	Value *float64 `json:"value"`
 }
 
 type glowSensorEntry struct {
-	Timestamp   string                `json:"timestamp"`
-	Temperature glowSensorMeasurement `json:"temperature"`
-	Humidity    glowSensorMeasurement `json:"humidity"`
-	Battery     glowSensorMeasurement `json:"battery"`
-	RSSI        glowSensorMeasurement `json:"rssi"`
+	Timestamp   string                 `json:"timestamp"`
+	Temperature glowSensorMeasurement  `json:"temperature"`
+	Humidity    glowSensorMeasurement  `json:"humidity"`
+	Battery     *glowSensorMeasurement `json:"battery"`
+	RSSI        *glowSensorMeasurement `json:"rssi"`
 }
 
 type glowSensorPayload struct {
@@ -147,17 +147,17 @@ func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial st
 		}
 	}
 
-	temp := entry.Temperature.Value
-	hum := entry.Humidity.Value
-	bat := entry.Battery.Value
-	rssi := int(entry.RSSI.Value)
-
 	r := model.Reading{
 		Timestamp:    ts,
-		TemperatureC: &temp,
-		HumidityPct:  &hum,
-		Battery:      &bat,
-		RSSI:         &rssi,
+		TemperatureC: entry.Temperature.Value,
+		HumidityPct:  entry.Humidity.Value,
+	}
+	if entry.Battery != nil && entry.Battery.Value != nil {
+		r.Battery = entry.Battery.Value
+	}
+	if entry.RSSI != nil && entry.RSSI.Value != nil {
+		v := int(*entry.RSSI.Value)
+		r.RSSI = &v
 	}
 
 	id := model.DeviceIdentity{Scheme: SchemeName, Primary: sensorSerial, Display: sensorSerial}

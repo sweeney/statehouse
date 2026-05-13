@@ -45,15 +45,15 @@ func (a *Adapter) Subscriptions() []string {
 }
 
 type observationPayload struct {
-	Timestamp      int64   `json:"timestamp"` // unix seconds
-	TemperatureC   float64 `json:"temperature_c"`
-	HumidityPct    float64 `json:"humidity_pct"`
-	PressureMB     float64 `json:"pressure_mb"` // mb == hPa
-	WindAvgMS      float64 `json:"wind_avg_ms"`
-	WindDirDeg     float64 `json:"wind_direction_deg"`
-	Rain1MinMM     float64 `json:"rain_1min_mm"`
-	IlluminanceLux float64 `json:"illuminance_lux"`
-	UVIndex        float64 `json:"uv_index"`
+	Timestamp      int64    `json:"timestamp"` // unix seconds
+	TemperatureC   *float64 `json:"temperature_c"`
+	HumidityPct    *float64 `json:"humidity_pct"`
+	PressureMB     *float64 `json:"pressure_mb"` // mb == hPa
+	WindAvgMS      *float64 `json:"wind_avg_ms"`
+	WindDirDeg     *float64 `json:"wind_direction_deg"`
+	Rain1MinMM     *float64 `json:"rain_1min_mm"`
+	IlluminanceLux *float64 `json:"illuminance_lux"`
+	UVIndex        *float64 `json:"uv_index"`
 }
 
 type deviceStatusPayload struct {
@@ -91,14 +91,14 @@ func (a *Adapter) handleObservation(location, topic string, payload []byte) {
 	}
 	r := model.Reading{
 		Timestamp:      ts,
-		TemperatureC:   &p.TemperatureC,
-		HumidityPct:    &p.HumidityPct,
-		PressureHPa:    &p.PressureMB,
-		WindSpeedMS:    &p.WindAvgMS,
-		WindDirDeg:     &p.WindDirDeg,
-		RainfallMM:     &p.Rain1MinMM,
-		IlluminanceLux: &p.IlluminanceLux,
-		UVIndex:        &p.UVIndex,
+		TemperatureC:   p.TemperatureC,
+		HumidityPct:    p.HumidityPct,
+		PressureHPa:    p.PressureMB,
+		WindSpeedMS:    p.WindAvgMS,
+		WindDirDeg:     p.WindDirDeg,
+		RainfallMM:     p.Rain1MinMM,
+		IlluminanceLux: p.IlluminanceLux,
+		UVIndex:        p.UVIndex,
 	}
 	id := a.identity(location)
 	a.engine.EnsureDiscovered(id, topic)

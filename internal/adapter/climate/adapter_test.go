@@ -120,6 +120,40 @@ func TestAdapter_MultipleLocations(t *testing.T) {
 	}
 }
 
+// TestAdapter_PartialObservation verifies that absent fields in a partial
+// WeatherFlow observation (e.g. a message containing only temperature and
+// humidity) do not produce false-zero readings for the missing fields.
+func TestAdapter_PartialObservation(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	partial := `{"timestamp":1778709402,"temperature_c":18.5,"humidity_pct":65.0}`
+	a.HandleMessage("climate/home/observation", []byte(partial), false)
+
+	dev, ok := store.Get("home")
+	if !ok {
+		t.Fatal("climate/home device not found in store")
+	}
+	l := dev.Latest
+	if l.TemperatureC == nil || *l.TemperatureC != 18.5 {
+		t.Errorf("TemperatureC = %v, want 18.5", l.TemperatureC)
+	}
+	if l.HumidityPct == nil || *l.HumidityPct != 65.0 {
+		t.Errorf("HumidityPct = %v, want 65.0", l.HumidityPct)
+	}
+	// Fields absent from JSON must not produce zero readings.
+	if l.PressureHPa != nil {
+		t.Errorf("PressureHPa should be nil for partial payload, got %v", *l.PressureHPa)
+	}
+	if l.WindSpeedMS != nil {
+		t.Errorf("WindSpeedMS should be nil for partial payload, got %v", *l.WindSpeedMS)
+	}
+	if l.RainfallMM != nil {
+		t.Errorf("RainfallMM should be nil for partial payload, got %v", *l.RainfallMM)
+	}
+	if l.UVIndex != nil {
+		t.Errorf("UVIndex should be nil for partial payload, got %v", *l.UVIndex)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "climate_readings.jsonl"))
