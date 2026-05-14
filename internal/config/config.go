@@ -165,12 +165,16 @@ type HouseConfig struct {
 	// Timezone names a tz database location (e.g. "Europe/London") used to
 	// classify the mode dimension's night/day hour window. Empty means UTC
 	// (back-compat for existing configs); "Local" uses the host time zone.
-	// Invalid values fall back to UTC with a warning.
+	// Load() rejects values that time.LoadLocation cannot resolve (typo,
+	// missing tzdata) with a clear error — operators see the diagnostic at
+	// startup rather than discovering it via mis-bucketed mode readings.
 	Timezone string `yaml:"timezone"`
 }
 
 // Location returns the time.Location implied by Timezone. Falls back to
-// time.UTC on parse failure.
+// time.UTC on parse failure; production configs go through Load() which
+// rejects invalid timezones up front, so this fallback only matters for
+// hand-crafted HouseConfig values in tests.
 func (h HouseConfig) Location() *time.Location {
 	if h.Timezone == "" {
 		return time.UTC
@@ -280,6 +284,11 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.MQTT.PublishPrefix == "" {
 		cfg.MQTT.PublishPrefix = "house"
+	}
+	if cfg.House.Timezone != "" {
+		if _, err := time.LoadLocation(cfg.House.Timezone); err != nil {
+			return cfg, fmt.Errorf("parse house.timezone %q: %w", cfg.House.Timezone, err)
+		}
 	}
 	if cfg.Adapters.Zigbee2MQTT.BaseTopic == "" {
 		cfg.Adapters.Zigbee2MQTT.BaseTopic = "zigbee2mqtt"
