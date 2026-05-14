@@ -209,22 +209,43 @@ func TestWriter_ActivityChangedWritesDeviceActivity(t *testing.T) {
 	}
 }
 
-func TestWriter_HouseStateChangedWritesHouseState(t *testing.T) {
+func TestWriter_HouseStateChangedWritesAllThreeDimensions(t *testing.T) {
 	w, api, _ := newWriterTest(t)
 	w.OnDerivedEvent(model.DerivedEvent{
 		Timestamp: time.Now(),
 		Type:      model.EvtHouseStateChanged,
-		Evidence:  map[string]any{"state": "active", "confidence": 0.85},
+		Evidence: map[string]any{
+			"occupancy":            "occupied",
+			"occupancy_confidence": 0.9,
+			"activity":             "active",
+			"activity_confidence":  0.8,
+			"mode":                 "day",
+			"mode_confidence":      0.75,
+		},
 	})
 	got := api.PointsForMeasurement("house_state")
 	if len(got) != 1 {
 		t.Fatalf("expected 1 house_state point, got %d", len(got))
 	}
-	if tagMap(got[0])["state"] != "active" {
-		t.Errorf("expected state=active tag, got %+v", tagMap(got[0]))
+	tags := tagMap(got[0])
+	if tags["occupancy"] != "occupied" {
+		t.Errorf("occupancy tag = %q, want occupied", tags["occupancy"])
 	}
-	if fieldMap(got[0])["confidence"] != 0.85 {
-		t.Errorf("expected confidence=0.85, got %+v", fieldMap(got[0]))
+	if tags["activity"] != "active" {
+		t.Errorf("activity tag = %q, want active", tags["activity"])
+	}
+	if tags["mode"] != "day" {
+		t.Errorf("mode tag = %q, want day", tags["mode"])
+	}
+	fields := fieldMap(got[0])
+	if fields["occupancy_confidence"] != 0.9 {
+		t.Errorf("occupancy_confidence = %v, want 0.9", fields["occupancy_confidence"])
+	}
+	if fields["activity_confidence"] != 0.8 {
+		t.Errorf("activity_confidence = %v, want 0.8", fields["activity_confidence"])
+	}
+	if fields["mode_confidence"] != 0.75 {
+		t.Errorf("mode_confidence = %v, want 0.75", fields["mode_confidence"])
 	}
 }
 
