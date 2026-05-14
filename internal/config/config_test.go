@@ -291,6 +291,75 @@ influx:
 	}
 }
 
+// TestHouseConfig_Location_EmptyReturnsUTC pins the empty-string branch.
+func TestHouseConfig_Location_EmptyReturnsUTC(t *testing.T) {
+	if loc := (HouseConfig{}).Location(); loc != time.UTC {
+		t.Errorf("empty Timezone must return UTC, got %v", loc)
+	}
+}
+
+// TestHouseConfig_Location_ValidReturnsLoaded pins the happy path.
+func TestHouseConfig_Location_ValidReturnsLoaded(t *testing.T) {
+	cfg := HouseConfig{Timezone: "Europe/London"}
+	loc := cfg.Location()
+	if loc == nil || loc.String() != "Europe/London" {
+		t.Errorf("valid timezone must resolve, got %v", loc)
+	}
+}
+
+// TestHouseConfig_Location_InvalidFallsBackToUTC pins the hand-crafted-config
+// fallback (production configs go through Load() which rejects bad tz).
+func TestHouseConfig_Location_InvalidFallsBackToUTC(t *testing.T) {
+	cfg := HouseConfig{Timezone: "Not/A/Real/Zone"}
+	if loc := cfg.Location(); loc != time.UTC {
+		t.Errorf("invalid timezone must fall back to UTC, got %v", loc)
+	}
+}
+
+// TestLoadHouseTimezoneInvalidReturnsError verifies that Load() rejects a
+// typo'd timezone with a clear error rather than silently degrading to UTC
+// at first Tick — the operator sees the diagnostic at startup.
+func TestLoadHouseTimezoneInvalidReturnsError(t *testing.T) {
+	yaml := `
+house:
+  timezone: "Europe/Lonon"
+`
+	path := writeTempYAML(t, yaml)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid house.timezone, got nil")
+	}
+	if !contains(err.Error(), "Europe/Lonon") {
+		t.Errorf("expected error to name the bad timezone, got %q", err.Error())
+	}
+}
+
+// TestLoadHouseTimezoneValidIsAccepted verifies that a valid timezone passes
+// validation and is preserved on the loaded config.
+func TestLoadHouseTimezoneValidIsAccepted(t *testing.T) {
+	yaml := `
+house:
+  timezone: "America/Los_Angeles"
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error for valid timezone: %v", err)
+	}
+	if cfg.House.Timezone != "America/Los_Angeles" {
+		t.Errorf("expected timezone preserved, got %q", cfg.House.Timezone)
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 // TestLoadExplicitSchemeBeatsLegacyShorthand verifies that when a device has
 // both scheme/primary set AND legacy ieee_address/ieee fields, the explicit
 // scheme and primary fields are preserved.
