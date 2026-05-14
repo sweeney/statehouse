@@ -280,6 +280,56 @@ func TestDeriveHouseState_ActiveDevicesList(t *testing.T) {
 	}
 }
 
+// TestDeriveHouseState_ModeNight_HonoursConfiguredTimezone verifies that
+// the night-hour classification uses the operator's configured timezone
+// rather than UTC. 23:00 local in San Francisco is 06:00 UTC the next day —
+// without honouring the timezone the mode would resolve to Day.
+func TestDeriveHouseState_ModeNight_HonoursConfiguredTimezone(t *testing.T) {
+	pacific, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Skipf("tz database unavailable: %v", err)
+	}
+	cfg := config.HouseConfig{
+		QuietAfter:    30 * time.Minute,
+		EmptyAfter:    2 * time.Hour,
+		SleepingAfter: 4 * time.Hour, // longer than elapsed → not sleeping
+		Timezone:      "America/Los_Angeles",
+	}
+
+	// 23:00 Pacific is night-local but day-UTC.
+	nowLocal := time.Date(2026, 5, 14, 23, 0, 0, 0, pacific)
+	lastActive := nowLocal.Add(-5 * time.Minute)
+	devices := map[string]model.Device{
+		"kettle": {
+			ID:    "kettle",
+			Class: device.ClassShortBurst,
+			Activity: model.Activity{
+				State:       model.ActivityIdle,
+				LastChanged: lastActive,
+				Confidence:  0.9,
+			},
+			Latest: model.Latest{LastSeen: lastActive},
+		},
+	}
+
+	h := DeriveHouseState(nowLocal, cfg, devices)
+	if h.Occupancy.State != model.OccupancyOccupied {
+		t.Fatalf("expected OccupancyOccupied 5min after activity, got %q", h.Occupancy.State)
+	}
+	if h.Mode.State != model.ModeNight {
+		t.Errorf("expected ModeNight at 23:00 Pacific (06:00 UTC), got %q", h.Mode.State)
+	}
+}
+
+// TestHouseConfig_LocationFallback asserts that an invalid timezone string
+// falls back to UTC rather than panicking.
+func TestHouseConfig_LocationFallback(t *testing.T) {
+	cfg := config.HouseConfig{Timezone: "Not/A/Real/Zone"}
+	if loc := cfg.Location(); loc != time.UTC {
+		t.Errorf("expected UTC fallback for invalid tz, got %v", loc)
+	}
+}
+
 // TestDeviceActivityStates_AreExhaustivelyClassified asserts that every
 // declared DeviceActivityState is bucketed by isActiveDeviceState or
 // isIdleDeviceState. Adding a new state without classifying it breaks

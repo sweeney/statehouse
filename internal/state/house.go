@@ -148,8 +148,12 @@ func DeriveHouseState(now time.Time, cfg config.HouseConfig, devices map[string]
 	if !mostRecentActivity.IsZero() {
 		quietDuration = now.Sub(mostRecentActivity)
 	}
-	nightHour := now.Hour() >= 22 || now.Hour() < 7
-	dayHour := now.Hour() >= 7 && now.Hour() < 22
+	// Classify in the operator's configured timezone (defaults to UTC for
+	// back-compat). Non-UTC operators previously got their mode dimension
+	// fired at the wrong wall-clock hours.
+	localHour := now.In(cfg.Location()).Hour()
+	nightHour := localHour >= 22 || localHour < 7
+	dayHour := localHour >= 7 && localHour < 22
 
 	var mode model.ModeDimension
 	switch {
