@@ -113,7 +113,8 @@ func main() {
 	broker := flag.String("broker", "tcp://localhost:1883", "MQTT broker URL")
 	clientID := flag.String("client-id", "statehouse-fixture-capture", "MQTT client ID")
 	username := flag.String("username", "", "MQTT username (optional)")
-	password := flag.String("password", "", "MQTT password (optional)")
+	password := flag.String("password", "", "MQTT password (optional, visible in ps; prefer -password-file or MQTT_PASSWORD)")
+	passwordFile := flag.String("password-file", "", "read MQTT password from this file (newline trimmed)")
 	topics := flag.String("topics", "zigbee2mqtt/#", "Comma-separated list of MQTT topic filters to subscribe to")
 	output := flag.String("output", "", `Output JSONL file; "-" or empty writes to stdout`)
 	duration := flag.Duration("duration", 0, "Capture duration (0 = until SIGINT/SIGTERM)")
@@ -122,6 +123,20 @@ func main() {
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	pw := *password
+	if pw != "" {
+		fmt.Fprintln(os.Stderr, "warning: -password flag is visible in process list; prefer -password-file or MQTT_PASSWORD env var")
+	} else if *passwordFile != "" {
+		b, err := os.ReadFile(*passwordFile)
+		if err != nil {
+			logger.Error("reading password file", "error", err)
+			os.Exit(1)
+		}
+		pw = strings.TrimRight(string(b), "\r\n")
+	} else if env := os.Getenv("MQTT_PASSWORD"); env != "" {
+		pw = env
+	}
 
 	out, file, err := openOutput(*output)
 	if err != nil {
@@ -229,7 +244,7 @@ func main() {
 		SetConnectionLostHandler(onLost)
 	if *username != "" {
 		opts.SetUsername(*username)
-		opts.SetPassword(*password)
+		opts.SetPassword(pw)
 	}
 
 	client := paho.NewClient(opts)
