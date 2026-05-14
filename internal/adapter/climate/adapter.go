@@ -13,26 +13,14 @@ package climate
 import (
 	"encoding/json"
 	"log/slog"
-	"math"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/sweeney/statehouse/internal/adapter/timeutil"
+	"github.com/sweeney/statehouse/internal/adapter/validate"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
-
-// finiteInRange returns true when v is a finite number in [lo, hi].
-func finiteInRange(v float64, lo, hi float64) bool {
-	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi
-}
-
-// reLocation accepts alphanumeric, underscore, and dash identifiers of 1–64 chars.
-var reLocation = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
-
-// validLocation returns true when s matches the expected location format.
-func validLocation(s string) bool { return reLocation.MatchString(s) }
 
 const SchemeName = "climate"
 
@@ -105,28 +93,28 @@ func (a *Adapter) handleObservation(location, topic string, payload []byte) {
 		ts = timeutil.UnixSeconds(p.Timestamp, now)
 	}
 	r := model.Reading{Timestamp: ts}
-	if p.TemperatureC != nil && finiteInRange(*p.TemperatureC, -50, 80) {
+	if p.TemperatureC != nil && validate.FiniteInRange(*p.TemperatureC, -50, 80) {
 		r.TemperatureC = p.TemperatureC
 	}
-	if p.HumidityPct != nil && finiteInRange(*p.HumidityPct, 0, 100) {
+	if p.HumidityPct != nil && validate.FiniteInRange(*p.HumidityPct, 0, 100) {
 		r.HumidityPct = p.HumidityPct
 	}
-	if p.PressureMB != nil && finiteInRange(*p.PressureMB, 800, 1100) {
+	if p.PressureMB != nil && validate.FiniteInRange(*p.PressureMB, 800, 1100) {
 		r.PressureHPa = p.PressureMB
 	}
-	if p.WindAvgMS != nil && finiteInRange(*p.WindAvgMS, 0, 120) {
+	if p.WindAvgMS != nil && validate.FiniteInRange(*p.WindAvgMS, 0, 120) {
 		r.WindSpeedMS = p.WindAvgMS
 	}
-	if p.WindDirDeg != nil && finiteInRange(*p.WindDirDeg, 0, 360) {
+	if p.WindDirDeg != nil && validate.FiniteInRange(*p.WindDirDeg, 0, 360) {
 		r.WindDirDeg = p.WindDirDeg
 	}
-	if p.Rain1MinMM != nil && finiteInRange(*p.Rain1MinMM, 0, 1000) {
+	if p.Rain1MinMM != nil && validate.FiniteInRange(*p.Rain1MinMM, 0, 1000) {
 		r.RainfallMM = p.Rain1MinMM
 	}
 	if p.IlluminanceLux != nil {
 		r.IlluminanceLux = p.IlluminanceLux
 	}
-	if p.UVIndex != nil && finiteInRange(*p.UVIndex, 0, 20) {
+	if p.UVIndex != nil && validate.FiniteInRange(*p.UVIndex, 0, 20) {
 		r.UVIndex = p.UVIndex
 	}
 	id := a.identity(location)
@@ -171,7 +159,7 @@ func parseClimateTopic(base, topic string) (location, subtype string) {
 		return "", "" // no subtype
 	}
 	loc := rest[:slash]
-	if !validLocation(loc) {
+	if !validate.Identifier(loc) {
 		return "", ""
 	}
 	return loc, rest[slash+1:]
