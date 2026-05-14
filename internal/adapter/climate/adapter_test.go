@@ -216,6 +216,34 @@ func TestAdapter_UnixMsTimestampRejected(t *testing.T) {
 	}
 }
 
+// TestAdapter_OutOfRangeObservationFieldsAreNil verifies that observation fields
+// exceeding their bounds are silently omitted rather than accepted.
+func TestAdapter_OutOfRangeObservationFieldsAreNil(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	// temperature=150 exceeds [-50,80]; pressure=500 is below [800,1100]; uv_index=25 exceeds [0,20].
+	// humidity=92.8 is valid and should be accepted.
+	payload := `{"timestamp":1778709402,"temperature_c":150,"humidity_pct":92.8,"pressure_mb":500,"uv_index":25}`
+	a.HandleMessage("climate/home/observation", []byte(payload), false)
+
+	dev, ok := store.Get("home")
+	if !ok {
+		t.Fatal("climate/home device not found in store")
+	}
+	l := dev.Latest
+	if l.TemperatureC != nil {
+		t.Errorf("TemperatureC should be nil for out-of-range value, got %v", *l.TemperatureC)
+	}
+	if l.HumidityPct == nil || *l.HumidityPct != 92.8 {
+		t.Errorf("HumidityPct = %v, want 92.8 (valid value should be accepted)", l.HumidityPct)
+	}
+	if l.PressureHPa != nil {
+		t.Errorf("PressureHPa should be nil for out-of-range value, got %v", *l.PressureHPa)
+	}
+	if l.UVIndex != nil {
+		t.Errorf("UVIndex should be nil for out-of-range value, got %v", *l.UVIndex)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "climate_readings.jsonl"))

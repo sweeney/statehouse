@@ -16,6 +16,7 @@ package meter
 import (
 	"encoding/json"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -23,6 +24,11 @@ import (
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
+
+// finiteInRange returns true when v is a finite number in [lo, hi].
+func finiteInRange(v float64, lo, hi float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi
+}
 
 const SchemeName = "meter"
 
@@ -118,10 +124,12 @@ func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
 	importKWh := p.ElectricityMeter.Energy.Import.Cumulative
 	powerW := p.ElectricityMeter.Power.Value * 1000
 
-	r := model.Reading{
-		Timestamp: ts,
-		EnergyKWh: &importKWh,
-		PowerW:    &powerW,
+	r := model.Reading{Timestamp: ts}
+	if finiteInRange(importKWh, 0, 1e9) {
+		r.EnergyKWh = &importKWh
+	}
+	if finiteInRange(powerW, -50_000, 200_000) {
+		r.PowerW = &powerW
 	}
 
 	id := model.DeviceIdentity{Scheme: SchemeName, Primary: serial, Display: serial}
@@ -150,15 +158,17 @@ func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial st
 		}
 	}
 
-	r := model.Reading{
-		Timestamp:    ts,
-		TemperatureC: entry.Temperature.Value,
-		HumidityPct:  entry.Humidity.Value,
+	r := model.Reading{Timestamp: ts}
+	if entry.Temperature.Value != nil && finiteInRange(*entry.Temperature.Value, -50, 80) {
+		r.TemperatureC = entry.Temperature.Value
 	}
-	if entry.Battery != nil && entry.Battery.Value != nil {
+	if entry.Humidity.Value != nil && finiteInRange(*entry.Humidity.Value, 0, 100) {
+		r.HumidityPct = entry.Humidity.Value
+	}
+	if entry.Battery != nil && entry.Battery.Value != nil && finiteInRange(*entry.Battery.Value, 0, 100) {
 		r.Battery = entry.Battery.Value
 	}
-	if entry.RSSI != nil && entry.RSSI.Value != nil {
+	if entry.RSSI != nil && entry.RSSI.Value != nil && finiteInRange(*entry.RSSI.Value, -150, 0) {
 		v := int(*entry.RSSI.Value)
 		r.RSSI = &v
 	}

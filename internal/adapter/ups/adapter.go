@@ -11,6 +11,7 @@ package ups
 import (
 	"encoding/json"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,11 @@ import (
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
+
+// finiteInRange returns true when v is a finite number in [lo, hi].
+func finiteInRange(v float64, lo, hi float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi
+}
 
 const SchemeName = "ups"
 
@@ -99,17 +105,21 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 
 	r := model.Reading{Timestamp: ts}
 	if p.Computed != nil {
-		r.PowerW = p.Computed.LoadWatts
-		r.BatteryRuntimeMins = p.Computed.BatteryRuntimeMins
+		if p.Computed.LoadWatts != nil && finiteInRange(*p.Computed.LoadWatts, -50_000, 200_000) {
+			r.PowerW = p.Computed.LoadWatts
+		}
+		if p.Computed.BatteryRuntimeMins != nil && finiteInRange(*p.Computed.BatteryRuntimeMins, 0, 100_000) {
+			r.BatteryRuntimeMins = p.Computed.BatteryRuntimeMins
+		}
 		r.OnBattery = p.Computed.OnBattery
 	}
 	if v, ok := p.Variables["battery.charge"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && finiteInRange(f, 0, 100) {
 			r.Battery = &f
 		}
 	}
 	if v, ok := p.Variables["input.voltage"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && finiteInRange(f, 0, 600) {
 			r.VoltageV = &f
 		}
 	}

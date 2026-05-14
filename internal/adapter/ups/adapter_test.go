@@ -166,6 +166,27 @@ func TestAdapter_FutureTimestampRejected(t *testing.T) {
 	}
 }
 
+// TestAdapter_OutOfRangePowerIsNil verifies that an out-of-range load_watts value
+// is rejected and PowerW is left nil rather than accepting garbage data.
+func TestAdapter_OutOfRangePowerIsNil(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	// load_watts=1e15 is far outside the [-50_000, 200_000] bounds.
+	payload := `{"timestamp":"2026-05-13T21:57:06Z","ups_name":"cyberpower","variables":{},"computed":{"load_watts":1e15,"battery_runtime_mins":74.5,"on_battery":false}}`
+	a.HandleMessage("ups/cyberpower/state", []byte(payload), false)
+
+	dev, ok := store.Get("cyberpower")
+	if !ok {
+		t.Fatal("device cyberpower not found in store")
+	}
+	if dev.Latest.PowerW != nil {
+		t.Errorf("PowerW should be nil for out-of-range value, got %v", *dev.Latest.PowerW)
+	}
+	// BatteryRuntimeMins should still be accepted (within bounds).
+	if dev.Latest.BatteryRuntimeMins == nil || *dev.Latest.BatteryRuntimeMins != 74.5 {
+		t.Errorf("BatteryRuntimeMins = %v, want 74.5", dev.Latest.BatteryRuntimeMins)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "ups_readings.jsonl"))

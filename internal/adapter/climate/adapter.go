@@ -13,6 +13,7 @@ package climate
 import (
 	"encoding/json"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -20,6 +21,11 @@ import (
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
+
+// finiteInRange returns true when v is a finite number in [lo, hi].
+func finiteInRange(v float64, lo, hi float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi
+}
 
 const SchemeName = "climate"
 
@@ -91,16 +97,30 @@ func (a *Adapter) handleObservation(location, topic string, payload []byte) {
 	if p.Timestamp != 0 {
 		ts = timeutil.UnixSeconds(p.Timestamp, now)
 	}
-	r := model.Reading{
-		Timestamp:      ts,
-		TemperatureC:   p.TemperatureC,
-		HumidityPct:    p.HumidityPct,
-		PressureHPa:    p.PressureMB,
-		WindSpeedMS:    p.WindAvgMS,
-		WindDirDeg:     p.WindDirDeg,
-		RainfallMM:     p.Rain1MinMM,
-		IlluminanceLux: p.IlluminanceLux,
-		UVIndex:        p.UVIndex,
+	r := model.Reading{Timestamp: ts}
+	if p.TemperatureC != nil && finiteInRange(*p.TemperatureC, -50, 80) {
+		r.TemperatureC = p.TemperatureC
+	}
+	if p.HumidityPct != nil && finiteInRange(*p.HumidityPct, 0, 100) {
+		r.HumidityPct = p.HumidityPct
+	}
+	if p.PressureMB != nil && finiteInRange(*p.PressureMB, 800, 1100) {
+		r.PressureHPa = p.PressureMB
+	}
+	if p.WindAvgMS != nil && finiteInRange(*p.WindAvgMS, 0, 120) {
+		r.WindSpeedMS = p.WindAvgMS
+	}
+	if p.WindDirDeg != nil && finiteInRange(*p.WindDirDeg, 0, 360) {
+		r.WindDirDeg = p.WindDirDeg
+	}
+	if p.Rain1MinMM != nil && finiteInRange(*p.Rain1MinMM, 0, 1000) {
+		r.RainfallMM = p.Rain1MinMM
+	}
+	if p.IlluminanceLux != nil {
+		r.IlluminanceLux = p.IlluminanceLux
+	}
+	if p.UVIndex != nil && finiteInRange(*p.UVIndex, 0, 20) {
+		r.UVIndex = p.UVIndex
 	}
 	id := a.identity(location)
 	a.engine.EnsureDiscovered(id, topic)

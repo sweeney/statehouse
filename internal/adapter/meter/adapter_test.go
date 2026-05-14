@@ -193,6 +193,42 @@ func TestAdapter_FutureGlowSensorTimestampRejected(t *testing.T) {
 	}
 }
 
+// TestAdapter_OutOfRangePowerIsNil verifies that an extreme power value (1e308 kW)
+// is rejected by the bounds check and PowerW is left nil.
+func TestAdapter_OutOfRangePowerIsNil(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","energy":{"import":{"cumulative":100.0}},"power":{"value":1e308}}}`
+	a.HandleMessage("energy/AABBCCDDEEFF/SENSOR/electricitymeter", []byte(payload), false)
+
+	dev, ok := store.Get("AABBCCDDEEFF")
+	if !ok {
+		t.Fatal("meter device not found in store")
+	}
+	if dev.Latest.PowerW != nil {
+		t.Errorf("PowerW should be nil for out-of-range value, got %v", *dev.Latest.PowerW)
+	}
+}
+
+// TestAdapter_OutOfRangeGlowSensorFieldsAreNil verifies that out-of-range glow
+// sensor fields are silently omitted rather than accepted.
+func TestAdapter_OutOfRangeGlowSensorFieldsAreNil(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	// temperature=200 exceeds [-50,80], humidity=-5 is below [0,100].
+	payload := `{"glowsensorth1":{"040D00000000":{"timestamp":"2026-05-13T23:03:55Z","temperature":{"value":200},"humidity":{"value":-5}}}}`
+	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/040D00000000", []byte(payload), false)
+
+	dev, ok := store.Get("040D00000000")
+	if !ok {
+		t.Fatal("glow sensor device not found in store")
+	}
+	if dev.Latest.TemperatureC != nil {
+		t.Errorf("TemperatureC should be nil for out-of-range value, got %v", *dev.Latest.TemperatureC)
+	}
+	if dev.Latest.HumidityPct != nil {
+		t.Errorf("HumidityPct should be nil for out-of-range value, got %v", *dev.Latest.HumidityPct)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "meter_readings.jsonl"))
