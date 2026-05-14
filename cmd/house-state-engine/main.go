@@ -107,7 +107,7 @@ func main() {
 	engine.AddCanonicalSink(influxWriter)
 	engine.AddDerivedSink(influxWriter)
 
-	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger)
+	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger, cfg.DeviceClasses)
 	engine.AddCanonicalSink(api)
 	engine.AddDerivedSink(api)
 

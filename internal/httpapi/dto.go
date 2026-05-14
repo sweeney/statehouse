@@ -189,11 +189,16 @@ type CycleResponse struct {
 }
 
 // buildSnapshot converts a model.Snapshot into a SnapshotResponse. now is used
-// to compute age/staleness so tests can inject a fixed value.
-func buildSnapshot(snap model.Snapshot, now time.Time) SnapshotResponse {
+// to compute age/staleness so tests can inject a fixed value. lookupStaleness
+// returns the per-class override (nil → class default); pass a no-op if not
+// needed.
+func buildSnapshot(snap model.Snapshot, now time.Time, lookupStaleness func(class string) *int) SnapshotResponse {
+	if lookupStaleness == nil {
+		lookupStaleness = func(string) *int { return nil }
+	}
 	devices := make(map[string]DeviceResponse, len(snap.Devices))
 	for id, d := range snap.Devices {
-		devices[id] = buildDeviceResponse(d, now, nil)
+		devices[id] = buildDeviceResponse(d, now, lookupStaleness(d.Class))
 	}
 
 	summary := buildSummary(devices)
