@@ -253,6 +253,9 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) D
 	if stale {
 		warnings = append(warnings, "stale_device")
 	}
+	if d.Cycle != nil && d.Cycle.Energy.DivergenceWarning {
+		warnings = append(warnings, "cycle_divergence")
+	}
 
 	return DeviceResponse{
 		ID:           d.ID,

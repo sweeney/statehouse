@@ -415,6 +415,78 @@ func TestSnapshot_Summary(t *testing.T) {
 	}
 }
 
+func TestSnapshot_CycleDivergenceWarningInWarnings(t *testing.T) {
+	// A finished cycle with DivergenceWarning=true must surface "cycle_divergence"
+	// in device.Warnings so the summary warning_count picks it up.
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	finished := now.Add(-2 * time.Minute)
+	d := freshDevice("d1", "cycle_power_device")
+	d.Cycle = &model.Cycle{
+		Active:          false,
+		StartedAt:       now.Add(-10 * time.Minute),
+		FinishedAt:      &finished,
+		DurationSeconds: 480,
+		Energy: model.CycleEnergy{
+			PrimarySource:     "integration",
+			ReportedKWhDelta:  0,
+			IntegratedKWh:     0.007,
+			SelectedKWh:       0.007,
+			DivergencePct:     100,
+			DivergenceWarning: true,
+		},
+	}
+	snap := makeDeviceSnap(d)
+	resp := buildSnapshot(snap, now)
+
+	dev := resp.Devices["d1"]
+	found := false
+	for _, w := range dev.Warnings {
+		if w == "cycle_divergence" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected cycle_divergence in warnings, got %v", dev.Warnings)
+	}
+	if resp.Summary.WarningCount != 1 {
+		t.Errorf("expected warning_count=1 for cycle_divergence device, got %d", resp.Summary.WarningCount)
+	}
+}
+
+func TestSnapshot_CycleDivergenceNotFlaggedWhenOK(t *testing.T) {
+	// A finished cycle with DivergenceWarning=false must NOT add "cycle_divergence"
+	// to warnings.
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	finished := now.Add(-2 * time.Minute)
+	d := freshDevice("d1", "cycle_power_device")
+	d.Cycle = &model.Cycle{
+		Active:          false,
+		StartedAt:       now.Add(-10 * time.Minute),
+		FinishedAt:      &finished,
+		DurationSeconds: 480,
+		Energy: model.CycleEnergy{
+			PrimarySource:     "counter",
+			ReportedKWhDelta:  0.1,
+			IntegratedKWh:     0.105,
+			SelectedKWh:       0.1,
+			DivergencePct:     4.8,
+			DivergenceWarning: false,
+		},
+	}
+	snap := makeDeviceSnap(d)
+	resp := buildSnapshot(snap, now)
+
+	dev := resp.Devices["d1"]
+	for _, w := range dev.Warnings {
+		if w == "cycle_divergence" {
+			t.Errorf("must NOT add cycle_divergence warning when DivergenceWarning=false, got %v", dev.Warnings)
+		}
+	}
+	if resp.Summary.WarningCount != 0 {
+		t.Errorf("expected warning_count=0, got %d", resp.Summary.WarningCount)
+	}
+}
+
 func TestSnapshot_CompressorCycleType(t *testing.T) {
 	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 	started := now.Add(-5 * time.Minute)

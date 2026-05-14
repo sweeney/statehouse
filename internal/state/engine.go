@@ -262,8 +262,11 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			cc := *outcome.Cycle
 			ent.Device.Cycle = &cc
 		}
-		// Divergence check on cycle completion.
-		if outcome.CycleFinished && ent.Device.Cycle != nil {
+		// Divergence check on cycle completion — only meaningful when the
+		// device reported a counter delta; if ReportedKWhDelta is zero the
+		// device has no energy counter and integration is the only source.
+		if outcome.CycleFinished && ent.Device.Cycle != nil &&
+			ent.Device.Cycle.Energy.ReportedKWhDelta > 0 {
 			pct := energy.DivergencePct(ent.Device.Cycle.Energy.ReportedKWhDelta, ent.Device.Cycle.Energy.IntegratedKWh)
 			if pct >= e.cfg.Energy.DivergenceWarningPct {
 				ent.Runtime.MarkDivergence(pct)

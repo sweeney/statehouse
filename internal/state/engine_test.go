@@ -139,24 +139,54 @@ func TestEngine_AvailabilityDebounce(t *testing.T) {
 }
 
 func TestEngine_DivergenceWarning(t *testing.T) {
+	// Device reports a counter jump of 1 kWh but the run was only a few
+	// seconds — counter-vs-integration divergence must exceed 20% and
+	// fire an energy_divergence_warning event.
 	engine, _, col, clock := mkEngine()
 	t0 := clock.Now()
 	id := zid("0x00158d0000000001", "kitchen_dishwasher")
+	// t0: first high-power reading starts the candidate (no counter yet).
 	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
-		model.Reading{Timestamp: t0, EnergyKWh: ptr(100.0)})
+		model.Reading{Timestamp: t0, PowerW: ptr(50.0)})
+	// t0+2s: sustained → cycle starts; counter baseline seeded at 100.
 	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: t0.Add(2 * time.Second), PowerW: ptr(50.0), EnergyKWh: ptr(100.0)})
+	// t0+3s: power drops, counter shows 1 kWh jump → candidate for end.
 	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
-		model.Reading{Timestamp: t0.Add(2 * time.Hour), PowerW: ptr(50.0), EnergyKWh: ptr(101.0)})
+		model.Reading{Timestamp: t0.Add(3 * time.Second), PowerW: ptr(1.0), EnergyKWh: ptr(101.0)})
+	// t0+5s: sustained below idle → cycle finishes.
+	// Integration ≈ 50W×1s + 1W×2s ≈ 1.6e-5 kWh; counter delta = 1 kWh → ~100% divergence.
 	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
-		model.Reading{Timestamp: t0.Add(2*time.Hour + time.Second), PowerW: ptr(1.0), EnergyKWh: ptr(101.0)})
-	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
-		model.Reading{Timestamp: t0.Add(2*time.Hour + 30*time.Second), PowerW: ptr(1.0), EnergyKWh: ptr(101.0)})
+		model.Reading{Timestamp: t0.Add(5 * time.Second), PowerW: ptr(1.0), EnergyKWh: ptr(101.0)})
 	if _, ok := col.findDerived(model.EvtCycleFinished); !ok {
 		t.Fatalf("expected cycle_finished event, derived=%v", col.derived)
 	}
 	if _, ok := col.findDerived(model.EvtEnergyDivergenceWarning); !ok {
 		t.Fatalf("expected energy_divergence_warning, derived=%v", col.derived)
+	}
+}
+
+func TestEngine_NoDivergenceWhenNoCounterData(t *testing.T) {
+	// Devices like chestfreezer/wine-fridge have no energy counter — they
+	// never report EnergyKWh. ReportedKWhDelta stays 0 and the divergence
+	// check must NOT fire: there is no counter to compare integration against.
+	engine, _, col, clock := mkEngine()
+	t0 := clock.Now()
+	id := zid("0x00158d0000000001", "kitchen_dishwasher")
+	// Drive a complete cycle with power readings only — no EnergyKWh.
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
+		model.Reading{Timestamp: t0, PowerW: ptr(50.0)})
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
+		model.Reading{Timestamp: t0.Add(2 * time.Second), PowerW: ptr(50.0)})
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
+		model.Reading{Timestamp: t0.Add(3 * time.Second), PowerW: ptr(1.0)})
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
+		model.Reading{Timestamp: t0.Add(5 * time.Second), PowerW: ptr(1.0)})
+	if _, ok := col.findDerived(model.EvtCycleFinished); !ok {
+		t.Fatalf("expected cycle_finished event, derived=%v", col.derived)
+	}
+	if _, ok := col.findDerived(model.EvtEnergyDivergenceWarning); ok {
+		t.Fatalf("must NOT emit divergence warning when device has no energy counter")
 	}
 }
 
