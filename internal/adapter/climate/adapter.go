@@ -71,8 +71,8 @@ type observationPayload struct {
 }
 
 type deviceStatusPayload struct {
-	Timestamp int64   `json:"timestamp"`
-	RSSI      int     `json:"rssi_dbm"`
+	Timestamp int64 `json:"timestamp"`
+	RSSI      *int  `json:"rssi_dbm"`
 }
 
 func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
@@ -147,7 +147,7 @@ func (a *Adapter) handleDeviceStatus(location, topic string, payload []byte) {
 	if p.Timestamp != 0 {
 		ts = timeutil.UnixSeconds(p.Timestamp, now)
 	}
-	r := model.Reading{Timestamp: ts, RSSI: &p.RSSI}
+	r := model.Reading{Timestamp: ts, RSSI: p.RSSI}
 	id := a.identity(location)
 	a.engine.EnsureDiscovered(id, topic)
 	a.engine.IngestReading(id, topic, r)

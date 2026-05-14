@@ -249,6 +249,29 @@ func TestAdapter_MalformedSerialIsRejected(t *testing.T) {
 	}
 }
 
+func TestAdapter_MeterPartialPayloadNoPower(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","energy":{"import":{"cumulative":6252.217}}}}`
+	a.HandleMessage("energy/AABBCCDDEEFF/SENSOR/electricitymeter", []byte(payload), false)
+	dev, _ := store.Get("AABBCCDDEEFF")
+	if dev.Latest.PowerW != nil {
+		t.Errorf("PowerW should be nil when power.value absent, got %v", *dev.Latest.PowerW)
+	}
+	if dev.Latest.EnergyKWh == nil || *dev.Latest.EnergyKWh != 6252.217 {
+		t.Errorf("EnergyKWh should be 6252.217, got %v", dev.Latest.EnergyKWh)
+	}
+}
+
+func TestAdapter_MeterPartialPayloadNoCumulative(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","power":{"value":1.011}}}`
+	a.HandleMessage("energy/AABBCCDDEEFF/SENSOR/electricitymeter", []byte(payload), false)
+	dev, _ := store.Get("AABBCCDDEEFF")
+	if dev.Latest.EnergyKWh != nil {
+		t.Errorf("EnergyKWh should be nil when cumulative absent, got %v", *dev.Latest.EnergyKWh)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "meter_readings.jsonl"))

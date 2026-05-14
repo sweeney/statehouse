@@ -257,6 +257,22 @@ func TestAdapter_MalformedLocationIsRejected(t *testing.T) {
 	}
 }
 
+// TestAdapter_DeviceStatusWithoutRSSI verifies that a device/status payload
+// lacking rssi_dbm does not produce a false-zero RSSI reading.
+func TestAdapter_DeviceStatusWithoutRSSI(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"timestamp":1778709402}`
+	a.HandleMessage("climate/home/device/status", []byte(payload), false)
+
+	dev, ok := store.Get("home")
+	if !ok {
+		t.Fatal("climate/home device not found after device/status")
+	}
+	if dev.Latest.RSSI != nil {
+		t.Errorf("RSSI should be nil when rssi_dbm absent, got %v", *dev.Latest.RSSI)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "climate_readings.jsonl"))

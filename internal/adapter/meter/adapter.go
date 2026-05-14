@@ -72,11 +72,11 @@ type meterPayload struct {
 		Timestamp string `json:"timestamp"`
 		Energy    struct {
 			Import struct {
-				Cumulative float64 `json:"cumulative"`
+				Cumulative *float64 `json:"cumulative"`
 			} `json:"import"`
 		} `json:"energy"`
 		Power struct {
-			Value float64 `json:"value"` // kW
+			Value *float64 `json:"value"` // kW
 		} `json:"power"`
 	} `json:"electricitymeter"`
 }
@@ -128,15 +128,15 @@ func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
 		}
 	}
 
-	importKWh := p.ElectricityMeter.Energy.Import.Cumulative
-	powerW := p.ElectricityMeter.Power.Value * 1000
-
 	r := model.Reading{Timestamp: ts}
-	if finiteInRange(importKWh, 0, 1e9) {
-		r.EnergyKWh = &importKWh
+	if v := p.ElectricityMeter.Energy.Import.Cumulative; v != nil && finiteInRange(*v, 0, 1e9) {
+		r.EnergyKWh = v
 	}
-	if finiteInRange(powerW, -50_000, 200_000) {
-		r.PowerW = &powerW
+	if v := p.ElectricityMeter.Power.Value; v != nil {
+		pw := *v * 1000
+		if finiteInRange(pw, -50_000, 200_000) {
+			r.PowerW = &pw
+		}
 	}
 
 	id := model.DeviceIdentity{Scheme: SchemeName, Primary: serial, Display: serial}
