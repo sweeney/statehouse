@@ -310,7 +310,7 @@ func TestFirstLowPowerReadingResolvesUnknown(t *testing.T) {
 		name      string
 		class     string
 		powerW    float64
-		wantAct   model.ActivityState
+		wantAct   model.DeviceActivityState
 		wantCycle bool // CycleStarted should be true for the "active" sub-cases
 	}
 	cases := []tc{
