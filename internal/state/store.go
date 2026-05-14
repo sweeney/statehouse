@@ -43,7 +43,11 @@ func NewStore() *Store {
 		dev:       make(map[string]*deviceEntry),
 		byPrimary: make(map[string]string),
 		byDisplay: make(map[string]string),
-		house:     model.House{State: model.HouseUnknown},
+		house: model.House{
+			Occupancy: model.OccupancyDimension{State: model.OccupancyUnknown},
+			Activity:  model.HouseActivityDimension{State: model.HouseActivityUnknown},
+			Mode:      model.ModeDimension{State: model.ModeUnknown},
+		},
 	}
 }
 
@@ -188,15 +192,29 @@ func (s *Store) withEntry(id string, fn func(*deviceEntry)) bool {
 }
 
 // setHouse atomically replaces the whole-house state. Returns true if
-// the state value changed.
+// any dimension's state changed.
 func (s *Store) setHouse(h model.House) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed := s.house.State != h.State
-	if changed {
-		h.LastChanged = time.Now().UTC()
+	now := time.Now().UTC()
+	changed := false
+	if s.house.Occupancy.State != h.Occupancy.State {
+		h.Occupancy.LastChanged = now
+		changed = true
 	} else {
-		h.LastChanged = s.house.LastChanged
+		h.Occupancy.LastChanged = s.house.Occupancy.LastChanged
+	}
+	if s.house.Activity.State != h.Activity.State {
+		h.Activity.LastChanged = now
+		changed = true
+	} else {
+		h.Activity.LastChanged = s.house.Activity.LastChanged
+	}
+	if s.house.Mode.State != h.Mode.State {
+		h.Mode.LastChanged = now
+		changed = true
+	} else {
+		h.Mode.LastChanged = s.house.Mode.LastChanged
 	}
 	s.house = h
 	return changed

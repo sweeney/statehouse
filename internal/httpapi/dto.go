@@ -11,7 +11,7 @@ const schemaVersion = "net.swee.statehouse.snapshot.v1"
 
 // activeActivityStates is the set of activity states that count as "active"
 // for the summary's ActiveCount.
-var activeActivityStates = map[model.ActivityState]bool{
+var activeActivityStates = map[model.DeviceActivityState]bool{
 	model.ActivityActive:      true,
 	model.ActivityStarting:    true,
 	model.ActivityRunning:     true,
@@ -73,12 +73,32 @@ type SummaryResponse struct {
 	WarningCount int `json:"warning_count"`
 }
 
+// HouseOccupancyResponse is the DTO for the occupancy dimension.
+type HouseOccupancyResponse struct {
+	State       model.OccupancyState `json:"state"`
+	Confidence  float64              `json:"confidence"`
+	LastChanged *time.Time           `json:"last_changed"`
+}
+
+// HouseActivityResponse is the DTO for the house activity dimension.
+type HouseActivityResponse struct {
+	State       model.HouseActivityState `json:"state"`
+	Confidence  float64                  `json:"confidence"`
+	LastChanged *time.Time               `json:"last_changed"`
+}
+
+// HouseModeResponse is the DTO for the mode dimension.
+type HouseModeResponse struct {
+	State       model.ModeState `json:"state"`
+	Confidence  float64         `json:"confidence"`
+	LastChanged *time.Time      `json:"last_changed"`
+}
+
 // HouseResponse is the DTO for the whole-house state.
 type HouseResponse struct {
-	State       model.HouseState `json:"state"`
-	Confidence  float64          `json:"confidence"`
-	LastChanged *time.Time       `json:"last_changed"`
-	Signals     []string         `json:"signals,omitempty"`
+	Occupancy HouseOccupancyResponse `json:"occupancy"`
+	Activity  HouseActivityResponse  `json:"activity"`
+	Mode      HouseModeResponse      `json:"mode"`
 }
 
 // DeviceResponse is the DTO for a single device.
@@ -98,10 +118,10 @@ type DeviceResponse struct {
 
 // ActivityResponse is the DTO for a device's activity sub-state.
 type ActivityResponse struct {
-	State       model.ActivityState `json:"state"`
-	Since       *time.Time          `json:"since"`
-	LastChanged *time.Time          `json:"last_changed"`
-	Confidence  float64             `json:"confidence"`
+	State       model.DeviceActivityState `json:"state"`
+	Since       *time.Time                `json:"since"`
+	LastChanged *time.Time                `json:"last_changed"`
+	Confidence  float64                   `json:"confidence"`
 }
 
 // LatestResponse is the DTO for the latest observed values of a device.
@@ -206,10 +226,21 @@ func buildSummary(devices map[string]DeviceResponse) SummaryResponse {
 // buildHouseResponse converts a model.House into a HouseResponse.
 func buildHouseResponse(h model.House) HouseResponse {
 	return HouseResponse{
-		State:       h.State,
-		Confidence:  h.Confidence,
-		LastChanged: nilIfZero(h.LastChanged),
-		Signals:     h.Signals,
+		Occupancy: HouseOccupancyResponse{
+			State:       h.Occupancy.State,
+			Confidence:  h.Occupancy.Confidence,
+			LastChanged: nilIfZero(h.Occupancy.LastChanged),
+		},
+		Activity: HouseActivityResponse{
+			State:       h.Activity.State,
+			Confidence:  h.Activity.Confidence,
+			LastChanged: nilIfZero(h.Activity.LastChanged),
+		},
+		Mode: HouseModeResponse{
+			State:       h.Mode.State,
+			Confidence:  h.Mode.Confidence,
+			LastChanged: nilIfZero(h.Mode.LastChanged),
+		},
 	}
 }
 

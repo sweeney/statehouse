@@ -39,8 +39,8 @@ func derefDur(p *time.Duration, def time.Duration) time.Duration {
 // {PrevActivity, NewActivity} pair and CycleStarted/CycleFinished
 // signals.
 type Outcome struct {
-	PrevActivity  model.ActivityState
-	NewActivity   model.ActivityState
+	PrevActivity  model.DeviceActivityState
+	NewActivity   model.DeviceActivityState
 	CycleStarted  bool
 	CycleFinished bool
 	Cycle         *model.Cycle
@@ -61,7 +61,7 @@ type Runtime struct {
 	Profile    Profile
 	Thresholds config.Thresholds
 
-	activity    model.ActivityState
+	activity    model.DeviceActivityState
 	activeSince time.Time
 	candidate   *candidateSample
 
@@ -86,7 +86,7 @@ func NewRuntime(p Profile, maxIntegrationGap time.Duration) *Runtime {
 }
 
 // Activity returns the current activity state.
-func (r *Runtime) Activity() model.ActivityState { return r.activity }
+func (r *Runtime) Activity() model.DeviceActivityState { return r.activity }
 
 // Cycle returns the in-flight or most-recent cycle, or nil if none.
 func (r *Runtime) Cycle() *model.Cycle { return r.cycle }
