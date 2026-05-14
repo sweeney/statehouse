@@ -200,6 +200,63 @@ func TestAdapter_MalformedUPSNameIsRejected(t *testing.T) {
 	}
 }
 
+// TestAdapter_LowBatteryForwarded verifies that a payload with low_battery=true
+// in the computed block produces Latest.LowBattery == true after the engine
+// ingests it.
+func TestAdapter_LowBatteryForwarded(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"timestamp":"2026-05-13T21:57:06Z","ups_name":"cyberpower","variables":{},"computed":{"load_watts":72,"battery_runtime_mins":5,"on_battery":true,"low_battery":true}}`
+	a.HandleMessage("ups/cyberpower/state", []byte(payload), false)
+
+	dev, ok := store.Get("cyberpower")
+	if !ok {
+		t.Fatal("device cyberpower not found in store")
+	}
+	lb := dev.Latest.LowBattery
+	if lb == nil {
+		t.Fatal("LowBattery is nil, expected true")
+	}
+	if !*lb {
+		t.Errorf("LowBattery = false, want true")
+	}
+}
+
+// TestAdapter_LowBatteryFalseForwarded verifies that low_battery=false is also
+// forwarded (not silently dropped as zero-value).
+func TestAdapter_LowBatteryFalseForwarded(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"timestamp":"2026-05-13T21:57:06Z","ups_name":"cyberpower","variables":{},"computed":{"load_watts":72,"battery_runtime_mins":74.5,"on_battery":false,"low_battery":false}}`
+	a.HandleMessage("ups/cyberpower/state", []byte(payload), false)
+
+	dev, ok := store.Get("cyberpower")
+	if !ok {
+		t.Fatal("device cyberpower not found in store")
+	}
+	lb := dev.Latest.LowBattery
+	if lb == nil {
+		t.Fatal("LowBattery is nil, expected false")
+	}
+	if *lb {
+		t.Errorf("LowBattery = true, want false")
+	}
+}
+
+// TestAdapter_LowBatteryAbsentIsNil verifies that when low_battery is absent
+// from the computed block, Latest.LowBattery is nil (not a false zero-value).
+func TestAdapter_LowBatteryAbsentIsNil(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"timestamp":"2026-05-13T21:57:06Z","ups_name":"cyberpower","variables":{},"computed":{"load_watts":72,"battery_runtime_mins":74.5,"on_battery":false}}`
+	a.HandleMessage("ups/cyberpower/state", []byte(payload), false)
+
+	dev, ok := store.Get("cyberpower")
+	if !ok {
+		t.Fatal("device cyberpower not found in store")
+	}
+	if dev.Latest.LowBattery != nil {
+		t.Errorf("LowBattery should be nil when absent from payload, got %v", *dev.Latest.LowBattery)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "ups_readings.jsonl"))

@@ -173,6 +173,10 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 		if v, ok := ev.Value.(bool); ok {
 			p = write.NewPoint("device_ups", tags, map[string]any{"on_battery": v}, ev.Timestamp)
 		}
+	case "low_battery":
+		if v, ok := ev.Value.(bool); ok {
+			p = write.NewPoint("device_ups", tags, map[string]any{"low_battery": v}, ev.Timestamp)
+		}
 	case "rssi_dbm":
 		if v, ok := ev.Value.(int); ok {
 			p = write.NewPoint("device_radio", tags, map[string]any{"rssi_dbm": v}, ev.Timestamp)

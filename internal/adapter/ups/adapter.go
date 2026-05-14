@@ -107,6 +107,9 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 			r.BatteryRuntimeMins = p.Computed.BatteryRuntimeMins
 		}
 		r.OnBattery = p.Computed.OnBattery
+		if p.Computed.LowBattery != nil {
+			r.LowBattery = p.Computed.LowBattery
+		}
 	}
 	if v, ok := p.Variables["battery.charge"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && validate.FiniteInRange(f, 0, 100) {

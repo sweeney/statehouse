@@ -68,6 +68,7 @@ type Latest struct {
 	// UPS
 	BatteryRuntimeMins *float64 `json:"battery_runtime_mins,omitempty"`
 	OnBattery          *bool    `json:"on_battery,omitempty"`
+	LowBattery         *bool    `json:"low_battery,omitempty"`
 
 	// Device health
 	BatteryPct  *float64 `json:"battery_pct,omitempty"`
