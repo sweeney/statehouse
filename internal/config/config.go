@@ -179,6 +179,9 @@ type DeviceClassConfig struct {
 	NameHints         []string   `yaml:"name_hints"`
 	DefaultThresholds Thresholds `yaml:"default_thresholds"`
 	EnergyStrategy    string     `yaml:"energy_strategy"`
+	// StalenessSeconds overrides the default class staleness threshold used
+	// by the API DTO layer. When nil the class default is used.
+	StalenessSeconds *int `yaml:"staleness_seconds"`
 }
 
 // DeviceConfig overrides classification for a specific known device.
