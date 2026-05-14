@@ -59,12 +59,14 @@ func DeriveHouseState(now time.Time, cfg config.HouseConfig, devices map[string]
 		mostRecentActivity time.Time // last Activity.LastChanged among occupancy-relevant devices
 		anyCurrentlyActive bool      // at least one occupancy-relevant device is active right now
 		activeCount        int       // number of devices in an "active" state (any class)
+		activeDevices      []string  // IDs of devices currently in an active state
 	)
 
 	for _, d := range devices {
 		// Activity count for house activity dimension (all classes).
 		if isActiveDeviceState(d.Activity.State) {
 			activeCount++
+			activeDevices = append(activeDevices, d.ID)
 		}
 
 		// Occupancy signals: only relevant device classes.
@@ -195,9 +197,13 @@ func DeriveHouseState(now time.Time, cfg config.HouseConfig, devices map[string]
 		mode = model.ModeDimension{State: model.ModeUnknown, Confidence: 0}
 	}
 
+	if activeDevices == nil {
+		activeDevices = []string{}
+	}
 	return model.House{
-		Occupancy: occ,
-		Activity:  act,
-		Mode:      mode,
+		Occupancy:     occ,
+		Activity:      act,
+		Mode:          mode,
+		ActiveDevices: activeDevices,
 	}
 }

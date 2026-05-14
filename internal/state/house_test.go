@@ -258,3 +258,44 @@ func TestDeriveHouseState_ModeSleeping(t *testing.T) {
 		t.Errorf("expected confidence boosted above 0.7 for night hour, got %.2f", h.Mode.Confidence)
 	}
 }
+
+func TestDeriveHouseState_ActiveDevicesList(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg()
+	devices := map[string]model.Device{
+		"boiler": makeBinaryDevice("boiler", model.ActivityActive, now.Add(-1*time.Minute)),
+		"kettle": {
+			ID:    "kettle",
+			Class: device.ClassShortBurst,
+			Activity: model.Activity{
+				State:       model.ActivityIdle,
+				LastChanged: now.Add(-1 * time.Minute),
+				Confidence:  0.9,
+			},
+		},
+	}
+	h := DeriveHouseState(now, cfg, devices)
+	if len(h.ActiveDevices) != 1 || h.ActiveDevices[0] != "boiler" {
+		t.Errorf("expected [boiler] in ActiveDevices, got %v", h.ActiveDevices)
+	}
+}
+
+func TestDeriveHouseState_ActiveDevicesEmptyWhenIdle(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg()
+	devices := map[string]model.Device{
+		"kettle": {
+			ID:    "kettle",
+			Class: device.ClassShortBurst,
+			Activity: model.Activity{
+				State:       model.ActivityIdle,
+				LastChanged: now.Add(-1 * time.Minute),
+				Confidence:  0.9,
+			},
+		},
+	}
+	h := DeriveHouseState(now, cfg, devices)
+	if len(h.ActiveDevices) != 0 {
+		t.Errorf("expected empty ActiveDevices when all idle, got %v", h.ActiveDevices)
+	}
+}

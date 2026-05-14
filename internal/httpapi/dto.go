@@ -96,9 +96,10 @@ type HouseModeResponse struct {
 
 // HouseResponse is the DTO for the whole-house state.
 type HouseResponse struct {
-	Occupancy HouseOccupancyResponse `json:"occupancy"`
-	Activity  HouseActivityResponse  `json:"activity"`
-	Mode      HouseModeResponse      `json:"mode"`
+	Occupancy     HouseOccupancyResponse `json:"occupancy"`
+	Activity      HouseActivityResponse  `json:"activity"`
+	Mode          HouseModeResponse      `json:"mode"`
+	ActiveDevices []string               `json:"active_devices"`
 }
 
 // DeviceResponse is the DTO for a single device.
@@ -225,6 +226,10 @@ func buildSummary(devices map[string]DeviceResponse) SummaryResponse {
 
 // buildHouseResponse converts a model.House into a HouseResponse.
 func buildHouseResponse(h model.House) HouseResponse {
+	activeDevices := h.ActiveDevices
+	if activeDevices == nil {
+		activeDevices = []string{}
+	}
 	return HouseResponse{
 		Occupancy: HouseOccupancyResponse{
 			State:       h.Occupancy.State,
@@ -241,6 +246,7 @@ func buildHouseResponse(h model.House) HouseResponse {
 			Confidence:  h.Mode.Confidence,
 			LastChanged: nilIfZero(h.Mode.LastChanged),
 		},
+		ActiveDevices: activeDevices,
 	}
 }
 

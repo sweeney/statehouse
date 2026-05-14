@@ -169,9 +169,10 @@ type ModeDimension struct {
 // House summarises whole-house derived state across three independent
 // semantic dimensions: occupancy, activity, and mode.
 type House struct {
-	Occupancy OccupancyDimension     `json:"occupancy"`
-	Activity  HouseActivityDimension `json:"activity"`
-	Mode      ModeDimension          `json:"mode"`
+	Occupancy     OccupancyDimension     `json:"occupancy"`
+	Activity      HouseActivityDimension `json:"activity"`
+	Mode          ModeDimension          `json:"mode"`
+	ActiveDevices []string               `json:"active_devices"`
 }
 
 // Snapshot is the full state-engine view at one instant.
