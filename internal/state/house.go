@@ -1,6 +1,7 @@
 package state
 
 import (
+	"sort"
 	"time"
 
 	"github.com/sweeney/statehouse/internal/config"
@@ -200,6 +201,9 @@ func DeriveHouseState(now time.Time, cfg config.HouseConfig, devices map[string]
 	if activeDevices == nil {
 		activeDevices = []string{}
 	}
+	// Map iteration is random; sort so identical state produces identical
+	// payloads on every recompute (retained MQTT topics, JSON diffs).
+	sort.Strings(activeDevices)
 	return model.House{
 		Occupancy:     occ,
 		Activity:      act,
