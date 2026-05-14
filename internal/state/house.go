@@ -74,7 +74,7 @@ func DeriveHouseState(now time.Time, cfg config.HouseConfig, devices map[string]
 	mostRecentActivity := time.Time{}
 	for _, d := range devices {
 		switch d.Class {
-		case device.ClassShortBurst, device.ClassCyclePower, device.ClassMedia:
+		case device.ClassShortBurst, device.ClassCyclePower, device.ClassMedia, device.ClassBinaryState:
 			if !d.Activity.LastChanged.IsZero() && d.Activity.LastChanged.After(mostRecentActivity) {
 				mostRecentActivity = d.Activity.LastChanged
 			}
