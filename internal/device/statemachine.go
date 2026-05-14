@@ -15,6 +15,17 @@ func derefF64(p *float64, def float64) float64 {
 	return *p
 }
 
+// derefIfSet returns (*p, true) when p is non-nil, and (zero, false)
+// when p is nil. It is the nil-aware alternative to derefF64 for cases
+// where an explicit zero carries different semantics than "not set".
+func derefIfSet[T any](p *T) (T, bool) {
+	var zero T
+	if p == nil {
+		return zero, false
+	}
+	return *p, true
+}
+
 func derefDur(p *time.Duration, def time.Duration) time.Duration {
 	if p == nil {
 		return def
@@ -28,17 +39,17 @@ func derefDur(p *time.Duration, def time.Duration) time.Duration {
 // {PrevActivity, NewActivity} pair and CycleStarted/CycleFinished
 // signals.
 type Outcome struct {
-	PrevActivity model.ActivityState
-	NewActivity  model.ActivityState
-	CycleStarted bool
+	PrevActivity  model.ActivityState
+	NewActivity   model.ActivityState
+	CycleStarted  bool
 	CycleFinished bool
-	Cycle        *model.Cycle
+	Cycle         *model.Cycle
 }
 
 // candidateSample is the most recent power reading awaiting hysteresis.
 type candidateSample struct {
-	at      time.Time
-	powerW  float64
+	at          time.Time
+	powerW      float64
 	abovePrevHi bool // power exceeded the active threshold
 	belowPrevLo bool // power dropped below the idle threshold
 }
@@ -53,7 +64,6 @@ type Runtime struct {
 	activity    model.ActivityState
 	activeSince time.Time
 	candidate   *candidateSample
-	candAt      time.Time
 
 	counter    energy.Counter
 	integrator *energy.Integrator
@@ -193,9 +203,9 @@ func (r *Runtime) stepCycle(at time.Time, p float64, out *Outcome) {
 // Idle is not zero; the device alternates between a low standby draw
 // and a compressor cycle above CompressorAboveW.
 func (r *Runtime) stepContinuous(at time.Time, p float64, out *Outcome) {
-	highTh := derefF64(r.Thresholds.CompressorAboveW, 0)
-	if highTh == 0 {
-		highTh = derefF64(r.Thresholds.ActiveAboveW, 0)
+	highTh, highSet := derefIfSet(r.Thresholds.CompressorAboveW)
+	if !highSet {
+		highTh, _ = derefIfSet(r.Thresholds.ActiveAboveW)
 	}
 	lowTh := derefF64(r.Thresholds.IdleBelowW, 0)
 	inactiveSustainedFor := derefDur(r.Thresholds.InactiveSustainedFor, 0)
@@ -398,16 +408,6 @@ func (r *Runtime) maybeEnd(at time.Time, p float64) bool {
 		return true
 	}
 	return false
-}
-
-func (r *Runtime) candidateSustained(at time.Time, d time.Duration) bool {
-	if r.candidate == nil {
-		return false
-	}
-	if d <= 0 {
-		return true
-	}
-	return at.Sub(r.candidate.at) >= d
 }
 
 func (r *Runtime) startCycle(at time.Time) {
