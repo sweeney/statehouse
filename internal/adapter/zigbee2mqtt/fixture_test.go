@@ -186,6 +186,95 @@ func TestFixture_RenameKeepsState(t *testing.T) {
 	}
 }
 
+// TestAdapter_RejectLongRandomTopicCreatesNoDevice verifies that a topic
+// with a random 100-character friendly-name segment does not cause the
+// engine to create a device. This closes the DoS vector reported in
+// issue #33 where an attacker could flood the engine with crafted topics.
+func TestAdapter_RejectLongRandomTopicCreatesNoDevice(t *testing.T) {
+	cfg := fixtureCfg()
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	// 100-character random-looking string — well above the 64-char limit.
+	longName := "aB3xQrKzPmLvNwOuTsYeHfGdCjIiJlRnVbUqWoAkEhSyXtDpFcMgZaBcDeFgHiJkLmNoPqRsTuVwXyZ012345"
+	topic := "zigbee2mqtt/" + longName
+	payload := []byte(`{"power":100}`)
+	a.HandleMessage(topic, payload, false)
+
+	devs := store.Devices()
+	if len(devs) != 0 {
+		t.Fatalf("expected no devices created for oversized random friendly name, got %d: %v", len(devs), devs)
+	}
+}
+
+// TestAdapter_AcceptValidFriendlyNameCreatesDevice verifies that a valid
+// friendly name (within the allow-list) causes the engine to create a
+// device as expected.
+func TestAdapter_AcceptValidFriendlyNameCreatesDevice(t *testing.T) {
+	cfg := fixtureCfg()
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	topic := "zigbee2mqtt/kitchen_kettle"
+	payload := []byte(`{"power":2000}`)
+	a.HandleMessage(topic, payload, false)
+
+	devs := store.Devices()
+	if len(devs) != 1 {
+		t.Fatalf("expected 1 device created for valid friendly name, got %d", len(devs))
+	}
+}
+
+// TestAdapter_PhantomActivityResetOnIEEEMerge verifies that a
+// display-only phantom device's Activity is reset to ActivityUnknown
+// when the real IEEE address is learned via bridge/devices. This
+// prevents pre-discovery state injection (from crafted topics) from
+// persisting after the legitimate device is seen.
+func TestAdapter_PhantomActivityResetOnIEEEMerge(t *testing.T) {
+	cfg := fixtureCfg()
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	// Step 1: a device payload arrives before bridge/devices — the adapter
+	// falls back to Primary=Display="kitchen_dishwasher".
+	a.HandleMessage("zigbee2mqtt/kitchen_dishwasher", []byte(`{"power":2000}`), false)
+
+	// The device should exist with a display-only phantom identity.
+	devs := store.Devices()
+	if len(devs) != 1 {
+		t.Fatalf("expected phantom device after payload, got %d devices", len(devs))
+	}
+
+	// Step 2: bridge/devices arrives with the real IEEE address.
+	bridgePayload := []byte(`[{"ieee_address":"0x00158d0000000001","friendly_name":"kitchen_dishwasher","type":"EndDevice"}]`)
+	a.HandleMessage("zigbee2mqtt/bridge/devices", bridgePayload, true)
+
+	// The phantom record should now have been upgraded and its Activity
+	// reset to ActivityUnknown — no pre-discovery state leaks through.
+	var found model.Device
+	var foundID string
+	for id, d := range store.Devices() {
+		found = d
+		foundID = id
+		_ = foundID
+	}
+	if found.Identity.Primary != "0x00158d0000000001" {
+		t.Errorf("expected IEEE address after bridge/devices merge, got %q", found.Identity.Primary)
+	}
+	if found.Activity.State != model.ActivityUnknown {
+		t.Errorf("expected Activity reset to unknown after phantom merge, got %q", found.Activity.State)
+	}
+	if found.Cycle != nil {
+		t.Errorf("expected Cycle cleared after phantom merge, got %+v", found.Cycle)
+	}
+}
+
 func summary(evs []model.DerivedEvent) []string {
 	out := make([]string, 0, len(evs))
 	for _, ev := range evs {
