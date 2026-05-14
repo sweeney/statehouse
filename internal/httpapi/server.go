@@ -74,6 +74,9 @@ func (s *Server) Start(ctx context.Context) error {
 		Addr:              s.Listen,
 		Handler:           newMux(s),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -95,12 +98,12 @@ func (s *Server) Start(ctx context.Context) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	type health struct {
-		Status         string  `json:"status"`
-		UptimeSeconds  float64 `json:"uptime_seconds"`
-		MQTTConnected  bool    `json:"mqtt_connected"`
-		InfluxEnabled  bool    `json:"influx_enabled"`
-		InfluxReachable bool   `json:"influx_reachable,omitempty"`
-		Goroutines     int     `json:"goroutines"`
+		Status          string  `json:"status"`
+		UptimeSeconds   float64 `json:"uptime_seconds"`
+		MQTTConnected   bool    `json:"mqtt_connected"`
+		InfluxEnabled   bool    `json:"influx_enabled"`
+		InfluxReachable bool    `json:"influx_reachable,omitempty"`
+		Goroutines      int     `json:"goroutines"`
 	}
 	h := health{
 		Status:        "ok",
@@ -163,7 +166,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		DeviceCount     int     `json:"device_count"`
 		CanonicalEvents uint64  `json:"canonical_events_total"`
 		DerivedEvents   uint64  `json:"derived_events_total"`
-		InfluxSuccess   uint64  `json:"influx_writes_success,omitempty"`
+		InfluxQueued    uint64  `json:"influx_writes_queued,omitempty"`
 		InfluxFailure   uint64  `json:"influx_writes_failure,omitempty"`
 	}
 	m := metrics{
@@ -173,7 +176,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		DerivedEvents:   atomic.LoadUint64(&s.derivedCount),
 	}
 	if s.Influx != nil && s.Influx.Enabled {
-		m.InfluxSuccess, m.InfluxFailure = s.Influx.Stats()
+		m.InfluxQueued, m.InfluxFailure = s.Influx.Stats()
 	}
 	writeJSON(w, http.StatusOK, m)
 }
