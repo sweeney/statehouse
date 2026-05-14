@@ -7,7 +7,7 @@ import (
 	"github.com/sweeney/statehouse/internal/model"
 )
 
-const schemaVersion = "statehouse.snapshot.v1"
+const schemaVersion = "net.swee.statehouse.snapshot.v1"
 
 // activeActivityStates is the set of activity states that count as "active"
 // for the summary's ActiveCount.

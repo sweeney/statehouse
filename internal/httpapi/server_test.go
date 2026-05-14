@@ -187,8 +187,8 @@ func TestSnapshot_SchemaVersion(t *testing.T) {
 	snap := makeDeviceSnap(freshDevice("d1", "short_burst_power_device"))
 	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 	resp := buildSnapshot(snap, now)
-	if resp.SchemaVersion != "statehouse.snapshot.v1" {
-		t.Errorf("expected schema_version %q, got %q", "statehouse.snapshot.v1", resp.SchemaVersion)
+	if resp.SchemaVersion != "net.swee.statehouse.snapshot.v1" {
+		t.Errorf("expected schema_version %q, got %q", "net.swee.statehouse.snapshot.v1", resp.SchemaVersion)
 	}
 }
 
