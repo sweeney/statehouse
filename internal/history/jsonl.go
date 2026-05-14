@@ -52,10 +52,10 @@ func Open(path string, retentionHours, maxSizeMB, memoryLimit int) (*Log, error)
 	if path == "" {
 		return l, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create log dir: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open log file: %w", err)
 	}
@@ -200,7 +200,7 @@ func (l *Log) rotateLocked(force bool) error {
 		}
 	}
 	tmpPath := l.path + ".tmp"
-	tmp, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	tmp, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -230,7 +230,7 @@ func (l *Log) rotateLocked(force bool) error {
 	if err := l.file.Close(); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}

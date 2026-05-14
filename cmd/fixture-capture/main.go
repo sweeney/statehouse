@@ -139,11 +139,11 @@ func main() {
 	// Track whether the first connect has happened so we can tell the
 	// initial connect apart from a recovery.
 	var (
-		mu               sync.Mutex
-		hadFirstConnect  bool
-		messageCount     int
-		reconnectCount   int
-		lastLostAt       time.Time
+		mu              sync.Mutex
+		hadFirstConnect bool
+		messageCount    int
+		reconnectCount  int
+		lastLostAt      time.Time
 	)
 
 	emit := func(r record) {
@@ -274,7 +274,7 @@ func openOutput(path string) (io.Writer, *os.File, error) {
 	if path == "" || path == "-" {
 		return os.Stdout, nil, nil
 	}
-	f, err := os.Create(path)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, nil, err
 	}

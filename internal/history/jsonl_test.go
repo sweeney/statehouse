@@ -59,6 +59,23 @@ func TestLog_RetentionDropsOldEntries(t *testing.T) {
 	}
 }
 
+func TestLog_FilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	l, err := Open(path, 24, 1, 16)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer l.Close()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("expected file mode 0o600, got %04o", got)
+	}
+}
+
 func TestLog_NoPathStillBuffersInMemory(t *testing.T) {
 	l, err := Open("", 1, 1, 8)
 	if err != nil {
