@@ -403,3 +403,125 @@ func TestSnapshot_Summary(t *testing.T) {
 		t.Errorf("expected warning_count=1, got %d", resp.Summary.WarningCount)
 	}
 }
+
+func TestSnapshot_CompressorCycleType(t *testing.T) {
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	started := now.Add(-5 * time.Minute)
+
+	cases := []struct {
+		class    string
+		wantType string
+	}{
+		{"continuous_power_device", "compressor_cycle"},
+		{"short_burst_power_device", "appliance_cycle"},
+	}
+
+	for _, tc := range cases {
+		d := freshDevice("d1", tc.class)
+		d.Cycle = &model.Cycle{
+			Active:    true,
+			StartedAt: started,
+		}
+
+		snap := makeDeviceSnap(d)
+		resp := buildSnapshot(snap, now)
+
+		dev := resp.Devices["d1"]
+		if dev.Cycle == nil {
+			t.Fatalf("class %q: expected cycle to be present", tc.class)
+		}
+		if dev.Cycle.Type != tc.wantType {
+			t.Errorf("class %q: expected cycle.type %q, got %q", tc.class, tc.wantType, dev.Cycle.Type)
+		}
+	}
+}
+
+func TestSnapshot_DivergenceWarning(t *testing.T) {
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	started := now.Add(-10 * time.Minute)
+	finished := now.Add(-2 * time.Minute)
+	divPct := 18.5
+
+	d := freshDevice("d1", "cycle_power_device")
+	d.Cycle = &model.Cycle{
+		Active:          false,
+		StartedAt:       started,
+		FinishedAt:      &finished,
+		DurationSeconds: 480,
+		Energy: model.CycleEnergy{
+			PrimarySource:     "counter",
+			ReportedKWhDelta:  0.1,
+			IntegratedKWh:     0.1185,
+			SelectedKWh:       0.1,
+			DivergencePct:     divPct,
+			DivergenceWarning: true,
+		},
+	}
+
+	snap := makeDeviceSnap(d)
+	resp := buildSnapshot(snap, now)
+
+	dev := resp.Devices["d1"]
+	if dev.Cycle == nil {
+		t.Fatal("expected cycle to be present")
+	}
+	div := dev.Cycle.Energy.Divergence
+
+	if div.Status != "warning" {
+		t.Errorf("expected divergence.status %q, got %q", "warning", div.Status)
+	}
+	if div.Warning == nil {
+		t.Fatal("expected divergence.warning to be non-nil")
+	}
+	if !*div.Warning {
+		t.Errorf("expected divergence.warning == true, got false")
+	}
+	if div.Pct == nil {
+		t.Fatal("expected divergence.pct to be non-nil")
+	}
+	if math.Abs(*div.Pct-divPct) > 0.001 {
+		t.Errorf("expected divergence.pct ≈ %v, got %v", divPct, *div.Pct)
+	}
+	if div.Reason != "" {
+		t.Errorf("expected divergence.reason to be empty for a finished cycle, got %q", div.Reason)
+	}
+}
+
+func TestSnapshot_ZeroLastSeenNotStale(t *testing.T) {
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+
+	// freshDevice leaves Latest.LastSeen at its zero value.
+	d := freshDevice("d1", "short_burst_power_device")
+
+	snap := makeDeviceSnap(d)
+	resp := buildSnapshot(snap, now)
+
+	dev := resp.Devices["d1"]
+
+	if dev.Latest.Stale {
+		t.Error("expected stale=false for device with zero LastSeen")
+	}
+	if dev.Latest.AgeSeconds != nil {
+		t.Errorf("expected age_seconds to be absent for zero LastSeen, got %v", *dev.Latest.AgeSeconds)
+	}
+
+	hasStaleWarning := false
+	for _, w := range dev.Warnings {
+		if w == "stale_device" {
+			hasStaleWarning = true
+		}
+	}
+	if hasStaleWarning {
+		t.Errorf("expected warnings to not contain %q for zero LastSeen, got %v", "stale_device", dev.Warnings)
+	}
+
+	// Verify raw JSON: last_seen must be null, age_seconds must be absent.
+	raw, _ := json.Marshal(dev.Latest)
+	rawStr := string(raw)
+	if !strings.Contains(rawStr, `"last_seen":null`) {
+		t.Errorf("expected last_seen:null in JSON for zero LastSeen, got %s", rawStr)
+	}
+	if strings.Contains(rawStr, `"age_seconds"`) {
+		t.Errorf("expected age_seconds to be absent in JSON for zero LastSeen, got %s", rawStr)
+	}
+}
