@@ -127,7 +127,7 @@ func (a *Adapter) handleDevicePayload(friendlyName, topic string, payload []byte
 	reading, err := ParseDevicePayload(payload)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Debug("device payload parse failed", "topic", topic, "error", err)
+			a.logger.Warn("zigbee2mqtt parse failed", "topic", topic, "error", err)
 		}
 		return
 	}

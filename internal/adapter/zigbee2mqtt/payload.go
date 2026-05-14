@@ -2,6 +2,7 @@ package zigbee2mqtt
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/sweeney/statehouse/internal/model"
@@ -33,7 +34,7 @@ type rawDevicePayload struct {
 func ParseDevicePayload(b []byte) (model.Reading, error) {
 	var raw rawDevicePayload
 	if err := json.Unmarshal(b, &raw); err != nil {
-		return model.Reading{}, err
+		return model.Reading{}, fmt.Errorf("zigbee2mqtt: %w", err)
 	}
 	r := model.Reading{}
 	if raw.State != nil {

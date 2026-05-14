@@ -79,6 +79,32 @@ func TestParseAvailability(t *testing.T) {
 	}
 }
 
+// TestParseDevicePayload_LastSeenIntegerIgnored verifies that a payload with
+// last_seen as a unix-millisecond integer (a common Z2M config) does not cause
+// a parse error. The field is intentionally absent from rawDevicePayload, so
+// JSON unmarshal silently ignores it and returns the rest of the reading.
+func TestParseDevicePayload_LastSeenIntegerIgnored(t *testing.T) {
+	r, err := ParseDevicePayload([]byte(`{"last_seen":1700000000000,"power":42}`))
+	if err != nil {
+		t.Fatalf("expected permissive parse (last_seen ignored), got error: %v", err)
+	}
+	if r.PowerW == nil || *r.PowerW != 42 {
+		t.Fatalf("expected PowerW=42, got %v", r.PowerW)
+	}
+}
+
+// TestParseDevicePayload_ErrorWrapped verifies that parse errors returned by
+// ParseDevicePayload are wrapped with a "zigbee2mqtt:" prefix for context.
+func TestParseDevicePayload_ErrorWrapped(t *testing.T) {
+	_, err := ParseDevicePayload([]byte(`not json`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if err.Error()[:len("zigbee2mqtt:")] != "zigbee2mqtt:" {
+		t.Errorf("expected error to be wrapped with zigbee2mqtt: prefix, got: %v", err)
+	}
+}
+
 func TestParseBridgeDevices_FiltersCoordinator(t *testing.T) {
 	raw := []byte(`[
 		{"ieee_address":"0x00000000","friendly_name":"coordinator","type":"Coordinator"},
