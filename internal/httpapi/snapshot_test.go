@@ -60,6 +60,44 @@ func TestStalenessConfigOverride(t *testing.T) {
 	}
 }
 
+// TestHandleDevice_StalenessOverridePassesThroughHandler verifies that a
+// StalenessSeconds override on a DeviceClassConfig actually reaches the DTO
+// when called via GET /state/devices/{id}, not only via direct unit calls.
+func TestHandleDevice_StalenessOverridePassesThroughHandler(t *testing.T) {
+	srv, engine := setup(t)
+	sixty := 60
+	cls := srv.DeviceClasses["short_burst_power_device"]
+	cls.StalenessSeconds = &sixty
+	srv.DeviceClasses["short_burst_power_device"] = cls
+
+	mux := newMux(srv)
+
+	// Ingest a reading 120s in the past — class default (900s) would keep
+	// it fresh, but the 60s override should mark it stale.
+	ts := time.Now().Add(-2 * time.Minute)
+	p := 2.0
+	engine.IngestReading(
+		model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc", Display: "kettle"},
+		"zigbee2mqtt/kettle",
+		model.Reading{Timestamp: ts, PowerW: &p},
+	)
+
+	r := httptest.NewRequest(http.MethodGet, "/state/devices/kettle", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var dev DeviceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &dev); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if !dev.Latest.Stale {
+		t.Errorf("expected Stale=true with 60s override and reading 120s old, got stale=false (age=%v)", dev.Latest.AgeSeconds)
+	}
+}
+
 // TestCycleTypeForClass covers all known device classes including binary state.
 func TestCycleTypeForClass(t *testing.T) {
 	cases := []struct {
