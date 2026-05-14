@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,12 @@ import (
 func finiteInRange(v float64, lo, hi float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi
 }
+
+// reUPSName accepts alphanumeric, underscore, and dash identifiers of 1–64 chars.
+var reUPSName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// validUPSName returns true when s matches the expected UPS name format.
+func validUPSName(s string) bool { return reUPSName.MatchString(s) }
 
 const SchemeName = "ups"
 
@@ -130,6 +137,7 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 }
 
 // upsNameFromTopic extracts the UPS name from base/upsname/state.
+// Returns "" if the name does not match the expected identifier format.
 func upsNameFromTopic(base, topic string) string {
 	prefix := base + "/"
 	if !strings.HasPrefix(topic, prefix) {
@@ -142,6 +150,9 @@ func upsNameFromTopic(base, topic string) string {
 	name := rest[:len(rest)-len("/state")]
 	if strings.Contains(name, "/") {
 		return "" // more segments than expected
+	}
+	if !validUPSName(name) {
+		return ""
 	}
 	return name
 }

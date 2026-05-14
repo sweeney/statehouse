@@ -187,6 +187,19 @@ func TestAdapter_OutOfRangePowerIsNil(t *testing.T) {
 	}
 }
 
+// TestAdapter_MalformedUPSNameIsRejected verifies that a very long random topic
+// segment that fails the UPS name format check does not register any device.
+func TestAdapter_MalformedUPSNameIsRejected(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	// 100 chars — exceeds the 64-char limit.
+	longName := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	topic := "ups/" + longName + "/state"
+	a.HandleMessage(topic, []byte(sampleState), false)
+	if n := len(store.Devices()); n != 0 {
+		t.Errorf("malformed UPS name must not register a device, got %d devices", n)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "ups_readings.jsonl"))

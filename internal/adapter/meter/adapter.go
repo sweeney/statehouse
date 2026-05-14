@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
@@ -29,6 +30,12 @@ import (
 func finiteInRange(v float64, lo, hi float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi
 }
+
+// reSerial accepts hex-only serials of 6–32 characters (both meter and glow sensor).
+var reSerial = regexp.MustCompile(`^[0-9A-Fa-f]{6,32}$`)
+
+// validSerial returns true when s matches the expected serial format.
+func validSerial(s string) bool { return reSerial.MatchString(s) }
 
 const SchemeName = "meter"
 
@@ -180,6 +187,7 @@ func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial st
 
 // serialFromTopic extracts the device serial from
 // {base}/{serial}/SENSOR/electricitymeter.
+// Returns "" if the serial does not match the expected hex format.
 func serialFromTopic(base, topic string) string {
 	prefix := base + "/"
 	if !strings.HasPrefix(topic, prefix) {
@@ -190,11 +198,16 @@ func serialFromTopic(base, topic string) string {
 	if len(parts) != 2 || parts[1] != "SENSOR/electricitymeter" {
 		return ""
 	}
-	return parts[0]
+	serial := parts[0]
+	if !validSerial(serial) {
+		return ""
+	}
+	return serial
 }
 
 // glowSensorSerial extracts the sensor serial from
 // {base}/{hub_serial}/SENSOR/glowsensorth1/{sensor_serial}.
+// Returns "" if the sensor serial does not match the expected hex format.
 func glowSensorSerial(base, topic string) string {
 	prefix := base + "/"
 	if !strings.HasPrefix(topic, prefix) {
@@ -206,5 +219,9 @@ func glowSensorSerial(base, topic string) string {
 	if len(parts) != 4 || parts[1] != "SENSOR" || parts[2] != "glowsensorth1" || parts[3] == "" {
 		return ""
 	}
-	return parts[3]
+	serial := parts[3]
+	if !validSerial(serial) {
+		return ""
+	}
+	return serial
 }

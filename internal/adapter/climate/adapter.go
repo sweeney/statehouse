@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,6 +27,12 @@ import (
 func finiteInRange(v float64, lo, hi float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi
 }
+
+// reLocation accepts alphanumeric, underscore, and dash identifiers of 1–64 chars.
+var reLocation = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// validLocation returns true when s matches the expected location format.
+func validLocation(s string) bool { return reLocation.MatchString(s) }
 
 const SchemeName = "climate"
 
@@ -152,6 +159,7 @@ func (a *Adapter) identity(location string) model.DeviceIdentity {
 
 // parseClimateTopic extracts (location, subtype) from
 // {base}/{location}/{subtype...}.
+// Returns ("","") if the location does not match the expected identifier format.
 func parseClimateTopic(base, topic string) (location, subtype string) {
 	prefix := base + "/"
 	if !strings.HasPrefix(topic, prefix) {
@@ -162,5 +170,9 @@ func parseClimateTopic(base, topic string) (location, subtype string) {
 	if slash < 0 {
 		return "", "" // no subtype
 	}
-	return rest[:slash], rest[slash+1:]
+	loc := rest[:slash]
+	if !validLocation(loc) {
+		return "", ""
+	}
+	return loc, rest[slash+1:]
 }

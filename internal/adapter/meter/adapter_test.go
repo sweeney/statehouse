@@ -229,6 +229,26 @@ func TestAdapter_OutOfRangeGlowSensorFieldsAreNil(t *testing.T) {
 	}
 }
 
+// TestAdapter_MalformedSerialIsRejected verifies that a very long random topic
+// segment that fails the serial format check does not register any device.
+func TestAdapter_MalformedSerialIsRejected(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	// 100 chars of mixed-case letters — not valid hex.
+	longSerial := "ZZZZZZZZZZzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+	topic := "energy/" + longSerial + "/SENSOR/electricitymeter"
+	a.HandleMessage(topic, []byte(sampleMeter), false)
+	if n := len(store.Devices()); n != 0 {
+		t.Errorf("malformed serial must not register a device, got %d devices", n)
+	}
+
+	// Same check for glow sensor topic.
+	glowTopic := "energy/001122AABBCC/SENSOR/glowsensorth1/" + longSerial
+	a.HandleMessage(glowTopic, []byte(sampleGlowSensor), false)
+	if n := len(store.Devices()); n != 0 {
+		t.Errorf("malformed glow sensor serial must not register a device, got %d devices", n)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "meter_readings.jsonl"))

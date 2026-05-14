@@ -244,6 +244,19 @@ func TestAdapter_OutOfRangeObservationFieldsAreNil(t *testing.T) {
 	}
 }
 
+// TestAdapter_MalformedLocationIsRejected verifies that a very long random topic
+// segment that fails the location format check does not register any device.
+func TestAdapter_MalformedLocationIsRejected(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	// 100 chars — exceeds the 64-char limit.
+	longLocation := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	topic := "climate/" + longLocation + "/observation"
+	a.HandleMessage(topic, []byte(sampleObservation), false)
+	if n := len(store.Devices()); n != 0 {
+		t.Errorf("malformed location must not register a device, got %d devices", n)
+	}
+}
+
 func TestAdapter_FixtureReplay(t *testing.T) {
 	a, store, clock := mkAdapter(t)
 	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "climate_readings.jsonl"))
