@@ -93,29 +93,57 @@ func (a *Adapter) handleObservation(location, topic string, payload []byte) {
 		ts = timeutil.UnixSeconds(p.Timestamp, now)
 	}
 	r := model.Reading{Timestamp: ts}
-	if p.TemperatureC != nil && validate.FiniteInRange(*p.TemperatureC, -50, 80) {
-		r.TemperatureC = p.TemperatureC
+	if p.TemperatureC != nil {
+		if validate.FiniteInRange(*p.TemperatureC, -50, 80) {
+			r.TemperatureC = p.TemperatureC
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "temperature_c", "value", *p.TemperatureC, "topic", topic)
+		}
 	}
-	if p.HumidityPct != nil && validate.FiniteInRange(*p.HumidityPct, 0, 100) {
-		r.HumidityPct = p.HumidityPct
+	if p.HumidityPct != nil {
+		if validate.FiniteInRange(*p.HumidityPct, 0, 100) {
+			r.HumidityPct = p.HumidityPct
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "humidity_pct", "value", *p.HumidityPct, "topic", topic)
+		}
 	}
-	if p.PressureMB != nil && validate.FiniteInRange(*p.PressureMB, 800, 1100) {
-		r.PressureHPa = p.PressureMB
+	if p.PressureMB != nil {
+		if validate.FiniteInRange(*p.PressureMB, 800, 1100) {
+			r.PressureHPa = p.PressureMB
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "pressure_mb", "value", *p.PressureMB, "topic", topic)
+		}
 	}
-	if p.WindAvgMS != nil && validate.FiniteInRange(*p.WindAvgMS, 0, 120) {
-		r.WindSpeedMS = p.WindAvgMS
+	if p.WindAvgMS != nil {
+		if validate.FiniteInRange(*p.WindAvgMS, 0, 120) {
+			r.WindSpeedMS = p.WindAvgMS
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "wind_avg_ms", "value", *p.WindAvgMS, "topic", topic)
+		}
 	}
-	if p.WindDirDeg != nil && validate.FiniteInRange(*p.WindDirDeg, 0, 360) {
-		r.WindDirDeg = p.WindDirDeg
+	if p.WindDirDeg != nil {
+		if validate.FiniteInRange(*p.WindDirDeg, 0, 360) {
+			r.WindDirDeg = p.WindDirDeg
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "wind_direction_deg", "value", *p.WindDirDeg, "topic", topic)
+		}
 	}
-	if p.Rain1MinMM != nil && validate.FiniteInRange(*p.Rain1MinMM, 0, 1000) {
-		r.RainfallMM = p.Rain1MinMM
+	if p.Rain1MinMM != nil {
+		if validate.FiniteInRange(*p.Rain1MinMM, 0, 1000) {
+			r.RainfallMM = p.Rain1MinMM
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "rain_1min_mm", "value", *p.Rain1MinMM, "topic", topic)
+		}
 	}
 	if p.IlluminanceLux != nil {
 		r.IlluminanceLux = p.IlluminanceLux
 	}
-	if p.UVIndex != nil && validate.FiniteInRange(*p.UVIndex, 0, 20) {
-		r.UVIndex = p.UVIndex
+	if p.UVIndex != nil {
+		if validate.FiniteInRange(*p.UVIndex, 0, 20) {
+			r.UVIndex = p.UVIndex
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "uv_index", "value", *p.UVIndex, "topic", topic)
+		}
 	}
 	id := a.identity(location)
 	a.engine.EnsureDiscovered(id, topic)

@@ -1,8 +1,11 @@
 package meter
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -269,6 +272,63 @@ func TestAdapter_MeterPartialPayloadNoCumulative(t *testing.T) {
 	dev, _ := store.Get("AABBCCDDEEFF")
 	if dev.Latest.EnergyKWh != nil {
 		t.Errorf("EnergyKWh should be nil when cumulative absent, got %v", *dev.Latest.EnergyKWh)
+	}
+}
+
+// TestAdapter_OutOfRangeMeterWarnLogged verifies that when the electricity meter
+// power value fails the bounds check, a Warn-level log message is emitted.
+// The valid energy_kwh field must not generate a warning.
+func TestAdapter_OutOfRangeMeterWarnLogged(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 21, 57, 0, 0, time.UTC))
+	engine := state.NewEngine(sensorCfg(), store, clock)
+	a := New(engine, "energy", logger)
+
+	// power.value=1e308 kW → overflows bounds; cumulative=100.0 is valid.
+	payload := `{"electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","energy":{"import":{"cumulative":100.0}},"power":{"value":1e308}}}`
+	a.HandleMessage("energy/AABBCCDDEEFF/SENSOR/electricitymeter", []byte(payload), false)
+
+	logged := buf.String()
+	if !strings.Contains(logged, "rejected out-of-range field") {
+		t.Errorf("expected warn log for rejected field, got: %s", logged)
+	}
+	if !strings.Contains(logged, "power_w") {
+		t.Errorf("expected warn log to mention power_w, got: %s", logged)
+	}
+	// Valid cumulative field must not produce a warning.
+	if strings.Contains(logged, "energy_kwh") {
+		t.Errorf("valid energy_kwh should not produce a warning, got: %s", logged)
+	}
+}
+
+// TestAdapter_OutOfRangeGlowSensorWarnLogged verifies that when a glow sensor
+// field fails the bounds check, a Warn-level log message is emitted.
+func TestAdapter_OutOfRangeGlowSensorWarnLogged(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 21, 57, 0, 0, time.UTC))
+	engine := state.NewEngine(sensorCfg(), store, clock)
+	a := New(engine, "energy", logger)
+
+	// temperature=200 is out of [-50, 80]; humidity=46 is valid.
+	payload := `{"glowsensorth1":{"040D00000000":{"timestamp":"2026-05-13T23:03:55Z","temperature":{"value":200},"humidity":{"value":46}}}}`
+	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/040D00000000", []byte(payload), false)
+
+	logged := buf.String()
+	if !strings.Contains(logged, "rejected out-of-range field") {
+		t.Errorf("expected warn log for rejected field, got: %s", logged)
+	}
+	if !strings.Contains(logged, "temperature_c") {
+		t.Errorf("expected warn log to mention temperature_c, got: %s", logged)
+	}
+	// Valid humidity field must not produce a warning.
+	if strings.Contains(logged, "humidity_pct") {
+		t.Errorf("valid humidity_pct should not produce a warning, got: %s", logged)
 	}
 }
 

@@ -117,13 +117,19 @@ func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
 	}
 
 	r := model.Reading{Timestamp: ts}
-	if v := p.ElectricityMeter.Energy.Import.Cumulative; v != nil && validate.FiniteInRange(*v, 0, 1e9) {
-		r.EnergyKWh = v
+	if v := p.ElectricityMeter.Energy.Import.Cumulative; v != nil {
+		if validate.FiniteInRange(*v, 0, 1e9) {
+			r.EnergyKWh = v
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "energy_kwh", "value", *v, "topic", topic)
+		}
 	}
 	if v := p.ElectricityMeter.Power.Value; v != nil {
 		pw := *v * 1000
 		if validate.FiniteInRange(pw, -50_000, 200_000) {
 			r.PowerW = &pw
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "power_w", "value", pw, "topic", topic)
 		}
 	}
 
@@ -154,18 +160,34 @@ func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial st
 	}
 
 	r := model.Reading{Timestamp: ts}
-	if entry.Temperature.Value != nil && validate.FiniteInRange(*entry.Temperature.Value, -50, 80) {
-		r.TemperatureC = entry.Temperature.Value
+	if entry.Temperature.Value != nil {
+		if validate.FiniteInRange(*entry.Temperature.Value, -50, 80) {
+			r.TemperatureC = entry.Temperature.Value
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "temperature_c", "value", *entry.Temperature.Value, "topic", topic)
+		}
 	}
-	if entry.Humidity.Value != nil && validate.FiniteInRange(*entry.Humidity.Value, 0, 100) {
-		r.HumidityPct = entry.Humidity.Value
+	if entry.Humidity.Value != nil {
+		if validate.FiniteInRange(*entry.Humidity.Value, 0, 100) {
+			r.HumidityPct = entry.Humidity.Value
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "humidity_pct", "value", *entry.Humidity.Value, "topic", topic)
+		}
 	}
-	if entry.Battery != nil && entry.Battery.Value != nil && validate.FiniteInRange(*entry.Battery.Value, 0, 100) {
-		r.Battery = entry.Battery.Value
+	if entry.Battery != nil && entry.Battery.Value != nil {
+		if validate.FiniteInRange(*entry.Battery.Value, 0, 100) {
+			r.Battery = entry.Battery.Value
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "battery_pct", "value", *entry.Battery.Value, "topic", topic)
+		}
 	}
-	if entry.RSSI != nil && entry.RSSI.Value != nil && validate.FiniteInRange(*entry.RSSI.Value, -150, 0) {
-		v := int(*entry.RSSI.Value)
-		r.RSSI = &v
+	if entry.RSSI != nil && entry.RSSI.Value != nil {
+		if validate.FiniteInRange(*entry.RSSI.Value, -150, 0) {
+			v := int(*entry.RSSI.Value)
+			r.RSSI = &v
+		} else if a.logger != nil {
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "rssi_dbm", "value", *entry.RSSI.Value, "topic", topic)
+		}
 	}
 
 	id := model.DeviceIdentity{Scheme: SchemeName, Primary: sensorSerial, Display: sensorSerial}
