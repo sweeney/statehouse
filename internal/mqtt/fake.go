@@ -190,17 +190,17 @@ func segments(s string) []string {
 // publish errors can be tested deterministically without manipulating
 // the FakeClient's PublishErr in-flight.
 type FaultClient struct {
-	Inner    Client
-	mu       sync.Mutex
-	calls    int
-	FaultStart int  // first publish call index that fails (inclusive)
-	FaultEnd   int  // last publish call index that fails (exclusive)
+	Inner      Client
+	mu         sync.Mutex
+	calls      int
+	FaultStart int // first publish call index that fails (inclusive)
+	FaultEnd   int // last publish call index that fails (exclusive)
 	FaultErr   error
 }
 
-func (f *FaultClient) Connect() error      { return f.Inner.Connect() }
-func (f *FaultClient) Disconnect()         { f.Inner.Disconnect() }
-func (f *FaultClient) IsConnected() bool   { return f.Inner.IsConnected() }
+func (f *FaultClient) Connect() error    { return f.Inner.Connect() }
+func (f *FaultClient) Disconnect()       { f.Inner.Disconnect() }
+func (f *FaultClient) IsConnected() bool { return f.Inner.IsConnected() }
 func (f *FaultClient) Subscribe(topic string, qos byte, h Handler) error {
 	return f.Inner.Subscribe(topic, qos, h)
 }
