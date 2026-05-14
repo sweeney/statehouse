@@ -100,11 +100,19 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 
 	r := model.Reading{Timestamp: ts}
 	if p.Computed != nil {
-		if p.Computed.LoadWatts != nil && validate.FiniteInRange(*p.Computed.LoadWatts, -50_000, 200_000) {
-			r.PowerW = p.Computed.LoadWatts
+		if p.Computed.LoadWatts != nil {
+			if validate.FiniteInRange(*p.Computed.LoadWatts, -50_000, 200_000) {
+				r.PowerW = p.Computed.LoadWatts
+			} else if a.logger != nil {
+				a.logger.Warn("adapter: rejected out-of-range field", "field", "load_watts", "value", *p.Computed.LoadWatts, "topic", topic)
+			}
 		}
-		if p.Computed.BatteryRuntimeMins != nil && validate.FiniteInRange(*p.Computed.BatteryRuntimeMins, 0, 100_000) {
-			r.BatteryRuntimeMins = p.Computed.BatteryRuntimeMins
+		if p.Computed.BatteryRuntimeMins != nil {
+			if validate.FiniteInRange(*p.Computed.BatteryRuntimeMins, 0, 100_000) {
+				r.BatteryRuntimeMins = p.Computed.BatteryRuntimeMins
+			} else if a.logger != nil {
+				a.logger.Warn("adapter: rejected out-of-range field", "field", "battery_runtime_mins", "value", *p.Computed.BatteryRuntimeMins, "topic", topic)
+			}
 		}
 		r.OnBattery = p.Computed.OnBattery
 		if p.Computed.LowBattery != nil {
@@ -112,13 +120,21 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 		}
 	}
 	if v, ok := p.Variables["battery.charge"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && validate.FiniteInRange(f, 0, 100) {
-			r.Battery = &f
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			if validate.FiniteInRange(f, 0, 100) {
+				r.Battery = &f
+			} else if a.logger != nil {
+				a.logger.Warn("adapter: rejected out-of-range field", "field", "battery.charge", "value", f, "topic", topic)
+			}
 		}
 	}
 	if v, ok := p.Variables["input.voltage"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && validate.FiniteInRange(f, 0, 600) {
-			r.VoltageV = &f
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			if validate.FiniteInRange(f, 0, 600) {
+				r.VoltageV = &f
+			} else if a.logger != nil {
+				a.logger.Warn("adapter: rejected out-of-range field", "field", "input.voltage", "value", f, "topic", topic)
+			}
 		}
 	}
 

@@ -1,8 +1,11 @@
 package climate
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -270,6 +273,35 @@ func TestAdapter_DeviceStatusWithoutRSSI(t *testing.T) {
 	}
 	if dev.Latest.RSSI != nil {
 		t.Errorf("RSSI should be nil when rssi_dbm absent, got %v", *dev.Latest.RSSI)
+	}
+}
+
+// TestAdapter_OutOfRangeWarnLogged verifies that when a field fails the bounds
+// check, a Warn-level log message is emitted containing the field name, value,
+// and topic. The valid humidity_pct field must not generate a warning.
+func TestAdapter_OutOfRangeWarnLogged(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 21, 57, 0, 0, time.UTC))
+	engine := state.NewEngine(sensorCfg(), store, clock)
+	a := New(engine, "climate", logger)
+
+	// temperature=150 is out of [-50, 80]; humidity=92.8 is valid.
+	payload := `{"timestamp":1778709402,"temperature_c":150,"humidity_pct":92.8}`
+	a.HandleMessage("climate/home/observation", []byte(payload), false)
+
+	logged := buf.String()
+	if !strings.Contains(logged, "rejected out-of-range field") {
+		t.Errorf("expected warn log for rejected field, got: %s", logged)
+	}
+	if !strings.Contains(logged, "temperature_c") {
+		t.Errorf("expected warn log to mention temperature_c, got: %s", logged)
+	}
+	// Valid field must not produce a warning.
+	if strings.Contains(logged, "humidity_pct") {
+		t.Errorf("valid humidity_pct should not produce a warning, got: %s", logged)
 	}
 }
 

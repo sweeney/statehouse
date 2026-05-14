@@ -1,8 +1,11 @@
 package ups
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -254,6 +257,35 @@ func TestAdapter_LowBatteryAbsentIsNil(t *testing.T) {
 	}
 	if dev.Latest.LowBattery != nil {
 		t.Errorf("LowBattery should be nil when absent from payload, got %v", *dev.Latest.LowBattery)
+	}
+}
+
+// TestAdapter_OutOfRangeWarnLogged verifies that when a computed field fails
+// the bounds check, a Warn-level log message is emitted containing the field
+// name, value, and topic. The valid battery_runtime_mins field must not log.
+func TestAdapter_OutOfRangeWarnLogged(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 21, 57, 0, 0, time.UTC))
+	engine := state.NewEngine(sensorCfg(), store, clock)
+	a := New(engine, "ups", logger)
+
+	// load_watts=1e15 is far outside [-50_000, 200_000]; battery_runtime_mins=74.5 is valid.
+	payload := `{"timestamp":"2026-05-13T21:57:06Z","ups_name":"cyberpower","variables":{},"computed":{"load_watts":1e15,"battery_runtime_mins":74.5,"on_battery":false}}`
+	a.HandleMessage("ups/cyberpower/state", []byte(payload), false)
+
+	logged := buf.String()
+	if !strings.Contains(logged, "rejected out-of-range field") {
+		t.Errorf("expected warn log for rejected field, got: %s", logged)
+	}
+	if !strings.Contains(logged, "load_watts") {
+		t.Errorf("expected warn log to mention load_watts, got: %s", logged)
+	}
+	// Valid field must not produce a warning.
+	if strings.Contains(logged, "battery_runtime_mins") {
+		t.Errorf("valid battery_runtime_mins should not produce a warning, got: %s", logged)
 	}
 }
 
