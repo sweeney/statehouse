@@ -294,6 +294,45 @@ func TestEngine_SensorDoesNotMakeHouseActive(t *testing.T) {
 	}
 }
 
+// TestEngine_EnvironmentFieldsEmitCanonicalEvents verifies that a Reading
+// with PressureHPa and WindSpeedMS set produces canonical events with
+// the matching attribute names so downstream sinks (e.g. influx.Writer)
+// can store them.
+func TestEngine_EnvironmentFieldsEmitCanonicalEvents(t *testing.T) {
+	engine, _, col, clock := mkEngine()
+	now := clock.Now()
+	id := zid("0xbb", "weather_station")
+	engine.IngestReading(id, "tasmota/weather_station/SENSOR",
+		model.Reading{
+			Timestamp:   now,
+			PressureHPa: ptr(1013.25),
+			WindSpeedMS: ptr(5.2),
+		})
+
+	attrs := map[string]int{}
+	for _, ce := range col.canonical {
+		attrs[ce.Attribute]++
+	}
+	for _, want := range []string{"pressure_hpa", "wind_speed_ms"} {
+		if attrs[want] != 1 {
+			t.Errorf("expected exactly 1 canonical event with attribute=%q, got %d", want, attrs[want])
+		}
+	}
+	// Verify the values are correct.
+	for _, ce := range col.canonical {
+		switch ce.Attribute {
+		case "pressure_hpa":
+			if v, ok := ce.Value.(float64); !ok || v != 1013.25 {
+				t.Errorf("pressure_hpa: expected 1013.25, got %v", ce.Value)
+			}
+		case "wind_speed_ms":
+			if v, ok := ce.Value.(float64); !ok || v != 5.2 {
+				t.Errorf("wind_speed_ms: expected 5.2, got %v", ce.Value)
+			}
+		}
+	}
+}
+
 // TestEngine_SchemeAgnostic verifies the engine treats DeviceIdentity
 // generically — a synthetic "tasmota" scheme works identically to
 // "zigbee", which is the whole point of the adapter abstraction.

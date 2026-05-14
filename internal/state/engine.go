@@ -224,11 +224,7 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		// Activity sub-state.
 		if outcome.NewActivity != outcome.PrevActivity {
 			now := reading.Timestamp
-			if outcome.PrevActivity == model.ActivityUnknown {
-				ent.Device.Activity.Since = now
-			} else {
-				ent.Device.Activity.Since = now
-			}
+			ent.Device.Activity.Since = now
 			ent.Device.Activity.State = outcome.NewActivity
 			ent.Device.Activity.LastChanged = now
 			ent.Device.Activity.Confidence = 0.9
@@ -546,6 +542,33 @@ func (e *Engine) emitCanonicalForReading(id string, identity model.DeviceIdentit
 	}
 	if r.Battery != nil {
 		emit("battery", "battery_pct", *r.Battery, "%")
+	}
+	if r.PressureHPa != nil {
+		emit("environment", "pressure_hpa", *r.PressureHPa, "hPa")
+	}
+	if r.WindSpeedMS != nil {
+		emit("environment", "wind_speed_ms", *r.WindSpeedMS, "m/s")
+	}
+	if r.WindDirDeg != nil {
+		emit("environment", "wind_dir_deg", *r.WindDirDeg, "deg")
+	}
+	if r.RainfallMM != nil {
+		emit("environment", "rainfall_mm", *r.RainfallMM, "mm")
+	}
+	if r.IlluminanceLux != nil {
+		emit("environment", "illuminance_lux", *r.IlluminanceLux, "lux")
+	}
+	if r.UVIndex != nil {
+		emit("environment", "uv_index", *r.UVIndex, "")
+	}
+	if r.BatteryRuntimeMins != nil {
+		emit("ups", "battery_runtime_mins", *r.BatteryRuntimeMins, "min")
+	}
+	if r.OnBattery != nil {
+		emit("ups", "on_battery", *r.OnBattery, "")
+	}
+	if r.RSSI != nil {
+		emit("radio", "rssi_dbm", *r.RSSI, "dBm")
 	}
 }
 

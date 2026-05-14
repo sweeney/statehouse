@@ -143,6 +143,42 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 		if v, ok := ev.Value.(float64); ok {
 			p = write.NewPoint("device_battery", tags, map[string]any{"battery_pct": v}, ev.Timestamp)
 		}
+	case "pressure_hpa":
+		if v, ok := ev.Value.(float64); ok {
+			p = write.NewPoint("device_environment", tags, map[string]any{"pressure_hpa": v}, ev.Timestamp)
+		}
+	case "wind_speed_ms":
+		if v, ok := ev.Value.(float64); ok {
+			p = write.NewPoint("device_environment", tags, map[string]any{"wind_speed_ms": v}, ev.Timestamp)
+		}
+	case "wind_dir_deg":
+		if v, ok := ev.Value.(float64); ok {
+			p = write.NewPoint("device_environment", tags, map[string]any{"wind_dir_deg": v}, ev.Timestamp)
+		}
+	case "rainfall_mm":
+		if v, ok := ev.Value.(float64); ok {
+			p = write.NewPoint("device_environment", tags, map[string]any{"rainfall_mm": v}, ev.Timestamp)
+		}
+	case "illuminance_lux":
+		if v, ok := ev.Value.(float64); ok {
+			p = write.NewPoint("device_environment", tags, map[string]any{"illuminance_lux": v}, ev.Timestamp)
+		}
+	case "uv_index":
+		if v, ok := ev.Value.(float64); ok {
+			p = write.NewPoint("device_environment", tags, map[string]any{"uv_index": v}, ev.Timestamp)
+		}
+	case "battery_runtime_mins":
+		if v, ok := ev.Value.(float64); ok {
+			p = write.NewPoint("device_ups", tags, map[string]any{"battery_runtime_mins": v}, ev.Timestamp)
+		}
+	case "on_battery":
+		if v, ok := ev.Value.(bool); ok {
+			p = write.NewPoint("device_ups", tags, map[string]any{"on_battery": v}, ev.Timestamp)
+		}
+	case "rssi_dbm":
+		if v, ok := ev.Value.(int); ok {
+			p = write.NewPoint("device_radio", tags, map[string]any{"rssi_dbm": v}, ev.Timestamp)
+		}
 	}
 	if p != nil {
 		w.api.WritePoint(p)
