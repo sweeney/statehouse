@@ -2,14 +2,14 @@
 //
 // boiler-sensor publishes two MQTT topics:
 //
-//   <base>/events  — per-transition payload:
-//     {"boiler":{"timestamp":"...","event":"CH_ON",
-//                "ch":{"state":"ON"},"hw":{"state":"OFF"}}}
+//	<base>/events  — per-transition payload:
+//	  {"boiler":{"timestamp":"...","event":"CH_ON",
+//	             "ch":{"state":"ON"},"hw":{"state":"OFF"}}}
 //
-//   <base>/system  — lifecycle, with two shapes:
-//     simple:  {"system":{"timestamp":"...","event":"SHUTDOWN",
-//                         "reason":"SIGTERM","source":"last_will"}}
-//     rich:    {"status":{"event":"STARTUP","ch":"OFF","hw":"OFF",...}}
+//	<base>/system  — lifecycle, with two shapes:
+//	  simple:  {"system":{"timestamp":"...","event":"SHUTDOWN",
+//	                      "reason":"SIGTERM","source":"last_will"}}
+//	  rich:    {"status":{"event":"STARTUP","ch":"OFF","hw":"OFF",...}}
 //
 // The publisher exposes two logical channels (central heating, hot
 // water), each ON/OFF. The adapter splits them into two engine

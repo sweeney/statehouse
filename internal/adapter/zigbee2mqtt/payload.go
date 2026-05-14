@@ -12,13 +12,13 @@ import (
 // for a device under zigbee2mqtt/<friendly_name>. Pointer fields keep
 // the "absent vs zero" distinction.
 type rawDevicePayload struct {
-	State        *string  `json:"state"`
-	Power        *float64 `json:"power"`
-	Voltage      *float64 `json:"voltage"`
-	Current      *float64 `json:"current"`
-	Energy       *float64 `json:"energy"`
-	Temperature  *float64 `json:"temperature"`
-	Humidity     *float64 `json:"humidity"`
+	State       *string  `json:"state"`
+	Power       *float64 `json:"power"`
+	Voltage     *float64 `json:"voltage"`
+	Current     *float64 `json:"current"`
+	Energy      *float64 `json:"energy"`
+	Temperature *float64 `json:"temperature"`
+	Humidity    *float64 `json:"humidity"`
 	LinkQuality *int     `json:"linkquality"`
 	Battery     *float64 `json:"battery"`
 	Occupancy   *bool    `json:"occupancy"`

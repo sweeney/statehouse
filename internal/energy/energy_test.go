@@ -25,7 +25,7 @@ func TestIntegrator_Trapezoid(t *testing.T) {
 	now := time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC)
 	i := NewIntegrator(30 * time.Minute)
 	i.Update(now, 0)
-	i.Update(now.Add(time.Minute), 2000) // avg = 1000W over 1m
+	i.Update(now.Add(time.Minute), 2000)   // avg = 1000W over 1m
 	i.Update(now.Add(2*time.Minute), 2000) // 2000W over 1m
 	// 1000W * 1/60 h / 1000 = 0.01666 kWh
 	// 2000W * 1/60 h / 1000 = 0.03333 kWh

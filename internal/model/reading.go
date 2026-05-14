@@ -17,14 +17,14 @@ type Reading struct {
 	EnergyKWh *float64 // monotonic import counter kWh
 
 	// Environment (climate / weather station)
-	TemperatureC  *float64
-	HumidityPct   *float64
-	PressureHPa   *float64 // atmospheric pressure hPa (= mb)
-	WindSpeedMS   *float64 // average wind speed m/s
-	WindDirDeg    *float64 // wind direction 0–360°
-	RainfallMM    *float64 // rainfall mm in last measurement interval
+	TemperatureC   *float64
+	HumidityPct    *float64
+	PressureHPa    *float64 // atmospheric pressure hPa (= mb)
+	WindSpeedMS    *float64 // average wind speed m/s
+	WindDirDeg     *float64 // wind direction 0–360°
+	RainfallMM     *float64 // rainfall mm in last measurement interval
 	IlluminanceLux *float64
-	UVIndex       *float64
+	UVIndex        *float64
 
 	// UPS
 	BatteryRuntimeMins *float64 // remaining battery runtime minutes

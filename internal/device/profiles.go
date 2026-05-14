@@ -14,10 +14,10 @@ import (
 // only understands these canonical V1 classes for state-machine
 // behaviour.
 const (
-	ClassShortBurst   = "short_burst_power_device"
-	ClassCyclePower   = "cycle_power_device"
-	ClassContinuous   = "continuous_power_device"
-	ClassMedia        = "media_power_device"
+	ClassShortBurst = "short_burst_power_device"
+	ClassCyclePower = "cycle_power_device"
+	ClassContinuous = "continuous_power_device"
+	ClassMedia      = "media_power_device"
 	// ClassBinaryState covers devices whose telemetry is a direct
 	// ON/OFF state rather than a power reading: a boiler relay, a
 	// contact sensor, a motion sensor, a smart switch reporting
@@ -52,7 +52,7 @@ type Resolver struct {
 	// byPrimary keys configured overrides by "scheme:primary".
 	byPrimary map[string]config.DeviceConfig
 	// byDisplay keys configured overrides by "scheme:display" (lowercased display).
-	byDisplay map[string]config.DeviceConfig
+	byDisplay   map[string]config.DeviceConfig
 	idByPrimary map[string]string
 	idByDisplay map[string]string
 }
