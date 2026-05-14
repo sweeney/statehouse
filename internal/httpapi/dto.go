@@ -188,6 +188,23 @@ type CycleResponse struct {
 	Energy          CycleEnergyResponse `json:"energy"`
 }
 
+// BuildSnapshot is the exported entry point for other packages (MQTT
+// publisher) that want the same DTO shape as GET /state — same
+// schema_version, summary, warnings, staleness. lookupStaleness may be
+// nil to use class defaults.
+func BuildSnapshot(snap model.Snapshot, now time.Time, lookupStaleness func(class string) *int) SnapshotResponse {
+	return buildSnapshot(snap, now, lookupStaleness)
+}
+
+// BuildHouseResponse is the exported HTTP-DTO builder for model.House.
+func BuildHouseResponse(h model.House) HouseResponse { return buildHouseResponse(h) }
+
+// BuildDeviceResponse is the exported HTTP-DTO builder for model.Device.
+// stalenessSeconds may be nil to use the class default.
+func BuildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) DeviceResponse {
+	return buildDeviceResponse(d, now, stalenessSeconds)
+}
+
 // buildSnapshot converts a model.Snapshot into a SnapshotResponse. now is used
 // to compute age/staleness so tests can inject a fixed value. lookupStaleness
 // returns the per-class override (nil → class default); pass a no-op if not

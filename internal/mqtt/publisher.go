@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
@@ -12,11 +13,28 @@ import (
 // Publisher is the EventSink that fans derived events out to MQTT
 // topics under PublishPrefix. It also publishes per-device state and
 // the periodic whole-house snapshot.
+//
+// Builders, when non-nil, wrap the raw model into the same DTO shape
+// the HTTP API publishes (schema_version, summary, warnings, etc.).
+// Set them via BuildSnapshot / BuildHouse / BuildDevice. If left nil,
+// the publisher falls back to the raw model.Snapshot/House/Device so
+// internal tests don't need to import the DTO package.
 type Publisher struct {
 	Client Client
 	Prefix string
 	Store  *state.Store
 	Logger *slog.Logger
+
+	// BuildSnapshot, when non-nil, transforms a model.Snapshot into the
+	// payload published on house/state/snapshot. now is supplied for
+	// age/staleness computation.
+	BuildSnapshot func(snap model.Snapshot, now time.Time) any
+	// BuildHouse, when non-nil, transforms a model.House into the
+	// payload published on house/state/house.
+	BuildHouse func(h model.House) any
+	// BuildDevice, when non-nil, transforms a model.Device into the
+	// payload published on house/state/devices/{id}.
+	BuildDevice func(d model.Device, now time.Time) any
 
 	mu sync.Mutex
 }
@@ -31,21 +49,22 @@ func (p *Publisher) OnDerivedEvent(ev model.DerivedEvent) {
 	if p == nil || p.Client == nil {
 		return
 	}
+	now := time.Now()
 	p.publishJSON(p.Prefix+"/events/derived", false, ev)
 	if ev.DeviceID != "" {
 		if d, ok := p.Store.Get(ev.DeviceID); ok {
-			p.publishJSON(p.Prefix+"/state/devices/"+ev.DeviceID, true, d)
+			p.publishJSON(p.Prefix+"/state/devices/"+ev.DeviceID, true, p.devicePayload(d, now))
 		}
 	}
 	switch ev.Type {
 	case model.EvtHouseStateChanged:
-		p.publishJSON(p.Prefix+"/state/house", true, p.Store.House())
+		p.publishJSON(p.Prefix+"/state/house", true, p.housePayload(p.Store.House()))
 	}
 	// Always refresh full snapshot on any state-relevant event. This
 	// is cheap relative to MQTT round-trip and gives downstreams a
 	// single source of truth.
 	if relevantForSnapshot(ev.Type) {
-		p.publishJSON(p.Prefix+"/state/snapshot", true, p.Store.Snapshot())
+		p.publishJSON(p.Prefix+"/state/snapshot", true, p.snapshotPayload(p.Store.Snapshot(), now))
 	}
 }
 
@@ -55,8 +74,32 @@ func (p *Publisher) PublishSnapshot() {
 	if p == nil || p.Client == nil || p.Store == nil {
 		return
 	}
-	p.publishJSON(p.Prefix+"/state/snapshot", true, p.Store.Snapshot())
-	p.publishJSON(p.Prefix+"/state/house", true, p.Store.House())
+	now := time.Now()
+	p.publishJSON(p.Prefix+"/state/snapshot", true, p.snapshotPayload(p.Store.Snapshot(), now))
+	p.publishJSON(p.Prefix+"/state/house", true, p.housePayload(p.Store.House()))
+}
+
+// snapshotPayload returns either the DTO-wrapped snapshot (BuildSnapshot
+// set) or the raw model.Snapshot.
+func (p *Publisher) snapshotPayload(snap model.Snapshot, now time.Time) any {
+	if p.BuildSnapshot != nil {
+		return p.BuildSnapshot(snap, now)
+	}
+	return snap
+}
+
+func (p *Publisher) housePayload(h model.House) any {
+	if p.BuildHouse != nil {
+		return p.BuildHouse(h)
+	}
+	return h
+}
+
+func (p *Publisher) devicePayload(d model.Device, now time.Time) any {
+	if p.BuildDevice != nil {
+		return p.BuildDevice(d, now)
+	}
+	return d
 }
 
 func (p *Publisher) publishJSON(topic string, retained bool, v any) {
