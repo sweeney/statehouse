@@ -14,36 +14,36 @@ const (
 	AvailabilityOffline        Availability = "offline"
 )
 
-// ActivityState is the device's current behavioural state. The values
+// DeviceActivityState is the device's current behavioural state. The values
 // used by any given device depend on its class; cycle_power_device
 // uses idle/starting/running/finishing/finished_recently, etc.
-type ActivityState string
+type DeviceActivityState string
 
 const (
-	ActivityUnknown          ActivityState = "unknown"
-	ActivityIdle             ActivityState = "idle"
-	ActivityActive           ActivityState = "active"
-	ActivityRecentlyActive   ActivityState = "recently_active"
-	ActivityStarting         ActivityState = "starting"
-	ActivityRunning          ActivityState = "running"
-	ActivityFinishing        ActivityState = "finishing"
-	ActivityFinishedRecently ActivityState = "finished_recently"
-	ActivityStandby          ActivityState = "standby"
-	ActivityNormalIdle       ActivityState = "normal_idle"
-	ActivityActiveCycle      ActivityState = "active_cycle"
+	ActivityUnknown          DeviceActivityState = "unknown"
+	ActivityIdle             DeviceActivityState = "idle"
+	ActivityActive           DeviceActivityState = "active"
+	ActivityRecentlyActive   DeviceActivityState = "recently_active"
+	ActivityStarting         DeviceActivityState = "starting"
+	ActivityRunning          DeviceActivityState = "running"
+	ActivityFinishing        DeviceActivityState = "finishing"
+	ActivityFinishedRecently DeviceActivityState = "finished_recently"
+	ActivityStandby          DeviceActivityState = "standby"
+	ActivityNormalIdle       DeviceActivityState = "normal_idle"
+	ActivityActiveCycle      DeviceActivityState = "active_cycle"
 	// ActivityReporting describes measurement-only devices (climate
 	// sensors, air-quality, illuminance) that have no behavioural
 	// state — they just transmit readings periodically. Activity
 	// transitions unknown→reporting on first contact and stays there.
-	ActivityReporting ActivityState = "reporting"
+	ActivityReporting DeviceActivityState = "reporting"
 )
 
 // Activity is the activity sub-state of a device.
 type Activity struct {
-	State       ActivityState `json:"state"`
-	Since       time.Time     `json:"since"`
-	LastChanged time.Time     `json:"last_changed"`
-	Confidence  float64       `json:"confidence"`
+	State       DeviceActivityState `json:"state"`
+	Since       time.Time           `json:"since"`
+	LastChanged time.Time           `json:"last_changed"`
+	Confidence  float64             `json:"confidence"`
 }
 
 // Latest carries the last observed values, regardless of whether the
@@ -114,24 +114,64 @@ type Device struct {
 	Unclassified bool           `json:"unclassified,omitempty"`
 }
 
-// HouseState is the V1 conservative whole-house summary.
-type HouseState string
+// OccupancyState is the house occupancy dimension.
+type OccupancyState string
 
 const (
-	HouseUnknown  HouseState = "unknown"
-	HouseEmpty    HouseState = "empty"
-	HouseOccupied HouseState = "occupied"
-	HouseActive   HouseState = "active"
-	HouseQuiet    HouseState = "quiet"
-	HouseAsleep   HouseState = "asleep"
+	OccupancyUnknown  OccupancyState = "unknown"
+	OccupancyEmpty    OccupancyState = "empty"
+	OccupancyOccupied OccupancyState = "occupied"
 )
 
-// House summarises whole-house derived state.
+// HouseActivityState is the house activity dimension.
+type HouseActivityState string
+
+const (
+	HouseActivityUnknown HouseActivityState = "unknown"
+	HouseActivityIdle    HouseActivityState = "idle"
+	HouseActivityQuiet   HouseActivityState = "quiet"
+	HouseActivityActive  HouseActivityState = "active"
+	HouseActivityBusy    HouseActivityState = "busy"
+)
+
+// ModeState is the house behavioural mode dimension.
+type ModeState string
+
+const (
+	ModeUnknown  ModeState = "unknown"
+	ModeDay      ModeState = "day"
+	ModeNight    ModeState = "night"
+	ModeAway     ModeState = "away"
+	ModeSleeping ModeState = "sleeping"
+)
+
+// OccupancyDimension holds the occupancy inference.
+type OccupancyDimension struct {
+	State       OccupancyState `json:"state"`
+	Confidence  float64        `json:"confidence"`
+	LastChanged time.Time      `json:"last_changed"`
+}
+
+// HouseActivityDimension holds the house activity inference.
+type HouseActivityDimension struct {
+	State       HouseActivityState `json:"state"`
+	Confidence  float64            `json:"confidence"`
+	LastChanged time.Time          `json:"last_changed"`
+}
+
+// ModeDimension holds the behavioural mode inference.
+type ModeDimension struct {
+	State       ModeState `json:"state"`
+	Confidence  float64   `json:"confidence"`
+	LastChanged time.Time `json:"last_changed"`
+}
+
+// House summarises whole-house derived state across three independent
+// semantic dimensions: occupancy, activity, and mode.
 type House struct {
-	State       HouseState `json:"state"`
-	Confidence  float64    `json:"confidence"`
-	LastChanged time.Time  `json:"last_changed"`
-	Signals     []string   `json:"signals,omitempty"`
+	Occupancy OccupancyDimension     `json:"occupancy"`
+	Activity  HouseActivityDimension `json:"activity"`
+	Mode      ModeDimension          `json:"mode"`
 }
 
 // Snapshot is the full state-engine view at one instant.

@@ -414,11 +414,14 @@ func (e *Engine) RecomputeHouse() {
 			ID:        newEventID(),
 			Timestamp: now,
 			Type:      model.EvtHouseStateChanged,
-			Summary:   fmt.Sprintf("House state -> %s", house.State),
+			Summary:   fmt.Sprintf("House state -> occupancy:%s activity:%s mode:%s", house.Occupancy.State, house.Activity.State, house.Mode.State),
 			Evidence: map[string]any{
-				"state":      string(house.State),
-				"confidence": house.Confidence,
-				"signals":    house.Signals,
+				"occupancy":            string(house.Occupancy.State),
+				"occupancy_confidence": house.Occupancy.Confidence,
+				"activity":             string(house.Activity.State),
+				"activity_confidence":  house.Activity.Confidence,
+				"mode":                 string(house.Mode.State),
+				"mode_confidence":      house.Mode.Confidence,
 			},
 		})
 	}
