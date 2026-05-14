@@ -30,8 +30,8 @@ type Adapter struct {
 	base   string
 	logger *slog.Logger
 
-	mu        sync.RWMutex
-	ieeeByFN  map[string]string // friendly_name -> ieee_address
+	mu       sync.RWMutex
+	ieeeByFN map[string]string // friendly_name -> ieee_address
 }
 
 // New constructs a Z2M adapter rooted at the given base topic
