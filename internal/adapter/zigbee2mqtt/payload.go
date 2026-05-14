@@ -3,10 +3,18 @@ package zigbee2mqtt
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/sweeney/statehouse/internal/model"
 )
+
+// reFriendly is the allow-list for Z2M friendly names extracted from
+// MQTT topic segments. It mirrors the allow-list applied to climate,
+// UPS, and meter adapters in #4, closing the same DoS vector. Random
+// strings (UUIDs, hex blobs) and names longer than 64 characters are
+// rejected before any device is created in the engine.
+var reFriendly = regexp.MustCompile(`^[a-zA-Z0-9_./-]{1,64}$`)
 
 // rawDevicePayload mirrors the set of fields Z2M typically publishes
 // for a device under zigbee2mqtt/<friendly_name>. Pointer fields keep
@@ -72,12 +80,18 @@ func TopicFriendlyName(base, topic string) string {
 		return ""
 	}
 	// Strip trailing sub-topics such as /availability or /set.
+	var name string
 	if i := strings.Index(rest, "/"); i >= 0 {
 		// Treat /availability as a special-case sub-topic later; the
 		// friendly name is the leading segment.
-		return rest[:i]
+		name = rest[:i]
+	} else {
+		name = rest
 	}
-	return rest
+	if !reFriendly.MatchString(name) {
+		return ""
+	}
+	return name
 }
 
 // AvailabilityFromTopic returns the friendly name and true if the
@@ -93,6 +107,9 @@ func AvailabilityFromTopic(base, topic string) (string, bool) {
 	}
 	name := strings.TrimSuffix(rest, "/availability")
 	if name == "" || strings.Contains(name, "/") {
+		return "", false
+	}
+	if !reFriendly.MatchString(name) {
 		return "", false
 	}
 	return name, true

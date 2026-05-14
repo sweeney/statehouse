@@ -105,6 +105,7 @@ func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic str
 	} else {
 		var rt *device.Runtime
 		var prevDisplay string
+		var wasPhantom bool
 		e.store.withEntry(id, func(ent *deviceEntry) {
 			rt = ent.Runtime
 			if rt == nil || rt.Profile.Class != prof.Class {
@@ -112,11 +113,29 @@ func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic str
 				ent.Runtime = rt
 			}
 			prevDisplay = ent.Device.Identity.Display
+			// A "phantom" record is one where Primary == Display — the
+			// adapter fell back to using the friendly name as the primary
+			// key before it learned the real IEEE address. Detect the
+			// upgrade so we can purge any pre-discovery injected state.
+			oldPrimary := ent.Device.Identity.Primary
+			oldDisplay := ent.Device.Identity.Display
+			wasPhantom = oldPrimary != "" && oldDisplay != "" && oldPrimary == oldDisplay &&
+				identity.Primary != "" && identity.Primary != identity.Display
 		})
 		e.store.Upsert(id, dev, rt)
 		// Detect display-name rename so the byDisplay index is rebuilt.
 		if identity.Display != "" && prevDisplay != "" && identity.Display != prevDisplay {
 			e.store.Rename(id, prevDisplay, identity.Display)
+		}
+		// Reset injected runtime state when a phantom display-only record
+		// is upgraded to a real IEEE identity. Any Activity or Cycle that
+		// was pre-seeded via the display-name fallback path cannot be
+		// trusted as it may originate from a DoS-crafted topic.
+		if wasPhantom {
+			e.store.withEntry(id, func(ent *deviceEntry) {
+				ent.Device.Activity = model.Activity{State: model.ActivityUnknown}
+				ent.Device.Cycle = nil
+			})
 		}
 	}
 	return id
@@ -208,6 +227,10 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		if reading.OnBattery != nil {
 			v := *reading.OnBattery
 			l.OnBattery = &v
+		}
+		if reading.LowBattery != nil {
+			v := *reading.LowBattery
+			l.LowBattery = &v
 		}
 		if reading.Battery != nil {
 			v := *reading.Battery
@@ -566,6 +589,9 @@ func (e *Engine) emitCanonicalForReading(id string, identity model.DeviceIdentit
 	}
 	if r.OnBattery != nil {
 		emit("ups", "on_battery", *r.OnBattery, "")
+	}
+	if r.LowBattery != nil {
+		emit("ups", "low_battery", *r.LowBattery, "")
 	}
 	if r.RSSI != nil {
 		emit("radio", "rssi_dbm", *r.RSSI, "dBm")

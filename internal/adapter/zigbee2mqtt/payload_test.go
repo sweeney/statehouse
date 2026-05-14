@@ -55,6 +55,38 @@ func TestTopicFriendlyName(t *testing.T) {
 	}
 }
 
+// TestTopicFriendlyName_RejectLongRandomString verifies that a topic
+// containing a 100-character random string (the DoS vector closed by
+// issue #33) is rejected and returns "".
+func TestTopicFriendlyName_RejectLongRandomString(t *testing.T) {
+	// 100-character random-looking string — well above the 64-char limit.
+	longRandom := "aB3xQrKzPmLvNwOuTsYeHfGdCjIiJlRnVbUqWoAkEhSyXtDpFcMgZaBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789abcd"
+	topic := "zigbee2mqtt/" + longRandom
+	got := TopicFriendlyName("zigbee2mqtt", topic)
+	if got != "" {
+		t.Errorf("expected empty string for oversized random friendly name, got %q", got)
+	}
+}
+
+// TestTopicFriendlyName_AcceptValidFriendlyName verifies that a
+// well-formed friendly name (alphanumeric, underscores, dots, slashes)
+// within the 64-char limit is accepted.
+func TestTopicFriendlyName_AcceptValidFriendlyName(t *testing.T) {
+	cases := []string{
+		"kitchen_kettle",
+		"boiler-relay",
+		"sensor.living_room",
+		"device64charname012345678901234567890123456789012345678901234567", // exactly 64 chars
+	}
+	for _, name := range cases {
+		topic := "zigbee2mqtt/" + name
+		got := TopicFriendlyName("zigbee2mqtt", topic)
+		if got == "" {
+			t.Errorf("valid friendly name %q was rejected", name)
+		}
+	}
+}
+
 func TestAvailabilityFromTopic(t *testing.T) {
 	name, ok := AvailabilityFromTopic("zigbee2mqtt", "zigbee2mqtt/kettle/availability")
 	if !ok || name != "kettle" {
