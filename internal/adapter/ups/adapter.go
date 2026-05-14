@@ -11,27 +11,15 @@ package ups
 import (
 	"encoding/json"
 	"log/slog"
-	"math"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sweeney/statehouse/internal/adapter/timeutil"
+	"github.com/sweeney/statehouse/internal/adapter/validate"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
-
-// finiteInRange returns true when v is a finite number in [lo, hi].
-func finiteInRange(v float64, lo, hi float64) bool {
-	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi
-}
-
-// reUPSName accepts alphanumeric, underscore, and dash identifiers of 1–64 chars.
-var reUPSName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
-
-// validUPSName returns true when s matches the expected UPS name format.
-func validUPSName(s string) bool { return reUPSName.MatchString(s) }
 
 const SchemeName = "ups"
 
@@ -112,21 +100,21 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 
 	r := model.Reading{Timestamp: ts}
 	if p.Computed != nil {
-		if p.Computed.LoadWatts != nil && finiteInRange(*p.Computed.LoadWatts, -50_000, 200_000) {
+		if p.Computed.LoadWatts != nil && validate.FiniteInRange(*p.Computed.LoadWatts, -50_000, 200_000) {
 			r.PowerW = p.Computed.LoadWatts
 		}
-		if p.Computed.BatteryRuntimeMins != nil && finiteInRange(*p.Computed.BatteryRuntimeMins, 0, 100_000) {
+		if p.Computed.BatteryRuntimeMins != nil && validate.FiniteInRange(*p.Computed.BatteryRuntimeMins, 0, 100_000) {
 			r.BatteryRuntimeMins = p.Computed.BatteryRuntimeMins
 		}
 		r.OnBattery = p.Computed.OnBattery
 	}
 	if v, ok := p.Variables["battery.charge"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && finiteInRange(f, 0, 100) {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && validate.FiniteInRange(f, 0, 100) {
 			r.Battery = &f
 		}
 	}
 	if v, ok := p.Variables["input.voltage"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && finiteInRange(f, 0, 600) {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && validate.FiniteInRange(f, 0, 600) {
 			r.VoltageV = &f
 		}
 	}
@@ -151,7 +139,7 @@ func upsNameFromTopic(base, topic string) string {
 	if strings.Contains(name, "/") {
 		return "" // more segments than expected
 	}
-	if !validUPSName(name) {
+	if !validate.Identifier(name) {
 		return ""
 	}
 	return name

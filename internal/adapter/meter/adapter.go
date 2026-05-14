@@ -16,26 +16,14 @@ package meter
 import (
 	"encoding/json"
 	"log/slog"
-	"math"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/sweeney/statehouse/internal/adapter/timeutil"
+	"github.com/sweeney/statehouse/internal/adapter/validate"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
-
-// finiteInRange returns true when v is a finite number in [lo, hi].
-func finiteInRange(v float64, lo, hi float64) bool {
-	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi
-}
-
-// reSerial accepts hex-only serials of 6–32 characters (both meter and glow sensor).
-var reSerial = regexp.MustCompile(`^[0-9A-Fa-f]{6,32}$`)
-
-// validSerial returns true when s matches the expected serial format.
-func validSerial(s string) bool { return reSerial.MatchString(s) }
 
 const SchemeName = "meter"
 
@@ -129,12 +117,12 @@ func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
 	}
 
 	r := model.Reading{Timestamp: ts}
-	if v := p.ElectricityMeter.Energy.Import.Cumulative; v != nil && finiteInRange(*v, 0, 1e9) {
+	if v := p.ElectricityMeter.Energy.Import.Cumulative; v != nil && validate.FiniteInRange(*v, 0, 1e9) {
 		r.EnergyKWh = v
 	}
 	if v := p.ElectricityMeter.Power.Value; v != nil {
 		pw := *v * 1000
-		if finiteInRange(pw, -50_000, 200_000) {
+		if validate.FiniteInRange(pw, -50_000, 200_000) {
 			r.PowerW = &pw
 		}
 	}
@@ -166,16 +154,16 @@ func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial st
 	}
 
 	r := model.Reading{Timestamp: ts}
-	if entry.Temperature.Value != nil && finiteInRange(*entry.Temperature.Value, -50, 80) {
+	if entry.Temperature.Value != nil && validate.FiniteInRange(*entry.Temperature.Value, -50, 80) {
 		r.TemperatureC = entry.Temperature.Value
 	}
-	if entry.Humidity.Value != nil && finiteInRange(*entry.Humidity.Value, 0, 100) {
+	if entry.Humidity.Value != nil && validate.FiniteInRange(*entry.Humidity.Value, 0, 100) {
 		r.HumidityPct = entry.Humidity.Value
 	}
-	if entry.Battery != nil && entry.Battery.Value != nil && finiteInRange(*entry.Battery.Value, 0, 100) {
+	if entry.Battery != nil && entry.Battery.Value != nil && validate.FiniteInRange(*entry.Battery.Value, 0, 100) {
 		r.Battery = entry.Battery.Value
 	}
-	if entry.RSSI != nil && entry.RSSI.Value != nil && finiteInRange(*entry.RSSI.Value, -150, 0) {
+	if entry.RSSI != nil && entry.RSSI.Value != nil && validate.FiniteInRange(*entry.RSSI.Value, -150, 0) {
 		v := int(*entry.RSSI.Value)
 		r.RSSI = &v
 	}
@@ -199,7 +187,7 @@ func serialFromTopic(base, topic string) string {
 		return ""
 	}
 	serial := parts[0]
-	if !validSerial(serial) {
+	if !validate.HexIdentifier(serial) {
 		return ""
 	}
 	return serial
@@ -220,7 +208,7 @@ func glowSensorSerial(base, topic string) string {
 		return ""
 	}
 	serial := parts[3]
-	if !validSerial(serial) {
+	if !validate.HexIdentifier(serial) {
 		return ""
 	}
 	return serial
