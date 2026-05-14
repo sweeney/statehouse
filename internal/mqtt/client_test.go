@@ -1,8 +1,11 @@
 package mqtt
 
 import (
+	"sync"
 	"testing"
 	"time"
+
+	paho "github.com/eclipse/paho.mqtt.golang"
 )
 
 // These tests exercise the paho ClientOptions construction without
@@ -76,3 +79,108 @@ func TestBuildClientOptions_AuthSetWhenProvided(t *testing.T) {
 		t.Errorf("auth not applied: user=%q pw=%q", opts.Username, opts.Password)
 	}
 }
+
+// TestSubscribeRecordsInSubsSlice verifies that Subscribe() appends an entry
+// to the pahoClient.subs slice so that resubscribe() can replay it later.
+// It exercises the recording path without opening a network connection by
+// using a stub paho.Client.
+func TestSubscribeRecordsInSubsSlice(t *testing.T) {
+	p := &pahoClient{c: &stubPahoClient{}}
+
+	handler := func(topic string, payload []byte, retained bool) {}
+	if err := p.Subscribe("home/+/temperature", 1, handler); err != nil {
+		t.Fatalf("Subscribe returned unexpected error: %v", err)
+	}
+
+	p.subsMu.Lock()
+	n := len(p.subs)
+	sub := p.subs[0]
+	p.subsMu.Unlock()
+
+	if n != 1 {
+		t.Fatalf("expected 1 recorded subscription, got %d", n)
+	}
+	if sub.topic != "home/+/temperature" {
+		t.Errorf("recorded topic: got %q want home/+/temperature", sub.topic)
+	}
+	if sub.qos != 1 {
+		t.Errorf("recorded qos: got %d want 1", sub.qos)
+	}
+}
+
+// TestResubscribeReplaysAllTopics verifies that resubscribe() calls
+// paho Subscribe for every entry in the subs slice.  This is the
+// invariant that guarantees topics survive a broker reconnect.
+func TestResubscribeReplaysAllTopics(t *testing.T) {
+	stub := &stubPahoClient{}
+	p := &pahoClient{c: stub}
+
+	h := func(string, []byte, bool) {}
+	_ = p.Subscribe("a/b", 0, h)
+	_ = p.Subscribe("c/d", 1, h)
+
+	// Reset the stub's call log to simulate a fresh connection.
+	stub.mu.Lock()
+	stub.subscribed = nil
+	stub.mu.Unlock()
+
+	p.resubscribe(stub)
+
+	stub.mu.Lock()
+	got := append([]string(nil), stub.subscribed...)
+	stub.mu.Unlock()
+
+	if len(got) != 2 {
+		t.Fatalf("resubscribe: expected 2 subscribe calls, got %d (%v)", len(got), got)
+	}
+	want := map[string]bool{"a/b": true, "c/d": true}
+	for _, topic := range got {
+		if !want[topic] {
+			t.Errorf("unexpected topic in resubscribe: %q", topic)
+		}
+	}
+}
+
+// stubPahoClient is a minimal paho.Client that records Subscribe calls
+// and returns immediately-complete tokens.  Only the methods exercised
+// by pahoClient are implemented; the rest panic so accidental use is
+// obvious.
+type stubPahoClient struct {
+	mu         sync.Mutex
+	subscribed []string
+}
+
+func (s *stubPahoClient) Subscribe(topic string, qos byte, _ paho.MessageHandler) paho.Token {
+	s.mu.Lock()
+	s.subscribed = append(s.subscribed, topic)
+	s.mu.Unlock()
+	return &doneToken{}
+}
+
+func (s *stubPahoClient) IsConnected() bool       { return true }
+func (s *stubPahoClient) IsConnectionOpen() bool  { return true }
+func (s *stubPahoClient) Connect() paho.Token     { return &doneToken{} }
+func (s *stubPahoClient) Disconnect(quiesce uint) {}
+func (s *stubPahoClient) Publish(topic string, qos byte, retained bool, payload interface{}) paho.Token {
+	return &doneToken{}
+}
+func (s *stubPahoClient) SubscribeMultiple(filters map[string]byte, callback paho.MessageHandler) paho.Token {
+	return &doneToken{}
+}
+func (s *stubPahoClient) Unsubscribe(topics ...string) paho.Token             { return &doneToken{} }
+func (s *stubPahoClient) AddRoute(topic string, callback paho.MessageHandler) {}
+func (s *stubPahoClient) OptionsReader() paho.ClientOptionsReader {
+	return paho.NewClient(paho.NewClientOptions()).OptionsReader()
+}
+
+// doneToken is a paho.Token that is immediately complete with no error.
+type doneToken struct{}
+
+func (d *doneToken) Wait() bool                     { return true }
+func (d *doneToken) WaitTimeout(time.Duration) bool { return true }
+func (d *doneToken) Done() <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+func (d *doneToken) Error() error { return nil }
