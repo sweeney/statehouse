@@ -136,6 +136,14 @@ func (p *pahoClient) resubscribe(c paho.Client) {
 	}
 }
 
+// publishTimeout caps each paho Publish to bound the engine against a
+// stuck-broker scenario. The publisher holds an exclusive lock around
+// this call and is itself called synchronously from the engine's emit
+// hot path, so an unbounded wait here can stall every state mutation.
+//
+// Declared as a var (not a const) so tests can shorten it.
+var publishTimeout = 5 * time.Second
+
 func (p *pahoClient) Publish(topic string, qos byte, retained bool, payload []byte) error {
 	p.mu.Lock()
 	c := p.c
@@ -144,7 +152,9 @@ func (p *pahoClient) Publish(topic string, qos byte, retained bool, payload []by
 		return errors.New("mqtt not connected")
 	}
 	tok := c.Publish(topic, qos, retained, payload)
-	tok.Wait()
+	if !tok.WaitTimeout(publishTimeout) {
+		return errors.New("mqtt publish timeout")
+	}
 	return tok.Error()
 }
 
