@@ -299,6 +299,63 @@ func TestSensor_NoPowerNeeded(t *testing.T) {
 	}
 }
 
+// TestFirstLowPowerReadingResolvesUnknown verifies that a first reading
+// with power below idle_below_w immediately transitions the device out
+// of ActivityUnknown without waiting for hysteresis.
+func TestFirstLowPowerReadingResolvesUnknown(t *testing.T) {
+	const idleBelow = 5.0
+	const activeAbove = 50.0
+
+	type tc struct {
+		name      string
+		class     string
+		powerW    float64
+		wantAct   model.ActivityState
+		wantCycle bool // CycleStarted should be true for the "active" sub-cases
+	}
+	cases := []tc{
+		// Low-power first reading → idle (or normal_idle for Continuous).
+		{name: "ShortBurst_lowPower", class: ClassShortBurst, powerW: idleBelow - 1, wantAct: model.ActivityIdle},
+		{name: "CyclePower_lowPower", class: ClassCyclePower, powerW: idleBelow - 1, wantAct: model.ActivityIdle},
+		{name: "Continuous_lowPower", class: ClassContinuous, powerW: idleBelow - 1, wantAct: model.ActivityNormalIdle},
+		{name: "Media_lowPower", class: ClassMedia, powerW: idleBelow - 1, wantAct: model.ActivityIdle},
+
+		// High-power first reading (above active threshold, no sustained
+		// window) → appropriate active state.
+		{name: "ShortBurst_highPower", class: ClassShortBurst, powerW: activeAbove + 1, wantAct: model.ActivityActive, wantCycle: true},
+		{name: "CyclePower_highPower", class: ClassCyclePower, powerW: activeAbove + 1, wantAct: model.ActivityRunning, wantCycle: true},
+		{name: "Continuous_highPower", class: ClassContinuous, powerW: activeAbove + 1, wantAct: model.ActivityActiveCycle, wantCycle: true},
+		{name: "Media_highPower", class: ClassMedia, powerW: activeAbove + 1, wantAct: model.ActivityActive, wantCycle: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			now := time.Date(2026, 5, 14, 8, 0, 0, 0, time.UTC)
+			th := config.Thresholds{
+				IdleBelowW:           ptrF(idleBelow),
+				ActiveAboveW:         ptrF(activeAbove),
+				CompressorAboveW:     ptrF(activeAbove), // used by Continuous
+				ActiveSustainedFor:   nil,               // fire immediately
+				InactiveSustainedFor: nil,
+			}
+			rt := mkRuntime(c.class, th, energy.StrategyIntegration)
+			out := rt.OnReading(now, model.Reading{Timestamp: now, PowerW: ptrF(c.powerW)})
+			if out.PrevActivity != model.ActivityUnknown {
+				t.Errorf("expected prev=unknown, got %q", out.PrevActivity)
+			}
+			if out.NewActivity != c.wantAct {
+				t.Errorf("expected new=%q, got %q", c.wantAct, out.NewActivity)
+			}
+			if c.wantCycle && !out.CycleStarted {
+				t.Errorf("expected CycleStarted=true for high-power first reading")
+			}
+			if !c.wantCycle && out.NewActivity == model.ActivityUnknown {
+				t.Errorf("activity must not remain unknown after first low-power reading")
+			}
+		})
+	}
+}
+
 // TestStepContinuous_ExplicitZeroCompressorAboveW verifies that
 // CompressorAboveW=0 (explicit operator intent: "any draw counts")
 // is honoured and does NOT fall back to ActiveAboveW=100. A 10W

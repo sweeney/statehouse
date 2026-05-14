@@ -178,6 +178,11 @@ func (r *Runtime) stepShortBurst(at time.Time, p float64, out *Outcome) {
 		r.finishCycle(at)
 		return
 	}
+	// First low-power reading: resolve unknown → idle immediately.
+	if r.activity == model.ActivityUnknown && p < derefF64(r.Thresholds.IdleBelowW, 0) {
+		r.activity = model.ActivityIdle
+		out.NewActivity = model.ActivityIdle
+	}
 }
 
 // stepCycle implements the dishwasher/washer/dryer model. It uses the
@@ -196,6 +201,11 @@ func (r *Runtime) stepCycle(at time.Time, p float64, out *Outcome) {
 		out.CycleFinished = true
 		r.finishCycle(at)
 		return
+	}
+	// First low-power reading: resolve unknown → idle immediately.
+	if r.activity == model.ActivityUnknown && p < derefF64(r.Thresholds.IdleBelowW, 0) {
+		r.activity = model.ActivityIdle
+		out.NewActivity = model.ActivityIdle
 	}
 }
 
@@ -277,6 +287,11 @@ func (r *Runtime) stepMedia(at time.Time, p float64, out *Outcome) {
 		out.CycleFinished = true
 		r.finishCycle(at)
 		return
+	}
+	// First low-power reading: resolve unknown → idle immediately.
+	if r.activity == model.ActivityUnknown && p < derefF64(r.Thresholds.IdleBelowW, 0) {
+		r.activity = model.ActivityIdle
+		out.NewActivity = model.ActivityIdle
 	}
 }
 
