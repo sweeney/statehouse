@@ -280,6 +280,28 @@ func TestDeriveHouseState_ActiveDevicesList(t *testing.T) {
 	}
 }
 
+func TestDeriveHouseState_ActiveDevicesSortedAndStable(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg()
+	devices := map[string]model.Device{
+		"zebra":  makeBinaryDevice("zebra", model.ActivityActive, now.Add(-1*time.Minute)),
+		"alpha":  makeBinaryDevice("alpha", model.ActivityActive, now.Add(-1*time.Minute)),
+		"monkey": makeBinaryDevice("monkey", model.ActivityActive, now.Add(-1*time.Minute)),
+	}
+	want := []string{"alpha", "monkey", "zebra"}
+	for i := 0; i < 50; i++ {
+		h := DeriveHouseState(now, cfg, devices)
+		if len(h.ActiveDevices) != len(want) {
+			t.Fatalf("iter %d: len=%d want %d (%v)", i, len(h.ActiveDevices), len(want), h.ActiveDevices)
+		}
+		for j := range want {
+			if h.ActiveDevices[j] != want[j] {
+				t.Fatalf("iter %d: got %v want %v", i, h.ActiveDevices, want)
+			}
+		}
+	}
+}
+
 func TestDeriveHouseState_ActiveDevicesEmptyWhenIdle(t *testing.T) {
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	cfg := defaultCfg()
