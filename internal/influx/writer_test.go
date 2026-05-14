@@ -269,18 +269,36 @@ func TestEvidenceAsFields_EmptyInputReturnsNil(t *testing.T) {
 	}
 }
 
-func TestWriter_StatsCountsSuccessfulCanonicalWrites(t *testing.T) {
+func TestWriter_StatsCountsQueuedCanonicalWrites(t *testing.T) {
 	w, _, store := newWriterTest(t)
 	seedDevice(t, store, "x", device.ClassMedia, "")
 	for i := 0; i < 3; i++ {
 		w.OnCanonicalEvent(model.CanonicalEvent{Timestamp: time.Now(), DeviceID: "x", Attribute: "power_w", Value: 50.0})
 	}
-	success, failure := w.Stats()
-	if success != 3 {
-		t.Errorf("expected 3 successes, got %d", success)
+	queued, failure := w.Stats()
+	if queued != 3 {
+		t.Errorf("expected 3 queued, got %d", queued)
 	}
 	if failure != 0 {
 		t.Errorf("expected 0 failures, got %d", failure)
+	}
+}
+
+func TestWriter_QueuedIncrementsAfterOnCanonicalEvent(t *testing.T) {
+	w, _, store := newWriterTest(t)
+	seedDevice(t, store, "sensor", device.ClassSensor, "living_room")
+
+	queuedBefore, _ := w.Stats()
+	w.OnCanonicalEvent(model.CanonicalEvent{
+		Timestamp: time.Now(),
+		DeviceID:  "sensor",
+		Attribute: "temperature_c",
+		Value:     22.0,
+	})
+	queuedAfter, _ := w.Stats()
+
+	if queuedAfter != queuedBefore+1 {
+		t.Errorf("expected queued to increment by 1: before=%d after=%d", queuedBefore, queuedAfter)
 	}
 }
 

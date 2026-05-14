@@ -3,7 +3,6 @@ package influx
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
@@ -32,11 +31,10 @@ type Writer struct {
 	Store   *state.Store
 	Logger  *slog.Logger
 
-	client    influxdb2.Client
-	api       pointWriter
-	failures  uint64
-	successes uint64
-	mu        sync.Mutex
+	client   influxdb2.Client
+	api      pointWriter
+	queued   uint64
+	failures uint64
 }
 
 // Config carries the runtime connection parameters.
@@ -182,7 +180,7 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 	}
 	if p != nil {
 		w.api.WritePoint(p)
-		atomic.AddUint64(&w.successes, 1)
+		atomic.AddUint64(&w.queued, 1)
 	}
 }
 
@@ -204,6 +202,7 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		}
 		p := write.NewPoint("appliance_cycle", tags, fields, ev.Timestamp)
 		w.api.WritePoint(p)
+		atomic.AddUint64(&w.queued, 1)
 	case model.EvtDeviceActivityChanged:
 		from, _ := ev.Evidence["from"].(string)
 		to, _ := ev.Evidence["to"].(string)
@@ -211,6 +210,7 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		fields := map[string]any{"from": from, "to": to}
 		p := write.NewPoint("device_activity", tags, fields, ev.Timestamp)
 		w.api.WritePoint(p)
+		atomic.AddUint64(&w.queued, 1)
 	case model.EvtHouseStateChanged:
 		stateStr, _ := ev.Evidence["state"].(string)
 		confidence, _ := ev.Evidence["confidence"].(float64)
@@ -218,12 +218,14 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		fields := map[string]any{"confidence": confidence}
 		p := write.NewPoint("house_state", tags, fields, ev.Timestamp)
 		w.api.WritePoint(p)
+		atomic.AddUint64(&w.queued, 1)
 	}
 }
 
-// Stats returns success/failure counts; useful for /healthz and /metrics.
-func (w *Writer) Stats() (success, failure uint64) {
-	return atomic.LoadUint64(&w.successes), atomic.LoadUint64(&w.failures)
+// Stats returns queued/failure counts; useful for /healthz and /metrics.
+// "queued" reflects points enqueued for async delivery, not confirmed writes.
+func (w *Writer) Stats() (queued, failure uint64) {
+	return atomic.LoadUint64(&w.queued), atomic.LoadUint64(&w.failures)
 }
 
 // Ping is a best-effort connectivity check.
