@@ -30,11 +30,21 @@ type Config struct {
 	Password string
 }
 
+// subscription records a single topic registered via Subscribe so that it can
+// be re-issued whenever the paho client (re)connects.
+type subscription struct {
+	topic   string
+	qos     byte
+	handler paho.MessageHandler
+}
+
 // pahoClient implements Client backed by github.com/eclipse/paho.mqtt.golang.
 type pahoClient struct {
-	cfg Config
-	mu  sync.Mutex
-	c   paho.Client
+	cfg    Config
+	mu     sync.Mutex
+	c      paho.Client
+	subsMu sync.Mutex
+	subs   []subscription
 }
 
 // New creates a Client that connects to the given broker.
@@ -44,6 +54,9 @@ func New(cfg Config) Client {
 
 func (p *pahoClient) Connect() error {
 	opts := buildClientOptions(p.cfg)
+	opts.SetOnConnectHandler(func(c paho.Client) {
+		p.resubscribe(c)
+	})
 	c := paho.NewClient(opts)
 	// Store the client immediately. paho will retry the connection in
 	// the background. We bound the initial wait so callers don't block
@@ -95,13 +108,32 @@ func (p *pahoClient) Subscribe(topic string, qos byte, handler Handler) error {
 	if c == nil {
 		return errors.New("mqtt not connected")
 	}
-	tok := c.Subscribe(topic, qos, func(_ paho.Client, m paho.Message) {
+	pahoHandler := func(_ paho.Client, m paho.Message) {
 		handler(m.Topic(), m.Payload(), m.Retained())
-	})
+	}
+	// Record before subscribing so that a concurrent resubscribe triggered
+	// by an OnConnect event cannot miss this entry.
+	p.subsMu.Lock()
+	p.subs = append(p.subs, subscription{topic: topic, qos: qos, handler: pahoHandler})
+	p.subsMu.Unlock()
+
+	tok := c.Subscribe(topic, qos, pahoHandler)
 	if !tok.WaitTimeout(2 * time.Second) {
 		return errors.New("mqtt subscribe timed out; will retry on reconnect")
 	}
 	return tok.Error()
+}
+
+// resubscribe re-issues all registered subscriptions on the given paho client.
+// It is called from the OnConnect handler so topics are refreshed after every
+// broker reconnect.
+func (p *pahoClient) resubscribe(c paho.Client) {
+	p.subsMu.Lock()
+	subs := append([]subscription(nil), p.subs...)
+	p.subsMu.Unlock()
+	for _, s := range subs {
+		c.Subscribe(s.topic, s.qos, s.handler) //nolint:errcheck // best-effort; paho will retry
+	}
 }
 
 func (p *pahoClient) Publish(topic string, qos byte, retained bool, payload []byte) error {
