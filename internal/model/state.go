@@ -93,11 +93,11 @@ type CycleEnergy struct {
 // Cycle represents one in-flight or recently-finished session of a
 // power-monitored appliance.
 type Cycle struct {
-	Active           bool        `json:"active"`
-	StartedAt        time.Time   `json:"started_at"`
-	FinishedAt       *time.Time  `json:"finished_at,omitempty"`
-	DurationSeconds  int64       `json:"duration_seconds"`
-	Energy           CycleEnergy `json:"energy"`
+	Active          bool        `json:"active"`
+	StartedAt       time.Time   `json:"started_at"`
+	FinishedAt      *time.Time  `json:"finished_at,omitempty"`
+	DurationSeconds int64       `json:"duration_seconds"`
+	Energy          CycleEnergy `json:"energy"`
 }
 
 // Device is the canonical, downstream-facing view of one device.
