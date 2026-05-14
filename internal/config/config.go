@@ -159,6 +159,9 @@ type HouseConfig struct {
 	// EmptyAfter marks the house as empty if quiet for this long and no
 	// signals of presence have been seen.
 	EmptyAfter time.Duration `yaml:"empty_after"`
+	// SleepingAfter is the sustained quiet duration beyond which the house
+	// mode transitions to sleeping (when occupied).
+	SleepingAfter time.Duration `yaml:"sleeping_after"`
 }
 
 // Thresholds describes the per-class activity detection thresholds.
@@ -233,8 +236,9 @@ func Default() Config {
 			OfflineDebounce: 30 * time.Second,
 		},
 		House: HouseConfig{
-			QuietAfter: 30 * time.Minute,
-			EmptyAfter: 6 * time.Hour,
+			QuietAfter:    30 * time.Minute,
+			EmptyAfter:    6 * time.Hour,
+			SleepingAfter: 2 * time.Hour,
 		},
 	}
 }

@@ -204,8 +204,8 @@ func TestEngine_HouseRecomputesOnActivity(t *testing.T) {
 	engine.IngestReading(zid("0x00158d0000000009", "kitchen_kettle"), "zigbee2mqtt/kitchen_kettle",
 		model.Reading{Timestamp: now, PowerW: ptr(2000.0)})
 	h := store.House()
-	if h.State != model.HouseActive {
-		t.Fatalf("expected house active while kettle running, got %q", h.State)
+	if h.Occupancy.State != model.OccupancyOccupied {
+		t.Fatalf("expected house occupied while kettle running, got %q", h.Occupancy.State)
 	}
 }
 
@@ -287,8 +287,8 @@ func TestEngine_SensorDoesNotMakeHouseActive(t *testing.T) {
 	engine.IngestReading(zid("0xaa", "bedroom_climate"), "zigbee2mqtt/bedroom_climate",
 		model.Reading{Timestamp: clock.Now(), TemperatureC: ptr(21.4)})
 	h := store.House()
-	if h.State == model.HouseActive {
-		t.Fatalf("sensor reading must not make house active, got %q", h.State)
+	if h.Occupancy.State == model.OccupancyOccupied && h.Activity.State == model.HouseActivityBusy {
+		t.Fatalf("sensor reading must not make house busy/active, got occupancy=%q activity=%q", h.Occupancy.State, h.Activity.State)
 	}
 }
 
