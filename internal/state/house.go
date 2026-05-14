@@ -87,6 +87,10 @@ func DeriveHouseState(now time.Time, cfg config.HouseConfig, devices map[string]
 		return h
 	}
 	since := now.Sub(mostRecentActivity)
+	// TODO(asleep): HouseAsleep is defined but detection is not yet implemented.
+	// Detection would require: sustained quiet period during a configurable night
+	// window (e.g. 23:00–07:00), or an explicit sleep signal from an integration.
+	// Until then, DeriveHouseState never returns HouseAsleep.
 	switch {
 	case cfg.QuietAfter > 0 && since < cfg.QuietAfter:
 		h.State = model.HouseOccupied
