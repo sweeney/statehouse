@@ -29,6 +29,7 @@ type Reading struct {
 	// UPS
 	BatteryRuntimeMins *float64 // remaining battery runtime minutes
 	OnBattery          *bool    // true when running on battery
+	LowBattery         *bool    // true when battery is critically low
 
 	// Device health (ancillary — not counted in HasAnyMeasurement)
 	LinkQuality *int
@@ -46,5 +47,5 @@ func (r Reading) HasAnyMeasurement() bool {
 		r.PressureHPa != nil || r.WindSpeedMS != nil ||
 		r.WindDirDeg != nil || r.RainfallMM != nil ||
 		r.IlluminanceLux != nil || r.UVIndex != nil ||
-		r.BatteryRuntimeMins != nil || r.OnBattery != nil
+		r.BatteryRuntimeMins != nil || r.OnBattery != nil || r.LowBattery != nil
 }
