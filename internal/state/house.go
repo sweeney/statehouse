@@ -33,10 +33,13 @@ func isActiveDeviceState(s model.DeviceActivityState) bool {
 
 // isIdleDeviceState reports whether an activity state is a resting /
 // measurement-only state that does NOT indicate occupancy by itself.
+// Standby (e.g. powered-down TV) counts as idle: the device is no
+// longer driving occupancy, only the moment it entered standby is.
 func isIdleDeviceState(s model.DeviceActivityState) bool {
 	switch s {
 	case model.ActivityIdle, model.ActivityNormalIdle,
-		model.ActivityUnknown, model.ActivityReporting:
+		model.ActivityUnknown, model.ActivityReporting,
+		model.ActivityStandby:
 		return true
 	}
 	return false

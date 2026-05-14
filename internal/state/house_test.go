@@ -280,6 +280,29 @@ func TestDeriveHouseState_ActiveDevicesList(t *testing.T) {
 	}
 }
 
+// TestDeviceActivityStates_AreExhaustivelyClassified asserts that every
+// declared DeviceActivityState is bucketed by isActiveDeviceState or
+// isIdleDeviceState. Adding a new state without classifying it breaks
+// occupancy/activity inference; this test catches that at CI time.
+func TestDeviceActivityStates_AreExhaustivelyClassified(t *testing.T) {
+	allStates := []model.DeviceActivityState{
+		model.ActivityUnknown, model.ActivityIdle, model.ActivityActive,
+		model.ActivityStarting, model.ActivityRunning, model.ActivityFinishing,
+		model.ActivityFinishedRecently, model.ActivityStandby,
+		model.ActivityNormalIdle, model.ActivityActiveCycle, model.ActivityReporting,
+	}
+	for _, s := range allStates {
+		active := isActiveDeviceState(s)
+		idle := isIdleDeviceState(s)
+		if !active && !idle {
+			t.Errorf("state %q is in neither active nor idle bucket", s)
+		}
+		if active && idle {
+			t.Errorf("state %q is in both active and idle buckets", s)
+		}
+	}
+}
+
 func TestDeriveHouseState_ActiveDevicesSortedAndStable(t *testing.T) {
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	cfg := defaultCfg()
