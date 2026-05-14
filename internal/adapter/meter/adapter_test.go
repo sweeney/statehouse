@@ -51,7 +51,7 @@ func TestAdapter_Subscriptions(t *testing.T) {
 	}
 }
 
-const sampleMeter = `{"electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","energy":{"export":{"cumulative":0.000,"units":"kWh"},"import":{"cumulative":6252.217,"day":32.715,"week":90.226,"month":300.821,"units":"kWh","mpan":"not available","supplier":"Example Energy","price":{"unitrate":0.21940,"standingcharge":0.55590}}},"power":{"value":1.011,"units":"kW"}}}`
+const sampleMeter = `{"electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","energy":{"export":{"cumulative":0.000,"units":"kWh"},"import":{"cumulative":6252.217,"day":32.715,"week":90.226,"month":300.821,"units":"kWh","mpan":"not available","supplier":"Example Energy","price":{"unitrate":0.15000,"standingcharge":0.25000}}},"power":{"value":1.011,"units":"kW"}}}`
 
 func TestAdapter_ParsesMeterPayload(t *testing.T) {
 	a, store, _ := mkAdapter(t)
@@ -74,13 +74,13 @@ func TestAdapter_ParsesMeterPayload(t *testing.T) {
 	}
 }
 
-const sampleGlowSensor = `{"glowsensorth1":{"040D00000000":{"timestamp":"2026-05-13T23:03:55Z","temperature":{"value":19.073,"units":"°C"},"humidity":{"value":46,"units":"%"},"battery":{"value":55,"units":"%"},"rssi":{"value":-82,"units":"dBm"},"status":"connected","advname":"GlowSensorTH_AAA2-282365","customname":""}}}`
+const sampleGlowSensor = `{"glowsensorth1":{"00CAFEBABE01":{"timestamp":"2026-05-13T23:03:55Z","temperature":{"value":19.073,"units":"°C"},"humidity":{"value":46,"units":"%"},"battery":{"value":55,"units":"%"},"rssi":{"value":-82,"units":"dBm"},"status":"connected","advname":"GlowSensorTH_TESTDEVICE","customname":""}}}`
 
 func TestAdapter_ParsesGlowSensorPayload(t *testing.T) {
 	a, store, _ := mkAdapter(t)
-	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/040D00000000", []byte(sampleGlowSensor), false)
+	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/00CAFEBABE01", []byte(sampleGlowSensor), false)
 
-	dev, ok := store.Get("040D00000000")
+	dev, ok := store.Get("00CAFEBABE01")
 	if !ok {
 		t.Fatal("glow sensor device not found in store")
 	}
@@ -108,7 +108,7 @@ func TestAdapter_IgnoresUnrelatedTopics(t *testing.T) {
 	// invalid JSON for electricitymeter
 	a.HandleMessage("energy/001122AABBCC/SENSOR/electricitymeter", []byte(`not json`), false)
 	// invalid JSON for glow sensor
-	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/040D00000000", []byte(`not json`), false)
+	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/00CAFEBABE01", []byte(`not json`), false)
 	if n := len(store.Devices()); n != 0 {
 		t.Errorf("expected 0 devices, got %d", n)
 	}
@@ -128,10 +128,10 @@ func TestAdapter_SerialExtractedFromTopic(t *testing.T) {
 func TestAdapter_GlowSensorPartialPayload(t *testing.T) {
 	a, store, _ := mkAdapter(t)
 	// Payload has temperature and humidity but no battery or rssi fields.
-	partial := `{"glowsensorth1":{"040D00000000":{"timestamp":"2026-05-13T23:03:55Z","temperature":{"value":19.073,"units":"°C"},"humidity":{"value":46,"units":"%"}}}}`
-	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/040D00000000", []byte(partial), false)
+	partial := `{"glowsensorth1":{"00CAFEBABE01":{"timestamp":"2026-05-13T23:03:55Z","temperature":{"value":19.073,"units":"°C"},"humidity":{"value":46,"units":"%"}}}}`
+	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/00CAFEBABE01", []byte(partial), false)
 
-	dev, ok := store.Get("040D00000000")
+	dev, ok := store.Get("00CAFEBABE01")
 	if !ok {
 		t.Fatal("glow sensor device not found in store")
 	}
@@ -178,12 +178,12 @@ func TestAdapter_FutureMeterTimestampRejected(t *testing.T) {
 func TestAdapter_FutureGlowSensorTimestampRejected(t *testing.T) {
 	a, store, _ := mkAdapter(t)
 	future := time.Now().Add(50 * 365 * 24 * time.Hour).Format(time.RFC3339)
-	payload := fmt.Sprintf(`{"glowsensorth1":{"040D00000000":{"timestamp":%q,"temperature":{"value":20.0},"humidity":{"value":50.0}}}}`, future)
+	payload := fmt.Sprintf(`{"glowsensorth1":{"00CAFEBABE01":{"timestamp":%q,"temperature":{"value":20.0},"humidity":{"value":50.0}}}}`, future)
 	before := time.Now()
-	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/040D00000000", []byte(payload), false)
+	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/00CAFEBABE01", []byte(payload), false)
 	after := time.Now()
 
-	dev, ok := store.Get("040D00000000")
+	dev, ok := store.Get("00CAFEBABE01")
 	if !ok {
 		t.Fatal("glow sensor device not found in store")
 	}
