@@ -146,8 +146,9 @@ func TestResubscribeReplaysAllTopics(t *testing.T) {
 // by pahoClient are implemented; the rest panic so accidental use is
 // obvious.
 type stubPahoClient struct {
-	mu         sync.Mutex
-	subscribed []string
+	mu           sync.Mutex
+	subscribed   []string
+	publishToken paho.Token
 }
 
 func (s *stubPahoClient) Subscribe(topic string, qos byte, _ paho.MessageHandler) paho.Token {
@@ -162,6 +163,9 @@ func (s *stubPahoClient) IsConnectionOpen() bool  { return true }
 func (s *stubPahoClient) Connect() paho.Token     { return &doneToken{} }
 func (s *stubPahoClient) Disconnect(quiesce uint) {}
 func (s *stubPahoClient) Publish(topic string, qos byte, retained bool, payload interface{}) paho.Token {
+	if s.publishToken != nil {
+		return s.publishToken
+	}
 	return &doneToken{}
 }
 func (s *stubPahoClient) SubscribeMultiple(filters map[string]byte, callback paho.MessageHandler) paho.Token {
@@ -172,6 +176,39 @@ func (s *stubPahoClient) AddRoute(topic string, callback paho.MessageHandler) {}
 func (s *stubPahoClient) OptionsReader() paho.ClientOptionsReader {
 	return paho.NewClient(paho.NewClientOptions()).OptionsReader()
 }
+
+// TestPublishReturnsErrorOnTimeout verifies that a paho token that never
+// completes does not stall pahoClient.Publish — it must return a timeout
+// error so the publisher can move on instead of holding its lock forever.
+func TestPublishReturnsErrorOnTimeout(t *testing.T) {
+	saved := publishTimeout
+	publishTimeout = 50 * time.Millisecond
+	defer func() { publishTimeout = saved }()
+
+	stub := &stubPahoClient{publishToken: &stuckToken{}}
+	p := &pahoClient{c: stub}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- p.Publish("a/b", 0, false, []byte("x"))
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected timeout error, got nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Publish did not return within publishTimeout")
+	}
+}
+
+// stuckToken is a paho.Token whose WaitTimeout always reports "not done".
+type stuckToken struct{}
+
+func (s *stuckToken) Wait() bool                       { return false }
+func (s *stuckToken) WaitTimeout(d time.Duration) bool { time.Sleep(d); return false }
+func (s *stuckToken) Done() <-chan struct{}            { return make(chan struct{}) }
+func (s *stuckToken) Error() error                     { return nil }
 
 // doneToken is a paho.Token that is immediately complete with no error.
 type doneToken struct{}

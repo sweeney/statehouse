@@ -162,6 +162,24 @@ type HouseConfig struct {
 	// SleepingAfter is the sustained quiet duration beyond which the house
 	// mode transitions to sleeping (when occupied).
 	SleepingAfter time.Duration `yaml:"sleeping_after"`
+	// Timezone names a tz database location (e.g. "Europe/London") used to
+	// classify the mode dimension's night/day hour window. Empty means UTC
+	// (back-compat for existing configs); "Local" uses the host time zone.
+	// Invalid values fall back to UTC with a warning.
+	Timezone string `yaml:"timezone"`
+}
+
+// Location returns the time.Location implied by Timezone. Falls back to
+// time.UTC on parse failure.
+func (h HouseConfig) Location() *time.Location {
+	if h.Timezone == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(h.Timezone)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
 }
 
 // Thresholds describes the per-class activity detection thresholds.

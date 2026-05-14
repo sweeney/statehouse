@@ -280,6 +280,101 @@ func TestDeriveHouseState_ActiveDevicesList(t *testing.T) {
 	}
 }
 
+// TestDeriveHouseState_ModeNight_HonoursConfiguredTimezone verifies that
+// the night-hour classification uses the operator's configured timezone
+// rather than UTC. 23:00 local in San Francisco is 06:00 UTC the next day —
+// without honouring the timezone the mode would resolve to Day.
+func TestDeriveHouseState_ModeNight_HonoursConfiguredTimezone(t *testing.T) {
+	pacific, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Skipf("tz database unavailable: %v", err)
+	}
+	cfg := config.HouseConfig{
+		QuietAfter:    30 * time.Minute,
+		EmptyAfter:    2 * time.Hour,
+		SleepingAfter: 4 * time.Hour, // longer than elapsed → not sleeping
+		Timezone:      "America/Los_Angeles",
+	}
+
+	// 23:00 Pacific is night-local but day-UTC.
+	nowLocal := time.Date(2026, 5, 14, 23, 0, 0, 0, pacific)
+	lastActive := nowLocal.Add(-5 * time.Minute)
+	devices := map[string]model.Device{
+		"kettle": {
+			ID:    "kettle",
+			Class: device.ClassShortBurst,
+			Activity: model.Activity{
+				State:       model.ActivityIdle,
+				LastChanged: lastActive,
+				Confidence:  0.9,
+			},
+			Latest: model.Latest{LastSeen: lastActive},
+		},
+	}
+
+	h := DeriveHouseState(nowLocal, cfg, devices)
+	if h.Occupancy.State != model.OccupancyOccupied {
+		t.Fatalf("expected OccupancyOccupied 5min after activity, got %q", h.Occupancy.State)
+	}
+	if h.Mode.State != model.ModeNight {
+		t.Errorf("expected ModeNight at 23:00 Pacific (06:00 UTC), got %q", h.Mode.State)
+	}
+}
+
+// TestHouseConfig_LocationFallback asserts that an invalid timezone string
+// falls back to UTC rather than panicking.
+func TestHouseConfig_LocationFallback(t *testing.T) {
+	cfg := config.HouseConfig{Timezone: "Not/A/Real/Zone"}
+	if loc := cfg.Location(); loc != time.UTC {
+		t.Errorf("expected UTC fallback for invalid tz, got %v", loc)
+	}
+}
+
+// TestDeviceActivityStates_AreExhaustivelyClassified asserts that every
+// declared DeviceActivityState is bucketed by isActiveDeviceState or
+// isIdleDeviceState. Adding a new state without classifying it breaks
+// occupancy/activity inference; this test catches that at CI time.
+func TestDeviceActivityStates_AreExhaustivelyClassified(t *testing.T) {
+	allStates := []model.DeviceActivityState{
+		model.ActivityUnknown, model.ActivityIdle, model.ActivityActive,
+		model.ActivityStarting, model.ActivityRunning, model.ActivityFinishing,
+		model.ActivityFinishedRecently, model.ActivityStandby,
+		model.ActivityNormalIdle, model.ActivityActiveCycle, model.ActivityReporting,
+	}
+	for _, s := range allStates {
+		active := isActiveDeviceState(s)
+		idle := isIdleDeviceState(s)
+		if !active && !idle {
+			t.Errorf("state %q is in neither active nor idle bucket", s)
+		}
+		if active && idle {
+			t.Errorf("state %q is in both active and idle buckets", s)
+		}
+	}
+}
+
+func TestDeriveHouseState_ActiveDevicesSortedAndStable(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg()
+	devices := map[string]model.Device{
+		"zebra":  makeBinaryDevice("zebra", model.ActivityActive, now.Add(-1*time.Minute)),
+		"alpha":  makeBinaryDevice("alpha", model.ActivityActive, now.Add(-1*time.Minute)),
+		"monkey": makeBinaryDevice("monkey", model.ActivityActive, now.Add(-1*time.Minute)),
+	}
+	want := []string{"alpha", "monkey", "zebra"}
+	for i := 0; i < 50; i++ {
+		h := DeriveHouseState(now, cfg, devices)
+		if len(h.ActiveDevices) != len(want) {
+			t.Fatalf("iter %d: len=%d want %d (%v)", i, len(h.ActiveDevices), len(want), h.ActiveDevices)
+		}
+		for j := range want {
+			if h.ActiveDevices[j] != want[j] {
+				t.Fatalf("iter %d: got %v want %v", i, h.ActiveDevices, want)
+			}
+		}
+	}
+}
+
 func TestDeriveHouseState_ActiveDevicesEmptyWhenIdle(t *testing.T) {
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	cfg := defaultCfg()

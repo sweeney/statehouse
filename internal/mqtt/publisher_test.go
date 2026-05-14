@@ -171,6 +171,57 @@ func TestPublisher_SurvivesFaultClientWindow(t *testing.T) {
 	}
 }
 
+// TestPublisher_BuildersWrapPayloads verifies the DTO builder hooks are
+// invoked and their output is what lands on retained topics. This is the
+// contract that lets the MQTT snapshot carry schema_version / summary /
+// warnings the same way the HTTP /state response does.
+func TestPublisher_BuildersWrapPayloads(t *testing.T) {
+	pub, client, _ := newPublisherTest(t)
+	pub.BuildSnapshot = func(snap model.Snapshot, now time.Time) any {
+		return map[string]any{"schema_version": "v1", "devices": len(snap.Devices)}
+	}
+	pub.BuildHouse = func(h model.House) any {
+		return map[string]any{"shape": "house_dto"}
+	}
+	pub.BuildDevice = func(d model.Device, now time.Time) any {
+		return map[string]any{"id": d.ID, "shape": "device_dto"}
+	}
+
+	pub.OnDerivedEvent(model.DerivedEvent{
+		ID:        "evt",
+		Timestamp: time.Now().UTC(),
+		Type:      model.EvtHouseStateChanged,
+		DeviceID:  "kitchen_dishwasher",
+	})
+
+	got := client.PublishedOn("house/state/snapshot")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 snapshot publish, got %d", len(got))
+	}
+	if !contains(got[0].Payload, "schema_version") {
+		t.Errorf("snapshot payload missing builder output: %s", string(got[0].Payload))
+	}
+
+	got = client.PublishedOn("house/state/house")
+	if len(got) != 1 || !contains(got[0].Payload, "house_dto") {
+		t.Errorf("house payload not from BuildHouse: %s", string(got[0].Payload))
+	}
+
+	got = client.PublishedOn("house/state/devices/kitchen_dishwasher")
+	if len(got) != 1 || !contains(got[0].Payload, "device_dto") {
+		t.Errorf("device payload not from BuildDevice: %s", string(got[0].Payload))
+	}
+}
+
+func contains(b []byte, sub string) bool {
+	for i := 0; i+len(sub) <= len(b); i++ {
+		if string(b[i:i+len(sub)]) == sub {
+			return true
+		}
+	}
+	return false
+}
+
 func TestPublisher_RecordedTopicShapeMatchesContract(t *testing.T) {
 	// Catch any accidental topic-shape regression. The README documents
 	// these as the public contract.

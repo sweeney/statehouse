@@ -43,6 +43,11 @@ availability:
 house:
   quiet_after: 30m
   empty_after: 6h
+  # Timezone used to bucket the mode dimension's night/day hours.
+  # Empty (or omitted) means UTC. Set to your local tz (e.g.
+  # "Europe/London", "America/Los_Angeles", or "Local") so the
+  # Mode=Night / Mode=Day window matches the operator's wall clock.
+  timezone: Local
 
 device_classes:
   short_burst_power_device:
