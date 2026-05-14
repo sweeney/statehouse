@@ -132,9 +132,16 @@ func TestHandleHouse_LastChangedNullWhenZero(t *testing.T) {
 		t.Fatalf("parse response: %v", err)
 	}
 
-	// A freshly-created house has zero LastChanged; DTO must map it to nil.
-	if h.LastChanged != nil {
-		t.Errorf("expected LastChanged to be nil for zero-time house, got %v", h.LastChanged)
+	// A freshly-created house has zero LastChanged on every dimension;
+	// the DTO must map each one to nil.
+	if h.Occupancy.LastChanged != nil {
+		t.Errorf("expected Occupancy.LastChanged to be nil for zero-time house, got %v", h.Occupancy.LastChanged)
+	}
+	if h.Activity.LastChanged != nil {
+		t.Errorf("expected Activity.LastChanged to be nil for zero-time house, got %v", h.Activity.LastChanged)
+	}
+	if h.Mode.LastChanged != nil {
+		t.Errorf("expected Mode.LastChanged to be nil for zero-time house, got %v", h.Mode.LastChanged)
 	}
 
 	// Verify via raw JSON bytes that the zero instant is absent.

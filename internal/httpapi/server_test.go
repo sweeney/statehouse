@@ -74,8 +74,8 @@ func TestHandleStateAndDevices(t *testing.T) {
 	if len(snap.Devices) != 1 {
 		t.Fatalf("expected 1 device, got %d", len(snap.Devices))
 	}
-	if snap.House.State != model.HouseActive {
-		t.Fatalf("expected house active, got %q", snap.House.State)
+	if snap.House.Activity.State == model.HouseActivityUnknown {
+		t.Fatalf("expected house activity state to be set after high-power reading, got %q", snap.House.Activity.State)
 	}
 
 	r = httptest.NewRequest(http.MethodGet, "/state/devices/kettle", nil)
@@ -148,6 +148,17 @@ func TestHandleHouse(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &h); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+	// All three dimension states must be non-empty strings; the valid zero
+	// state is "unknown", not the empty string "".
+	if string(h.Occupancy.State) == "" {
+		t.Errorf("expected Occupancy.State to be a non-empty string (e.g. %q), got empty", model.OccupancyUnknown)
+	}
+	if string(h.Activity.State) == "" {
+		t.Errorf("expected Activity.State to be a non-empty string (e.g. %q), got empty", model.HouseActivityUnknown)
+	}
+	if string(h.Mode.State) == "" {
+		t.Errorf("expected Mode.State to be a non-empty string (e.g. %q), got empty", model.ModeUnknown)
+	}
 }
 
 func TestUnknownRouteReturns404(t *testing.T) {
@@ -165,7 +176,7 @@ func TestUnknownRouteReturns404(t *testing.T) {
 func makeDeviceSnap(d model.Device) model.Snapshot {
 	return model.Snapshot{
 		GeneratedAt: time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
-		House:       model.House{State: model.HouseUnknown},
+		House:       model.House{},
 		Devices:     map[string]model.Device{d.ID: d},
 	}
 }
@@ -381,7 +392,7 @@ func TestSnapshot_Summary(t *testing.T) {
 
 	snap := model.Snapshot{
 		GeneratedAt: now,
-		House:       model.House{State: model.HouseUnknown},
+		House:       model.House{},
 		Devices: map[string]model.Device{
 			"d1": d1,
 			"d2": d2,
