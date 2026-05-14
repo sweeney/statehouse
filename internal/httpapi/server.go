@@ -121,15 +121,21 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.Store.Snapshot())
+	writeJSON(w, http.StatusOK, buildSnapshot(s.Store.Snapshot(), time.Now()))
 }
 
 func (s *Server) handleHouse(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.Store.House())
+	writeJSON(w, http.StatusOK, buildHouseResponse(s.Store.House()))
 }
 
 func (s *Server) handleDevices(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.Store.Devices())
+	now := time.Now()
+	devices := s.Store.Devices()
+	out := make(map[string]DeviceResponse, len(devices))
+	for id, d := range devices {
+		out[id] = buildDeviceResponse(d, now, nil)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +149,7 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "device not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, d)
+	writeJSON(w, http.StatusOK, buildDeviceResponse(d, time.Now(), nil))
 }
 
 func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
