@@ -1,6 +1,7 @@
 package device
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/sweeney/statehouse/internal/config"
@@ -156,17 +157,32 @@ func (r *Resolver) classifyByHints(name string) (string, bool) {
 	if n == "" {
 		return "", false
 	}
+	type match struct {
+		class   string
+		hintLen int
+	}
+	var matches []match
 	for class, cfg := range r.classes {
 		for _, hint := range cfg.NameHints {
 			if hint == "" {
 				continue
 			}
 			if strings.Contains(n, strings.ToLower(hint)) {
-				return class, true
+				matches = append(matches, match{class: class, hintLen: len(hint)})
+				break // one match per class is enough
 			}
 		}
 	}
-	return "", false
+	if len(matches) == 0 {
+		return "", false
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].hintLen != matches[j].hintLen {
+			return matches[i].hintLen > matches[j].hintLen // longer hint wins
+		}
+		return matches[i].class < matches[j].class // lexicographic tiebreaker
+	})
+	return matches[0].class, true
 }
 
 func profileFromOverride(d config.DeviceConfig, classes map[string]config.DeviceClassConfig) Profile {
@@ -187,19 +203,19 @@ func profileFromOverride(d config.DeviceConfig, classes map[string]config.Device
 
 func mergeThresholds(base, override config.Thresholds) config.Thresholds {
 	out := base
-	if override.IdleBelowW != 0 {
+	if override.IdleBelowW != nil {
 		out.IdleBelowW = override.IdleBelowW
 	}
-	if override.ActiveAboveW != 0 {
+	if override.ActiveAboveW != nil {
 		out.ActiveAboveW = override.ActiveAboveW
 	}
-	if override.ActiveSustainedFor != 0 {
+	if override.ActiveSustainedFor != nil {
 		out.ActiveSustainedFor = override.ActiveSustainedFor
 	}
-	if override.InactiveSustainedFor != 0 {
+	if override.InactiveSustainedFor != nil {
 		out.InactiveSustainedFor = override.InactiveSustainedFor
 	}
-	if override.CompressorAboveW != 0 {
+	if override.CompressorAboveW != nil {
 		out.CompressorAboveW = override.CompressorAboveW
 	}
 	return out

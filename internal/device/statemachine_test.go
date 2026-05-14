@@ -18,15 +18,16 @@ func mkRuntime(class string, th config.Thresholds, strategy energy.Strategy) *Ru
 	return NewRuntime(p, 30*time.Minute)
 }
 
-func ptrF(v float64) *float64 { return &v }
+func ptrF(v float64) *float64         { return &v }
+func ptrDur(v time.Duration) *time.Duration { return &v }
 
 func TestShortBurst_HysteresisAvoidsFalseStart(t *testing.T) {
 	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 	rt := mkRuntime(ClassShortBurst, config.Thresholds{
-		IdleBelowW:           5,
-		ActiveAboveW:         50,
-		ActiveSustainedFor:   3 * time.Second,
-		InactiveSustainedFor: 10 * time.Second,
+		IdleBelowW:           ptrF(5),
+		ActiveAboveW:         ptrF(50),
+		ActiveSustainedFor:   ptrDur(3 * time.Second),
+		InactiveSustainedFor: ptrDur(10 * time.Second),
 	}, energy.StrategyIntegration)
 	// One high reading is not enough to flip.
 	out := rt.OnReading(now, model.Reading{Timestamp: now, PowerW: ptrF(60)})
@@ -43,10 +44,10 @@ func TestShortBurst_HysteresisAvoidsFalseStart(t *testing.T) {
 func TestShortBurst_StartsAfterSustained(t *testing.T) {
 	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 	rt := mkRuntime(ClassShortBurst, config.Thresholds{
-		IdleBelowW:           5,
-		ActiveAboveW:         50,
-		ActiveSustainedFor:   3 * time.Second,
-		InactiveSustainedFor: 5 * time.Second,
+		IdleBelowW:           ptrF(5),
+		ActiveAboveW:         ptrF(50),
+		ActiveSustainedFor:   ptrDur(3 * time.Second),
+		InactiveSustainedFor: ptrDur(5 * time.Second),
 	}, energy.StrategyIntegration)
 	rt.OnReading(now, model.Reading{Timestamp: now, PowerW: ptrF(60)})
 	out := rt.OnReading(now.Add(4*time.Second), model.Reading{Timestamp: now.Add(4 * time.Second), PowerW: ptrF(1800)})
@@ -61,10 +62,10 @@ func TestShortBurst_StartsAfterSustained(t *testing.T) {
 func TestCycle_StartFinishAndCounterEnergy(t *testing.T) {
 	now := time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC)
 	th := config.Thresholds{
-		IdleBelowW:           5,
-		ActiveAboveW:         20,
-		ActiveSustainedFor:   10 * time.Second,
-		InactiveSustainedFor: 5 * time.Minute,
+		IdleBelowW:           ptrF(5),
+		ActiveAboveW:         ptrF(20),
+		ActiveSustainedFor:   ptrDur(10 * time.Second),
+		InactiveSustainedFor: ptrDur(5 * time.Minute),
 	}
 	rt := mkRuntime(ClassCyclePower, th, energy.StrategyCounter)
 	// Seed counter before activity.
@@ -94,10 +95,10 @@ func TestCycle_StartFinishAndCounterEnergy(t *testing.T) {
 func TestCycle_IntegrationGapDuringActiveCycle(t *testing.T) {
 	now := time.Date(2026, 5, 13, 1, 0, 0, 0, time.UTC)
 	th := config.Thresholds{
-		IdleBelowW:           5,
-		ActiveAboveW:         20,
-		ActiveSustainedFor:   1 * time.Second,
-		InactiveSustainedFor: 1 * time.Second,
+		IdleBelowW:           ptrF(5),
+		ActiveAboveW:         ptrF(20),
+		ActiveSustainedFor:   ptrDur(1 * time.Second),
+		InactiveSustainedFor: ptrDur(1 * time.Second),
 	}
 	rt := mkRuntime(ClassCyclePower, th, energy.StrategyIntegration)
 	rt.OnReading(now, model.Reading{Timestamp: now, PowerW: ptrF(1000)})
@@ -115,11 +116,11 @@ func TestCycle_IntegrationGapDuringActiveCycle(t *testing.T) {
 func TestContinuous_TreatsIdleAsNonZero(t *testing.T) {
 	now := time.Date(2026, 5, 13, 0, 0, 0, 0, time.UTC)
 	th := config.Thresholds{
-		IdleBelowW:           5,
-		ActiveAboveW:         25,
-		CompressorAboveW:     25,
-		ActiveSustainedFor:   1 * time.Second,
-		InactiveSustainedFor: 1 * time.Second,
+		IdleBelowW:           ptrF(5),
+		ActiveAboveW:         ptrF(25),
+		CompressorAboveW:     ptrF(25),
+		ActiveSustainedFor:   ptrDur(1 * time.Second),
+		InactiveSustainedFor: ptrDur(1 * time.Second),
 	}
 	rt := mkRuntime(ClassContinuous, th, energy.StrategyCounter)
 	// 2W idle - normal_idle, not "active".
@@ -138,10 +139,10 @@ func TestContinuous_TreatsIdleAsNonZero(t *testing.T) {
 func TestMedia_TransitionsActiveStandby(t *testing.T) {
 	now := time.Date(2026, 5, 13, 20, 0, 0, 0, time.UTC)
 	th := config.Thresholds{
-		IdleBelowW:           5,
-		ActiveAboveW:         20,
-		ActiveSustainedFor:   1 * time.Second,
-		InactiveSustainedFor: 1 * time.Second,
+		IdleBelowW:           ptrF(5),
+		ActiveAboveW:         ptrF(20),
+		ActiveSustainedFor:   ptrDur(1 * time.Second),
+		InactiveSustainedFor: ptrDur(1 * time.Second),
 	}
 	rt := mkRuntime(ClassMedia, th, energy.StrategyIntegration)
 	rt.OnReading(now, model.Reading{Timestamp: now, PowerW: ptrF(80)})
@@ -158,7 +159,7 @@ func TestMedia_TransitionsActiveStandby(t *testing.T) {
 
 func TestOnReading_NoPowerDoesNotTransition(t *testing.T) {
 	now := time.Date(2026, 5, 13, 0, 0, 0, 0, time.UTC)
-	th := config.Thresholds{IdleBelowW: 5, ActiveAboveW: 20, ActiveSustainedFor: 0, InactiveSustainedFor: 0}
+	th := config.Thresholds{IdleBelowW: ptrF(5), ActiveAboveW: ptrF(20)}
 	rt := mkRuntime(ClassCyclePower, th, energy.StrategyCounter)
 	state := "ON"
 	out := rt.OnReading(now, model.Reading{Timestamp: now, State: &state, LinkQuality: nil})
@@ -207,8 +208,8 @@ func TestBinary_OffFinishesCycleWithDuration(t *testing.T) {
 func TestBinary_SustainedWindowDebouncesBlip(t *testing.T) {
 	now := time.Date(2026, 5, 13, 7, 0, 0, 0, time.UTC)
 	rt := mkRuntime(ClassBinaryState, config.Thresholds{
-		ActiveSustainedFor:   5 * time.Second,
-		InactiveSustainedFor: 5 * time.Second,
+		ActiveSustainedFor:   ptrDur(5 * time.Second),
+		InactiveSustainedFor: ptrDur(5 * time.Second),
 	}, "")
 	rt.OnReading(now, model.Reading{Timestamp: now, State: ptrS("ON")})
 	// Blip back to OFF before window matures — must NOT activate.

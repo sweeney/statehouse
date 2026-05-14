@@ -162,14 +162,16 @@ type HouseConfig struct {
 }
 
 // Thresholds describes the per-class activity detection thresholds.
+// All fields are pointers so that an explicitly-set zero value is
+// honoured and not silently overridden by the class default.
 type Thresholds struct {
-	IdleBelowW         float64       `yaml:"idle_below_w"`
-	ActiveAboveW       float64       `yaml:"active_above_w"`
-	ActiveSustainedFor time.Duration `yaml:"active_sustained_for"`
-	InactiveSustainedFor time.Duration `yaml:"inactive_sustained_for"`
+	IdleBelowW           *float64       `yaml:"idle_below_w"`
+	ActiveAboveW         *float64       `yaml:"active_above_w"`
+	ActiveSustainedFor   *time.Duration `yaml:"active_sustained_for"`
+	InactiveSustainedFor *time.Duration `yaml:"inactive_sustained_for"`
 	// CompressorAboveW is used by continuous_power_device. When set, an
 	// active cycle begins when power exceeds this value.
-	CompressorAboveW float64 `yaml:"compressor_above_w"`
+	CompressorAboveW *float64 `yaml:"compressor_above_w"`
 }
 
 // DeviceClassConfig describes one device class profile.

@@ -53,8 +53,10 @@ func (s *Server) OnCanonicalEvent(_ model.CanonicalEvent) { atomic.AddUint64(&s.
 // OnDerivedEvent satisfies state.EventSink for metrics counting.
 func (s *Server) OnDerivedEvent(_ model.DerivedEvent) { atomic.AddUint64(&s.derivedCount, 1) }
 
-// Start runs the HTTP server until the context is cancelled.
-func (s *Server) Start(ctx context.Context) error {
+// newMux builds and returns the ServeMux used by both Start and tests.
+// Centralising route registration here means tests always exercise the
+// same routes as the running server.
+func newMux(s *Server) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/state", s.handleState)
@@ -63,9 +65,14 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/state/devices/", s.handleDevice)
 	mux.HandleFunc("/events/recent", s.handleRecent)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	return mux
+}
+
+// Start runs the HTTP server until the context is cancelled.
+func (s *Server) Start(ctx context.Context) error {
 	s.srv = &http.Server{
 		Addr:              s.Listen,
-		Handler:           mux,
+		Handler:           newMux(s),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errCh := make(chan error, 1)

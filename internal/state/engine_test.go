@@ -40,19 +40,17 @@ func mkEngine() (*Engine, *Store, *collector, *testutil.FakeClock) {
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
 		"cycle_power_device": {
 			DefaultThresholds: config.Thresholds{
-				IdleBelowW:           5,
-				ActiveAboveW:         20,
-				ActiveSustainedFor:   1 * time.Second,
-				InactiveSustainedFor: 1 * time.Second,
+				IdleBelowW:           ptr(5.0),
+				ActiveAboveW:         ptr(20.0),
+				ActiveSustainedFor:   ptr(1 * time.Second),
+				InactiveSustainedFor: ptr(1 * time.Second),
 			},
 			EnergyStrategy: "counter",
 		},
 		"short_burst_power_device": {
 			DefaultThresholds: config.Thresholds{
-				IdleBelowW:           5,
-				ActiveAboveW:         50,
-				ActiveSustainedFor:   0,
-				InactiveSustainedFor: 0,
+				IdleBelowW:   ptr(5.0),
+				ActiveAboveW: ptr(50.0),
 			},
 			EnergyStrategy: "integration",
 		},

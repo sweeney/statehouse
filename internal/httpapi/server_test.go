@@ -22,8 +22,8 @@ func setup(t *testing.T) (*Server, *state.Engine) {
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
 		"short_burst_power_device": {
 			DefaultThresholds: config.Thresholds{
-				IdleBelowW: 5, ActiveAboveW: 50,
-				ActiveSustainedFor: 0, InactiveSustainedFor: 0,
+				IdleBelowW:   testutil.PtrF64(5),
+				ActiveAboveW: testutil.PtrF64(50),
 			},
 			EnergyStrategy: "integration",
 			NameHints:      []string{"kettle"},
@@ -133,17 +133,28 @@ func TestHandleMetrics(t *testing.T) {
 	}
 }
 
-// newMux constructs the same mux the running server would, without
-// listening on a socket. We replicate the wiring here so we can hit
-// handlers directly.
-func newMux(s *Server) *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/state", s.handleState)
-	mux.HandleFunc("/state/house", s.handleHouse)
-	mux.HandleFunc("/state/devices", s.handleDevices)
-	mux.HandleFunc("/state/devices/", s.handleDevice)
-	mux.HandleFunc("/events/recent", s.handleRecent)
-	mux.HandleFunc("/metrics", s.handleMetrics)
-	return mux
+func TestHandleHouse(t *testing.T) {
+	srv, _ := setup(t)
+	mux := newMux(srv)
+	r := httptest.NewRequest(http.MethodGet, "/state/house", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var h model.House
+	if err := json.Unmarshal(w.Body.Bytes(), &h); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+}
+
+func TestUnknownRouteReturns404(t *testing.T) {
+	srv, _ := setup(t)
+	mux := newMux(srv)
+	r := httptest.NewRequest(http.MethodGet, "/no-such-route", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown route, got %d", w.Code)
+	}
 }

@@ -20,18 +20,20 @@ func fixtureCfg() config.Config {
 		"cycle_power_device": {
 			NameHints: []string{"dishwasher"},
 			DefaultThresholds: config.Thresholds{
-				IdleBelowW: 5, ActiveAboveW: 20,
-				ActiveSustainedFor:   10 * time.Second,
-				InactiveSustainedFor: 5 * time.Minute,
+				IdleBelowW:           testutil.PtrF64(5),
+				ActiveAboveW:         testutil.PtrF64(20),
+				ActiveSustainedFor:   testutil.PtrDur(10 * time.Second),
+				InactiveSustainedFor: testutil.PtrDur(5 * time.Minute),
 			},
 			EnergyStrategy: "counter",
 		},
 		"short_burst_power_device": {
 			NameHints: []string{"kettle"},
 			DefaultThresholds: config.Thresholds{
-				IdleBelowW: 5, ActiveAboveW: 50,
-				ActiveSustainedFor:   3 * time.Second,
-				InactiveSustainedFor: 10 * time.Second,
+				IdleBelowW:           testutil.PtrF64(5),
+				ActiveAboveW:         testutil.PtrF64(50),
+				ActiveSustainedFor:   testutil.PtrDur(3 * time.Second),
+				InactiveSustainedFor: testutil.PtrDur(10 * time.Second),
 			},
 			EnergyStrategy: "integration",
 		},
@@ -153,8 +155,8 @@ func TestFixture_RenameKeepsState(t *testing.T) {
 	cfg.DeviceClasses["short_burst_power_device"] = config.DeviceClassConfig{
 		NameHints: []string{"plug"},
 		DefaultThresholds: config.Thresholds{
-			IdleBelowW: 5, ActiveAboveW: 50,
-			ActiveSustainedFor: 0, InactiveSustainedFor: 0,
+			IdleBelowW:   testutil.PtrF64(5),
+			ActiveAboveW: testutil.PtrF64(50),
 		},
 		EnergyStrategy: "integration",
 	}

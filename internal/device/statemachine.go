@@ -8,6 +8,20 @@ import (
 	"github.com/sweeney/statehouse/internal/model"
 )
 
+func derefF64(p *float64, def float64) float64 {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
+func derefDur(p *time.Duration, def time.Duration) time.Duration {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
 // Outcome captures everything the engine learned by feeding one
 // reading into a device. State transitions are advisory: the caller
 // decides which derived events to emit based on the
@@ -179,17 +193,19 @@ func (r *Runtime) stepCycle(at time.Time, p float64, out *Outcome) {
 // Idle is not zero; the device alternates between a low standby draw
 // and a compressor cycle above CompressorAboveW.
 func (r *Runtime) stepContinuous(at time.Time, p float64, out *Outcome) {
-	highTh := r.Thresholds.CompressorAboveW
+	highTh := derefF64(r.Thresholds.CompressorAboveW, 0)
 	if highTh == 0 {
-		highTh = r.Thresholds.ActiveAboveW
+		highTh = derefF64(r.Thresholds.ActiveAboveW, 0)
 	}
-	lowTh := r.Thresholds.IdleBelowW
+	lowTh := derefF64(r.Thresholds.IdleBelowW, 0)
+	inactiveSustainedFor := derefDur(r.Thresholds.InactiveSustainedFor, 0)
+	activeSustainedFor := derefDur(r.Thresholds.ActiveSustainedFor, 0)
 	switch r.activity {
 	case model.ActivityActiveCycle:
 		if p <= lowTh {
 			if r.candidate == nil || !r.candidate.belowPrevLo {
 				r.candidate = &candidateSample{at: at, powerW: p, belowPrevLo: true}
-				if r.Thresholds.InactiveSustainedFor <= 0 {
+				if inactiveSustainedFor <= 0 {
 					r.activity = model.ActivityNormalIdle
 					out.NewActivity = model.ActivityNormalIdle
 					out.CycleFinished = true
@@ -198,7 +214,7 @@ func (r *Runtime) stepContinuous(at time.Time, p float64, out *Outcome) {
 				}
 				return
 			}
-			if at.Sub(r.candidate.at) >= r.Thresholds.InactiveSustainedFor {
+			if at.Sub(r.candidate.at) >= inactiveSustainedFor {
 				r.activity = model.ActivityNormalIdle
 				out.NewActivity = model.ActivityNormalIdle
 				out.CycleFinished = true
@@ -213,7 +229,7 @@ func (r *Runtime) stepContinuous(at time.Time, p float64, out *Outcome) {
 		if p >= highTh {
 			if r.candidate == nil || !r.candidate.abovePrevHi {
 				r.candidate = &candidateSample{at: at, powerW: p, abovePrevHi: true}
-				if r.Thresholds.ActiveSustainedFor <= 0 {
+				if activeSustainedFor <= 0 {
 					r.activity = model.ActivityActiveCycle
 					out.NewActivity = model.ActivityActiveCycle
 					out.CycleStarted = true
@@ -222,7 +238,7 @@ func (r *Runtime) stepContinuous(at time.Time, p float64, out *Outcome) {
 				}
 				return
 			}
-			if at.Sub(r.candidate.at) >= r.Thresholds.ActiveSustainedFor {
+			if at.Sub(r.candidate.at) >= activeSustainedFor {
 				r.activity = model.ActivityActiveCycle
 				out.NewActivity = model.ActivityActiveCycle
 				out.CycleStarted = true
@@ -262,12 +278,14 @@ func (r *Runtime) stepMedia(at time.Time, p float64, out *Outcome) {
 // zero, but DurationSeconds tells the consumer how long the device
 // was on. Caller is responsible for normalising state to "ON"/"OFF".
 func (r *Runtime) stepBinary(at time.Time, state string, out *Outcome) {
+	inactiveSustainedFor := derefDur(r.Thresholds.InactiveSustainedFor, 0)
+	activeSustainedFor := derefDur(r.Thresholds.ActiveSustainedFor, 0)
 	switch r.activity {
 	case model.ActivityActive:
 		if state == "OFF" {
 			if r.candidate == nil || !r.candidate.belowPrevLo {
 				r.candidate = &candidateSample{at: at, belowPrevLo: true}
-				if r.Thresholds.InactiveSustainedFor <= 0 {
+				if inactiveSustainedFor <= 0 {
 					r.activity = model.ActivityIdle
 					out.NewActivity = model.ActivityIdle
 					out.CycleFinished = true
@@ -276,7 +294,7 @@ func (r *Runtime) stepBinary(at time.Time, state string, out *Outcome) {
 				}
 				return
 			}
-			if at.Sub(r.candidate.at) >= r.Thresholds.InactiveSustainedFor {
+			if at.Sub(r.candidate.at) >= inactiveSustainedFor {
 				r.activity = model.ActivityIdle
 				out.NewActivity = model.ActivityIdle
 				out.CycleFinished = true
@@ -291,7 +309,7 @@ func (r *Runtime) stepBinary(at time.Time, state string, out *Outcome) {
 		if state == "ON" {
 			if r.candidate == nil || !r.candidate.abovePrevHi {
 				r.candidate = &candidateSample{at: at, abovePrevHi: true}
-				if r.Thresholds.ActiveSustainedFor <= 0 {
+				if activeSustainedFor <= 0 {
 					r.activity = model.ActivityActive
 					out.NewActivity = model.ActivityActive
 					out.CycleStarted = true
@@ -300,7 +318,7 @@ func (r *Runtime) stepBinary(at time.Time, state string, out *Outcome) {
 				}
 				return
 			}
-			if at.Sub(r.candidate.at) >= r.Thresholds.ActiveSustainedFor {
+			if at.Sub(r.candidate.at) >= activeSustainedFor {
 				r.activity = model.ActivityActive
 				out.NewActivity = model.ActivityActive
 				out.CycleStarted = true
@@ -325,7 +343,9 @@ func (r *Runtime) maybeBegin(at time.Time, p float64) bool {
 		r.activity == model.ActivityActiveCycle {
 		return false
 	}
-	if p < r.Thresholds.ActiveAboveW {
+	activeAboveW := derefF64(r.Thresholds.ActiveAboveW, 0)
+	activeSustainedFor := derefDur(r.Thresholds.ActiveSustainedFor, 0)
+	if p < activeAboveW {
 		// reading is not high enough; clear candidate if it was a high one.
 		if r.candidate != nil && r.candidate.abovePrevHi {
 			r.candidate = nil
@@ -335,13 +355,13 @@ func (r *Runtime) maybeBegin(at time.Time, p float64) bool {
 	if r.candidate == nil || !r.candidate.abovePrevHi {
 		r.candidate = &candidateSample{at: at, powerW: p, abovePrevHi: true}
 		// If the sustained threshold is zero, fire immediately.
-		if r.Thresholds.ActiveSustainedFor <= 0 {
+		if activeSustainedFor <= 0 {
 			r.candidate = nil
 			return true
 		}
 		return false
 	}
-	if at.Sub(r.candidate.at) >= r.Thresholds.ActiveSustainedFor {
+	if at.Sub(r.candidate.at) >= activeSustainedFor {
 		r.candidate = nil
 		return true
 	}
@@ -357,7 +377,9 @@ func (r *Runtime) maybeEnd(at time.Time, p float64) bool {
 	default:
 		return false
 	}
-	if p > r.Thresholds.IdleBelowW {
+	idleBelowW := derefF64(r.Thresholds.IdleBelowW, 0)
+	inactiveSustainedFor := derefDur(r.Thresholds.InactiveSustainedFor, 0)
+	if p > idleBelowW {
 		if r.candidate != nil && r.candidate.belowPrevLo {
 			r.candidate = nil
 		}
@@ -365,13 +387,13 @@ func (r *Runtime) maybeEnd(at time.Time, p float64) bool {
 	}
 	if r.candidate == nil || !r.candidate.belowPrevLo {
 		r.candidate = &candidateSample{at: at, powerW: p, belowPrevLo: true}
-		if r.Thresholds.InactiveSustainedFor <= 0 {
+		if inactiveSustainedFor <= 0 {
 			r.candidate = nil
 			return true
 		}
 		return false
 	}
-	if at.Sub(r.candidate.at) >= r.Thresholds.InactiveSustainedFor {
+	if at.Sub(r.candidate.at) >= inactiveSustainedFor {
 		r.candidate = nil
 		return true
 	}

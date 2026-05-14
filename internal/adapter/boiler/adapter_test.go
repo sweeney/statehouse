@@ -20,8 +20,8 @@ func boilerCfg() config.Config {
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
 		"binary_state_device": {
 			DefaultThresholds: config.Thresholds{
-				ActiveSustainedFor:   0, // immediate — boiler-sensor already debounces
-				InactiveSustainedFor: 0,
+				// nil pointers → zero duration → immediate transitions;
+				// boiler-sensor firmware already debounces upstream.
 			},
 		},
 	}
