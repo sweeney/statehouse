@@ -293,40 +293,65 @@ func TestEngine_SensorDoesNotMakeHouseActive(t *testing.T) {
 }
 
 // TestEngine_EnvironmentFieldsEmitCanonicalEvents verifies that a Reading
-// with PressureHPa and WindSpeedMS set produces canonical events with
-// the matching attribute names so downstream sinks (e.g. influx.Writer)
-// can store them.
+// with all 9 new environment/ups/radio fields produces canonical events
+// with the matching attribute names and correct values so downstream
+// sinks (e.g. influx.Writer) can store them.
 func TestEngine_EnvironmentFieldsEmitCanonicalEvents(t *testing.T) {
 	engine, _, col, clock := mkEngine()
 	now := clock.Now()
 	id := zid("0xbb", "weather_station")
+	onBattery := true
+	rssi := -72
 	engine.IngestReading(id, "tasmota/weather_station/SENSOR",
 		model.Reading{
-			Timestamp:   now,
-			PressureHPa: ptr(1013.25),
-			WindSpeedMS: ptr(5.2),
+			Timestamp:          now,
+			PressureHPa:        ptr(1013.25),
+			WindSpeedMS:        ptr(5.2),
+			WindDirDeg:         ptr(270.0),
+			RainfallMM:         ptr(3.4),
+			IlluminanceLux:     ptr(800.0),
+			UVIndex:            ptr(4.5),
+			BatteryRuntimeMins: ptr(42.0),
+			OnBattery:          &onBattery,
+			RSSI:               &rssi,
 		})
 
-	attrs := map[string]int{}
+	attrs := map[string]any{}
 	for _, ce := range col.canonical {
-		attrs[ce.Attribute]++
+		attrs[ce.Attribute] = ce.Value
 	}
-	for _, want := range []string{"pressure_hpa", "wind_speed_ms"} {
-		if attrs[want] != 1 {
-			t.Errorf("expected exactly 1 canonical event with attribute=%q, got %d", want, attrs[want])
+
+	wantAttrs := []string{
+		"pressure_hpa", "wind_speed_ms", "wind_dir_deg", "rainfall_mm",
+		"illuminance_lux", "uv_index", "battery_runtime_mins", "on_battery", "rssi_dbm",
+	}
+	for _, want := range wantAttrs {
+		if _, ok := attrs[want]; !ok {
+			t.Errorf("expected canonical event with attribute=%q, not found in %v", want, col.canonical)
 		}
 	}
+
 	// Verify the values are correct.
-	for _, ce := range col.canonical {
-		switch ce.Attribute {
-		case "pressure_hpa":
-			if v, ok := ce.Value.(float64); !ok || v != 1013.25 {
-				t.Errorf("pressure_hpa: expected 1013.25, got %v", ce.Value)
-			}
-		case "wind_speed_ms":
-			if v, ok := ce.Value.(float64); !ok || v != 5.2 {
-				t.Errorf("wind_speed_ms: expected 5.2, got %v", ce.Value)
-			}
+	type wantVal struct {
+		attr string
+		val  any
+	}
+	checks := []wantVal{
+		{"pressure_hpa", float64(1013.25)},
+		{"wind_speed_ms", float64(5.2)},
+		{"wind_dir_deg", float64(270.0)},
+		{"rainfall_mm", float64(3.4)},
+		{"illuminance_lux", float64(800.0)},
+		{"uv_index", float64(4.5)},
+		{"battery_runtime_mins", float64(42.0)},
+		{"on_battery", true},
+		{"rssi_dbm", -72},
+	}
+	for _, c := range checks {
+		if got, ok := attrs[c.attr]; !ok {
+			t.Errorf("%s: attribute not found", c.attr)
+		} else if got != c.val {
+			t.Errorf("%s: expected %v, got %v", c.attr, c.val, got)
 		}
 	}
 }
