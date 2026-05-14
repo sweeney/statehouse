@@ -18,7 +18,7 @@ func mkRuntime(class string, th config.Thresholds, strategy energy.Strategy) *Ru
 	return NewRuntime(p, 30*time.Minute)
 }
 
-func ptrF(v float64) *float64         { return &v }
+func ptrF(v float64) *float64               { return &v }
 func ptrDur(v time.Duration) *time.Duration { return &v }
 
 func TestShortBurst_HysteresisAvoidsFalseStart(t *testing.T) {
@@ -296,5 +296,26 @@ func TestSensor_NoPowerNeeded(t *testing.T) {
 	out := rt.OnReading(now, model.Reading{Timestamp: now, HumidityPct: &hum})
 	if out.NewActivity != model.ActivityReporting {
 		t.Fatalf("expected reporting from humidity-only reading, got %q", out.NewActivity)
+	}
+}
+
+// TestStepContinuous_ExplicitZeroCompressorAboveW verifies that
+// CompressorAboveW=0 (explicit operator intent: "any draw counts")
+// is honoured and does NOT fall back to ActiveAboveW=100. A 10W
+// reading must start a compressor cycle even though 10 < 100.
+func TestStepContinuous_ExplicitZeroCompressorAboveW(t *testing.T) {
+	now := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassContinuous, config.Thresholds{
+		CompressorAboveW: ptrF(0),
+		ActiveAboveW:     ptrF(100),
+		IdleBelowW:       ptrF(5),
+		// No sustained windows: fire immediately.
+	}, energy.StrategyIntegration)
+	out := rt.OnReading(now, model.Reading{Timestamp: now, PowerW: ptrF(10)})
+	if !out.CycleStarted {
+		t.Errorf("explicit CompressorAboveW=0 should treat 10W as active; got CycleStarted=false (activity=%s)", out.NewActivity)
+	}
+	if out.NewActivity != model.ActivityActiveCycle {
+		t.Errorf("expected ActivityActiveCycle, got %s", out.NewActivity)
 	}
 }
