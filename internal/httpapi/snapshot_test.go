@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sweeney/statehouse/internal/device"
 	"github.com/sweeney/statehouse/internal/model"
 )
 
@@ -56,6 +57,27 @@ func TestStalenessConfigOverride(t *testing.T) {
 	}
 	if !hasStaleWarning {
 		t.Errorf("expected warnings to contain %q, got %v", "stale_device", resp.Warnings)
+	}
+}
+
+// TestCycleTypeForClass covers all known device classes including binary state.
+func TestCycleTypeForClass(t *testing.T) {
+	cases := []struct {
+		class string
+		want  string
+	}{
+		{device.ClassShortBurst, "appliance_cycle"},
+		{device.ClassCyclePower, "appliance_cycle"},
+		{device.ClassMedia, "appliance_cycle"},
+		{device.ClassContinuous, "compressor_cycle"},
+		{device.ClassBinaryState, "binary_cycle"},
+		{device.ClassSensor, "unknown"},
+		{"", "unknown"},
+	}
+	for _, tc := range cases {
+		if got := cycleTypeForClass(tc.class); got != tc.want {
+			t.Errorf("cycleTypeForClass(%q) = %q, want %q", tc.class, got, tc.want)
+		}
 	}
 }
 

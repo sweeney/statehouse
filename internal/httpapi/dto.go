@@ -43,6 +43,8 @@ func cycleTypeForClass(class string) string {
 		return "appliance_cycle"
 	case device.ClassContinuous:
 		return "compressor_cycle"
+	case device.ClassBinaryState:
+		return "binary_cycle"
 	default:
 		return "unknown"
 	}
