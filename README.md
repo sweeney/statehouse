@@ -1,6 +1,6 @@
 # Statehouse: a state engine for the home
 
-V1 Go daemon that turns Zigbee2MQTT telemetry into a canonical
+V1 Go daemon that turns MQTT telemetry into a canonical
 in-memory house/device state and derived MQTT events. See
 `PLAN.md`-style requirements in `docs/` once they exist; the runtime
 implements the V1 scope described in the originating spec.
