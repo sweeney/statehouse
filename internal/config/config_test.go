@@ -174,3 +174,147 @@ func writeTempYAML(t *testing.T, content string) string {
 	}
 	return path
 }
+
+// writeTempFile writes raw bytes to a temp file with the given name suffix
+// and returns the path.
+func writeTempFile(t *testing.T, name, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	return path
+}
+
+// TestAdapterIsEnabled_DefaultMatrix verifies that zigbee2mqtt defaults to
+// enabled and every other adapter defaults to disabled when no explicit
+// enabled flag is set.
+func TestAdapterIsEnabled_DefaultMatrix(t *testing.T) {
+	cfg := Default()
+	adapters := cfg.Adapters
+
+	if !adapters.Zigbee2MQTT.IsEnabled() {
+		t.Error("Zigbee2MQTT.IsEnabled() should default to true")
+	}
+	if adapters.Boiler.IsEnabled() {
+		t.Error("Boiler.IsEnabled() should default to false")
+	}
+	if adapters.UPS.IsEnabled() {
+		t.Error("UPS.IsEnabled() should default to false")
+	}
+	if adapters.Climate.IsEnabled() {
+		t.Error("Climate.IsEnabled() should default to false")
+	}
+	if adapters.Meter.IsEnabled() {
+		t.Error("Meter.IsEnabled() should default to false")
+	}
+}
+
+// TestLoadFillsAdapterBaseTopicDefaults verifies that Load sets each adapter's
+// BaseTopic to its documented default when the YAML does not specify one.
+func TestLoadFillsAdapterBaseTopicDefaults(t *testing.T) {
+	// Minimal YAML — just a broker so Load succeeds.
+	yaml := `
+mqtt:
+  broker: "tcp://localhost:1883"
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	type want struct {
+		name string
+		got  string
+		exp  string
+	}
+	checks := []want{
+		{"Zigbee2MQTT", cfg.Adapters.Zigbee2MQTT.BaseTopic, "zigbee2mqtt"},
+		{"Boiler", cfg.Adapters.Boiler.BaseTopic, "energy/boiler/sensor"},
+		{"UPS", cfg.Adapters.UPS.BaseTopic, "ups"},
+		{"Climate", cfg.Adapters.Climate.BaseTopic, "climate"},
+		{"Meter", cfg.Adapters.Meter.BaseTopic, "energy"},
+	}
+	for _, c := range checks {
+		if c.got != c.exp {
+			t.Errorf("%s.BaseTopic: expected %q, got %q", c.name, c.exp, c.got)
+		}
+	}
+}
+
+// TestLoadInfluxTokenFile_TrimsTrailingWhitespace verifies that Load reads a
+// token_file, strips trailing newlines, and exposes the clean token.
+func TestLoadInfluxTokenFile_TrimsTrailingWhitespace(t *testing.T) {
+	tokenPath := writeTempFile(t, "influx.token", "abc123\n")
+
+	yaml := `
+influx:
+  enabled: true
+  url: "http://influx.example.com:8086"
+  org: myorg
+  bucket: mybucket
+  token_file: "` + tokenPath + `"
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Influx.Token != "abc123" {
+		t.Errorf("expected Token=%q after trimming newline, got %q", "abc123", cfg.Influx.Token)
+	}
+}
+
+// TestLoadInlineTokenBeatsTokenFile verifies that when both token and
+// token_file are set in YAML, the inline token takes precedence.
+func TestLoadInlineTokenBeatsTokenFile(t *testing.T) {
+	tokenPath := writeTempFile(t, "influx.token", "from_file\n")
+
+	yaml := `
+influx:
+  enabled: true
+  url: "http://influx.example.com:8086"
+  org: myorg
+  bucket: mybucket
+  token: "inline_token"
+  token_file: "` + tokenPath + `"
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Influx.Token != "inline_token" {
+		t.Errorf("expected inline token to win, got %q", cfg.Influx.Token)
+	}
+}
+
+// TestLoadExplicitSchemeBeatsLegacyShorthand verifies that when a device has
+// both scheme/primary set AND legacy ieee_address/ieee fields, the explicit
+// scheme and primary fields are preserved.
+func TestLoadExplicitSchemeBeatsLegacyShorthand(t *testing.T) {
+	yaml := `
+devices:
+  my_device:
+    scheme: tasmota
+    primary: "explicit_primary"
+    ieee_address: "0xlegacy"
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	dev, ok := cfg.Devices["my_device"]
+	if !ok {
+		t.Fatal("expected device 'my_device'")
+	}
+	if dev.Scheme != "tasmota" {
+		t.Errorf("expected scheme=tasmota, got %q", dev.Scheme)
+	}
+	if dev.Primary != "explicit_primary" {
+		t.Errorf("expected primary=explicit_primary, got %q", dev.Primary)
+	}
+}

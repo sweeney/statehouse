@@ -1,6 +1,7 @@
 package influx
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -307,5 +308,69 @@ func TestWriter_CloseFlushesFakeAPI(t *testing.T) {
 	w.Close()
 	if api.Flushed != 1 {
 		t.Errorf("expected 1 flush on Close, got %d", api.Flushed)
+	}
+}
+
+// fmtVal formats a value for comparison in a type-agnostic way. The
+// InfluxDB client may normalise int to int64, so we compare via fmt.Sprintf
+// rather than requiring exact type equality.
+func fmtVal(v any) string {
+	return fmt.Sprintf("%v", v)
+}
+
+// TestWriter_NewAttributesRoutedCorrectly is a table-driven test for the 9
+// new OnCanonicalEvent switch arms added in #13. Each row exercises one
+// attribute, asserts the correct measurement name, field name, and value.
+func TestWriter_NewAttributesRoutedCorrectly(t *testing.T) {
+	type tc struct {
+		attr        string
+		value       any
+		measurement string
+		field       string
+		wantVal     string // expected formatted value (type-agnostic)
+	}
+	cases := []tc{
+		{"pressure_hpa", float64(1013.25), "device_environment", "pressure_hpa", "1013.25"},
+		{"wind_speed_ms", float64(5.2), "device_environment", "wind_speed_ms", "5.2"},
+		{"wind_dir_deg", float64(270.0), "device_environment", "wind_dir_deg", "270"},
+		{"rainfall_mm", float64(3.4), "device_environment", "rainfall_mm", "3.4"},
+		{"illuminance_lux", float64(800.0), "device_environment", "illuminance_lux", "800"},
+		{"uv_index", float64(4.5), "device_environment", "uv_index", "4.5"},
+		{"battery_runtime_mins", float64(42.0), "device_ups", "battery_runtime_mins", "42"},
+		{"on_battery", true, "device_ups", "on_battery", "true"},
+		{"rssi_dbm", int(-72), "device_radio", "rssi_dbm", "-72"},
+	}
+
+	ts := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range cases {
+		t.Run(tc.attr, func(t *testing.T) {
+			w, api, store := newWriterTest(t)
+			seedDevice(t, store, "weather_station", "environment", "roof")
+
+			w.OnCanonicalEvent(model.CanonicalEvent{
+				Timestamp: ts,
+				DeviceID:  "weather_station",
+				Attribute: tc.attr,
+				Value:     tc.value,
+			})
+
+			got := api.PointsForMeasurement(tc.measurement)
+			if len(got) != 1 {
+				t.Fatalf("attribute=%q: expected 1 %s point, got %d", tc.attr, tc.measurement, len(got))
+			}
+			p := got[0]
+			if !p.Time().Equal(ts) {
+				t.Errorf("attribute=%q: timestamp mismatch: got %v want %v", tc.attr, p.Time(), ts)
+			}
+			tags := tagMap(p)
+			if tags["device_id"] != "weather_station" {
+				t.Errorf("attribute=%q: device_id tag wrong: %+v", tc.attr, tags)
+			}
+			fields := fieldMap(p)
+			if fmtVal(fields[tc.field]) != tc.wantVal {
+				t.Errorf("attribute=%q: field %q = %v (%T), want %v", tc.attr, tc.field, fields[tc.field], fields[tc.field], tc.wantVal)
+			}
+		})
 	}
 }
