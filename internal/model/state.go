@@ -23,7 +23,6 @@ const (
 	ActivityUnknown          DeviceActivityState = "unknown"
 	ActivityIdle             DeviceActivityState = "idle"
 	ActivityActive           DeviceActivityState = "active"
-	ActivityRecentlyActive   DeviceActivityState = "recently_active"
 	ActivityStarting         DeviceActivityState = "starting"
 	ActivityRunning          DeviceActivityState = "running"
 	ActivityFinishing        DeviceActivityState = "finishing"

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
 	"github.com/sweeney/statehouse/internal/influx"
 	"github.com/sweeney/statehouse/internal/model"
@@ -19,12 +20,13 @@ import (
 
 // Server hosts the JSON HTTP API.
 type Server struct {
-	Listen string
-	Store  *state.Store
-	Log    *history.Log
-	MQTT   mqtt.Client
-	Influx *influx.Writer
-	Logger *slog.Logger
+	Listen        string
+	Store         *state.Store
+	Log           *history.Log
+	MQTT          mqtt.Client
+	Influx        *influx.Writer
+	Logger        *slog.Logger
+	DeviceClasses map[string]config.DeviceClassConfig
 
 	started time.Time
 
@@ -34,17 +36,32 @@ type Server struct {
 	derivedCount   uint64
 }
 
-// New returns a configured Server.
-func New(listen string, store *state.Store, log *history.Log, mqtt mqtt.Client, infl *influx.Writer, logger *slog.Logger) *Server {
+// New returns a configured Server. deviceClasses may be nil; when a class is
+// absent or its StalenessSeconds pointer is nil the DTO layer falls back to
+// the per-class default.
+func New(listen string, store *state.Store, log *history.Log, mqtt mqtt.Client, infl *influx.Writer, logger *slog.Logger, deviceClasses map[string]config.DeviceClassConfig) *Server {
 	return &Server{
-		Listen:  listen,
-		Store:   store,
-		Log:     log,
-		MQTT:    mqtt,
-		Influx:  infl,
-		Logger:  logger,
-		started: time.Now().UTC(),
+		Listen:        listen,
+		Store:         store,
+		Log:           log,
+		MQTT:          mqtt,
+		Influx:        infl,
+		Logger:        logger,
+		DeviceClasses: deviceClasses,
+		started:       time.Now().UTC(),
 	}
+}
+
+// stalenessFor returns the configured StalenessSeconds override for a device
+// class, or nil to use the class default.
+func (s *Server) stalenessFor(class string) *int {
+	if s == nil || s.DeviceClasses == nil {
+		return nil
+	}
+	if c, ok := s.DeviceClasses[class]; ok {
+		return c.StalenessSeconds
+	}
+	return nil
 }
 
 // OnCanonicalEvent satisfies state.CanonicalSink for metrics counting.
@@ -121,7 +138,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, buildSnapshot(s.Store.Snapshot(), time.Now()))
+	writeJSON(w, http.StatusOK, buildSnapshot(s.Store.Snapshot(), time.Now(), s.stalenessFor))
 }
 
 func (s *Server) handleHouse(w http.ResponseWriter, _ *http.Request) {
@@ -133,7 +150,7 @@ func (s *Server) handleDevices(w http.ResponseWriter, _ *http.Request) {
 	devices := s.Store.Devices()
 	out := make(map[string]DeviceResponse, len(devices))
 	for id, d := range devices {
-		out[id] = buildDeviceResponse(d, now, nil)
+		out[id] = buildDeviceResponse(d, now, s.stalenessFor(d.Class))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -149,7 +166,7 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "device not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, buildDeviceResponse(d, time.Now(), nil))
+	writeJSON(w, http.StatusOK, buildDeviceResponse(d, time.Now(), s.stalenessFor(d.Class)))
 }
 
 func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
