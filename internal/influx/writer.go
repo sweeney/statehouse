@@ -216,10 +216,22 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		w.api.WritePoint(p)
 		atomic.AddUint64(&w.queued, 1)
 	case model.EvtHouseStateChanged:
-		stateStr, _ := ev.Evidence["state"].(string)
-		confidence, _ := ev.Evidence["confidence"].(float64)
-		tags := map[string]string{"state": stateStr}
-		fields := map[string]any{"confidence": confidence}
+		occupancy, _ := ev.Evidence["occupancy"].(string)
+		occupancyConf, _ := ev.Evidence["occupancy_confidence"].(float64)
+		activity, _ := ev.Evidence["activity"].(string)
+		activityConf, _ := ev.Evidence["activity_confidence"].(float64)
+		mode, _ := ev.Evidence["mode"].(string)
+		modeConf, _ := ev.Evidence["mode_confidence"].(float64)
+		tags := map[string]string{
+			"occupancy": occupancy,
+			"activity":  activity,
+			"mode":      mode,
+		}
+		fields := map[string]any{
+			"occupancy_confidence": occupancyConf,
+			"activity_confidence":  activityConf,
+			"mode_confidence":      modeConf,
+		}
 		p := write.NewPoint("house_state", tags, fields, ev.Timestamp)
 		w.api.WritePoint(p)
 		atomic.AddUint64(&w.queued, 1)
