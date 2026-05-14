@@ -20,6 +20,7 @@ import (
 	"github.com/sweeney/statehouse/internal/history"
 	"github.com/sweeney/statehouse/internal/httpapi"
 	"github.com/sweeney/statehouse/internal/influx"
+	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/mqtt"
 	"github.com/sweeney/statehouse/internal/state"
 	"github.com/sweeney/statehouse/internal/testutil"
@@ -90,11 +91,27 @@ func main() {
 		logger.Info("adapter ready", "name", a.Name(), "subscriptions", a.Subscriptions())
 	}
 
+	// Look up per-class staleness override for DTO building.
+	stalenessFor := func(class string) *int {
+		if c, ok := cfg.DeviceClasses[class]; ok {
+			return c.StalenessSeconds
+		}
+		return nil
+	}
 	publisher := &mqtt.Publisher{
 		Client: mqttClient,
 		Prefix: cfg.MQTT.PublishPrefix,
 		Store:  store,
 		Logger: logger,
+		BuildSnapshot: func(snap model.Snapshot, now time.Time) any {
+			return httpapi.BuildSnapshot(snap, now, stalenessFor)
+		},
+		BuildHouse: func(h model.House) any {
+			return httpapi.BuildHouseResponse(h)
+		},
+		BuildDevice: func(d model.Device, now time.Time) any {
+			return httpapi.BuildDeviceResponse(d, now, stalenessFor(d.Class))
+		},
 	}
 	engine.AddDerivedSink(publisher)
 
