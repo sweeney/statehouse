@@ -1,7 +1,6 @@
 package mqtt
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"sync"
@@ -30,11 +29,11 @@ var publishQueueSize = 256
 // the publisher falls back to the raw model.Snapshot/House/Device so
 // internal tests don't need to import the DTO package.
 //
-// Lifecycle: call Start(ctx) once after construction to enable the
-// non-blocking publish queue, and Close() at shutdown to drain it. If
-// Start is never called, OnDerivedEvent falls back to a synchronous
-// publish under p.mu — convenient for unit tests that want to
-// inspect publishes immediately without running the worker.
+// Lifecycle: call Start() once after construction to enable the
+// non-blocking publish queue, and Close() at shutdown to drain it.
+// If Start is never called, OnDerivedEvent falls back to a
+// synchronous publish under p.mu — convenient for unit tests that
+// want to inspect publishes immediately without running the worker.
 type Publisher struct {
 	Client Client
 	Prefix string
@@ -45,7 +44,11 @@ type Publisher struct {
 	BuildHouse    func(h model.House) any
 	BuildDevice   func(d model.Device, now time.Time) any
 
-	mu sync.Mutex // serialises the synchronous fallback path only.
+	// mu guards p.in for the Start/Close lifecycle, serialises the
+	// non-blocking send in publishJSON against Close's close(in), and
+	// (only when Start was never called) serialises the synchronous
+	// fallback publish path.
+	mu sync.Mutex
 
 	in      chan publishJob
 	wg      sync.WaitGroup
@@ -61,8 +64,9 @@ type publishJob struct {
 // Start launches the publisher's worker goroutine. After Start, every
 // publishJSON enqueues onto a bounded channel served by a single
 // worker — the engine's emit hot path becomes non-blocking. The
-// worker exits when ctx is cancelled or Close is called.
-func (p *Publisher) Start(ctx context.Context) {
+// worker exits only when Close() closes the channel, so any
+// jobs buffered at shutdown are drained before the worker returns.
+func (p *Publisher) Start() {
 	if p == nil {
 		return
 	}
@@ -78,18 +82,13 @@ func (p *Publisher) Start(ctx context.Context) {
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case j, ok := <-ch:
-				if !ok {
-					return
-				}
-				if err := p.Client.Publish(j.topic, 0, j.retained, j.payload); err != nil {
-					if p.Logger != nil {
-						p.Logger.Warn("mqtt publish failed", "topic", j.topic, "error", err)
-					}
+		// Drain semantics: ranging over the channel exits when the
+		// channel is closed AND empty. Close() relies on this to drain
+		// in-flight jobs at shutdown.
+		for j := range ch {
+			if err := p.Client.Publish(j.topic, 0, j.retained, j.payload); err != nil {
+				if p.Logger != nil {
+					p.Logger.Warn("mqtt publish failed", "topic", j.topic, "error", err)
 				}
 			}
 		}
@@ -98,6 +97,9 @@ func (p *Publisher) Start(ctx context.Context) {
 
 // Close drains the publish queue and waits for the worker to exit.
 // Safe to call multiple times; a no-op if Start was never called.
+//
+// Holding p.mu around close(ch) closes the race with publishJSON's
+// non-blocking send: a closed-channel send would otherwise panic.
 func (p *Publisher) Close() {
 	if p == nil {
 		return
@@ -105,16 +107,15 @@ func (p *Publisher) Close() {
 	p.mu.Lock()
 	ch := p.in
 	p.in = nil
-	p.mu.Unlock()
-	if ch == nil {
-		return
+	if ch != nil {
+		close(ch)
 	}
-	close(ch)
+	p.mu.Unlock()
 	p.wg.Wait()
 }
 
 // Dropped returns the cumulative count of publish jobs dropped because
-// the queue was full. Exposed for /healthz and tests.
+// the queue was full. Exposed for /metrics and tests.
 func (p *Publisher) Dropped() uint64 {
 	if p == nil {
 		return 0
@@ -188,15 +189,16 @@ func (p *Publisher) publishJSON(topic string, retained bool, v any) {
 		}
 		return
 	}
-	// Snapshot the channel under the mutex so Close()/Start() races are
-	// safe. The synchronous fallback path also uses the mutex to
-	// serialise direct Publish calls when the worker is not running.
+	// Hold p.mu across the (non-blocking) send so Close() cannot
+	// race close(ch) with an in-flight send and trigger a panic.
+	// The default arm makes the critical section O(1).
 	p.mu.Lock()
-	ch := p.in
-	if ch == nil {
-		// No worker: fall back to a synchronous publish. Preserves the
-		// test-time invariant that OnDerivedEvent's publishes are
-		// observable on return.
+	if p.in == nil {
+		// Sync fallback when Start() was never called — used by unit
+		// tests that want to inspect publishes immediately on return.
+		// Production callers must call Start(); in that path p.in is
+		// non-nil and we never reach here. The mutex is held across
+		// Publish only on this test-only path.
 		err := p.Client.Publish(topic, 0, retained, b)
 		p.mu.Unlock()
 		if err != nil && p.Logger != nil {
@@ -204,10 +206,11 @@ func (p *Publisher) publishJSON(topic string, retained bool, v any) {
 		}
 		return
 	}
-	p.mu.Unlock()
 	select {
-	case ch <- publishJob{topic: topic, retained: retained, payload: b}:
+	case p.in <- publishJob{topic: topic, retained: retained, payload: b}:
+		p.mu.Unlock()
 	default:
+		p.mu.Unlock()
 		// Queue full. Drop and increment counter. Retained topics
 		// self-heal on the next derived event of the same shape, and
 		// the 30s periodic snapshot in main.go acts as a safety net.
