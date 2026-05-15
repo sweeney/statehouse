@@ -117,6 +117,10 @@ func main() {
 			return httpapi.BuildDeviceResponse(d, now, stalenessFor(d.Class))
 		},
 	}
+	// Start the bounded-queue worker before wiring the publisher as a
+	// sink so the first inbound MQTT message can't take the
+	// synchronous fallback path (issue #50).
+	publisher.Start()
 	engine.AddDerivedSink(publisher)
 
 	influxWriter := influx.New(cfg.Influx.Enabled, influx.Config{
@@ -129,6 +133,7 @@ func main() {
 	engine.AddDerivedSink(influxWriter)
 
 	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger, cfg.DeviceClasses)
+	api.Publisher = publisher
 	engine.AddCanonicalSink(api)
 	engine.AddDerivedSink(api)
 
@@ -176,6 +181,7 @@ func main() {
 	}
 
 	logger.Info("shutting down")
+	publisher.Close()
 	mqttClient.Disconnect()
 	influxWriter.Close()
 	if err := hlog.Close(); err != nil {

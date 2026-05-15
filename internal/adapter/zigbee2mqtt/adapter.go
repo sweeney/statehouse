@@ -91,12 +91,19 @@ func (a *Adapter) handleBridgeDevices(payload []byte) {
 		}
 		return
 	}
-	a.mu.Lock()
+	// bridge/devices is a retained, complete snapshot of the current
+	// Z2M device set. Rebuild rather than merge so renames and removals
+	// evict their old entries; merging would let ieeeByFN grow
+	// unboundedly across renames/unpairs and risks routing a stale
+	// friendly_name to the IEEE of a possibly-different device.
+	fresh := make(map[string]string, len(devs))
 	for _, d := range devs {
 		if d.FriendlyName != "" && d.IEEEAddress != "" {
-			a.ieeeByFN[d.FriendlyName] = d.IEEEAddress
+			fresh[d.FriendlyName] = d.IEEEAddress
 		}
 	}
+	a.mu.Lock()
+	a.ieeeByFN = fresh
 	a.mu.Unlock()
 	for _, d := range devs {
 		topic := a.base + "/" + d.FriendlyName

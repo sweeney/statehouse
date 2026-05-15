@@ -28,6 +28,10 @@ type Server struct {
 	Logger        *slog.Logger
 	DeviceClasses map[string]config.DeviceClassConfig
 
+	// Publisher, when non-nil, surfaces its drop counter on /metrics.
+	// Set by main.go after construction; tests may leave it nil.
+	Publisher *mqtt.Publisher
+
 	started time.Time
 
 	srv *http.Server
@@ -192,12 +196,13 @@ func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	type metrics struct {
-		UptimeSeconds   float64 `json:"uptime_seconds"`
-		DeviceCount     int     `json:"device_count"`
-		CanonicalEvents uint64  `json:"canonical_events_total"`
-		DerivedEvents   uint64  `json:"derived_events_total"`
-		InfluxQueued    uint64  `json:"influx_writes_queued,omitempty"`
-		InfluxFailure   uint64  `json:"influx_writes_failure,omitempty"`
+		UptimeSeconds    float64 `json:"uptime_seconds"`
+		DeviceCount      int     `json:"device_count"`
+		CanonicalEvents  uint64  `json:"canonical_events_total"`
+		DerivedEvents    uint64  `json:"derived_events_total"`
+		InfluxQueued     uint64  `json:"influx_writes_queued,omitempty"`
+		InfluxFailure    uint64  `json:"influx_writes_failure,omitempty"`
+		PublisherDropped uint64  `json:"mqtt_publishes_dropped_total"`
 	}
 	m := metrics{
 		UptimeSeconds:   time.Since(s.started).Seconds(),
@@ -207,6 +212,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.Influx != nil && s.Influx.Enabled {
 		m.InfluxQueued, m.InfluxFailure = s.Influx.Stats()
+	}
+	if s.Publisher != nil {
+		m.PublisherDropped = s.Publisher.Dropped()
 	}
 	writeJSON(w, http.StatusOK, m)
 }

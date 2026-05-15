@@ -275,6 +275,55 @@ func TestAdapter_PhantomActivityResetOnIEEEMerge(t *testing.T) {
 	}
 }
 
+// TestAdapter_BridgeDevicesEvictsRemovedFriendlyNames verifies the
+// unbounded-growth fix from issue #49: when a friendly_name is renamed
+// or a device is unpaired, the next bridge/devices snapshot omits it
+// and the adapter's ieeeByFN cache must drop the absent entry.
+func TestAdapter_BridgeDevicesEvictsRemovedFriendlyNames(t *testing.T) {
+	cfg := fixtureCfg()
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	first := []byte(`[
+		{"ieee_address":"0x00158d0000000001","friendly_name":"old_plug","type":"EndDevice"},
+		{"ieee_address":"0x00158d0000000002","friendly_name":"stable_kettle","type":"EndDevice"}
+	]`)
+	a.HandleMessage("zigbee2mqtt/bridge/devices", first, true)
+
+	a.mu.RLock()
+	_, hadOld := a.ieeeByFN["old_plug"]
+	a.mu.RUnlock()
+	if !hadOld {
+		t.Fatalf("expected old_plug to be cached after first snapshot")
+	}
+
+	// Second snapshot: old_plug has been renamed to new_plug (and a
+	// device has been unpaired entirely — represented here by simply
+	// omitting it). The cache must reflect the new snapshot exactly.
+	second := []byte(`[
+		{"ieee_address":"0x00158d0000000001","friendly_name":"new_plug","type":"EndDevice"},
+		{"ieee_address":"0x00158d0000000002","friendly_name":"stable_kettle","type":"EndDevice"}
+	]`)
+	a.HandleMessage("zigbee2mqtt/bridge/devices", second, true)
+
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if _, stillThere := a.ieeeByFN["old_plug"]; stillThere {
+		t.Fatalf("expected old_plug evicted from cache after rename snapshot, got %v", a.ieeeByFN)
+	}
+	if got := a.ieeeByFN["new_plug"]; got != "0x00158d0000000001" {
+		t.Errorf("expected new_plug -> ieee, got %q", got)
+	}
+	if got := a.ieeeByFN["stable_kettle"]; got != "0x00158d0000000002" {
+		t.Errorf("expected stable_kettle retained, got %q", got)
+	}
+	if len(a.ieeeByFN) != 2 {
+		t.Errorf("expected exactly 2 cache entries after rebuild, got %d: %v", len(a.ieeeByFN), a.ieeeByFN)
+	}
+}
+
 func summary(evs []model.DerivedEvent) []string {
 	out := make([]string, 0, len(evs))
 	for _, ev := range evs {
