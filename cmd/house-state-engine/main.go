@@ -131,6 +131,11 @@ func main() {
 	ctx, cancel := signalContext()
 	defer cancel()
 
+	// Run the publisher with a non-blocking bounded queue so broker
+	// stalls don't park paho dispatch goroutines on the publisher
+	// mutex (issue #50).
+	publisher.Start(ctx)
+
 	// Tick: drives the availability debounce + house recompute.
 	go func() {
 		t := time.NewTicker(5 * time.Second)
@@ -165,6 +170,7 @@ func main() {
 	}
 
 	logger.Info("shutting down")
+	publisher.Close()
 	mqttClient.Disconnect()
 	influxWriter.Close()
 	if err := hlog.Close(); err != nil {

@@ -1,8 +1,10 @@
 package mqtt
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -210,6 +212,123 @@ func TestPublisher_BuildersWrapPayloads(t *testing.T) {
 	got = client.PublishedOn("house/state/devices/kitchen_dishwasher")
 	if len(got) != 1 || !contains(got[0].Payload, "device_dto") {
 		t.Errorf("device payload not from BuildDevice: %s", string(got[0].Payload))
+	}
+}
+
+// blockingClient implements Client but parks every Publish call on a
+// channel until the test releases it. Used to simulate a stalled
+// broker without involving timing.
+type blockingClient struct {
+	gate     chan struct{}
+	calls    atomic.Uint64
+	released atomic.Uint64
+}
+
+func newBlockingClient() *blockingClient {
+	return &blockingClient{gate: make(chan struct{})}
+}
+
+func (b *blockingClient) Connect() error    { return nil }
+func (b *blockingClient) Disconnect()       {}
+func (b *blockingClient) IsConnected() bool { return true }
+func (b *blockingClient) Subscribe(string, byte, Handler) error {
+	return nil
+}
+func (b *blockingClient) Publish(string, byte, bool, []byte) error {
+	b.calls.Add(1)
+	<-b.gate
+	b.released.Add(1)
+	return nil
+}
+func (b *blockingClient) release() { close(b.gate) }
+
+// TestPublisher_AsyncDoesNotBlockOnStalledBroker reproduces issue #50:
+// before the fix, every OnDerivedEvent call against a stalled broker
+// would park a paho dispatch goroutine on Publisher.mu, with each one
+// holding marshalled snapshot bytes alive on the heap. After the fix,
+// OnDerivedEvent should enqueue and return immediately regardless of
+// broker liveness, and an overflow should be counted not deadlocked.
+func TestPublisher_AsyncDoesNotBlockOnStalledBroker(t *testing.T) {
+	prev := publishQueueSize
+	publishQueueSize = 4
+	defer func() { publishQueueSize = prev }()
+
+	store := state.NewStore()
+	rt := device.NewRuntime(device.Profile{Class: device.ClassCyclePower}, 30*time.Minute)
+	store.Upsert("k", model.Device{
+		ID:       "k",
+		Class:    device.ClassCyclePower,
+		Identity: model.DeviceIdentity{Scheme: "zigbee", Primary: "k", Display: "k"},
+	}, rt)
+
+	bc := newBlockingClient()
+	pub := &Publisher{Client: bc, Prefix: "house", Store: store}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pub.Start(ctx)
+
+	// Fire 100 derived events against the stalled client. Each call
+	// must return promptly — the budget here is generous (1s for the
+	// whole batch); the actual cost should be microseconds.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			pub.OnDerivedEvent(model.DerivedEvent{
+				ID:        "evt",
+				Timestamp: time.Now().UTC(),
+				Type:      model.EvtCycleStarted,
+				DeviceID:  "k",
+			})
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("OnDerivedEvent batch blocked despite stalled client")
+	}
+
+	// With a 4-slot queue and >>4 publishes attempted while the worker
+	// is parked on the first call, the drop counter must be non-zero.
+	if got := pub.Dropped(); got == 0 {
+		t.Fatalf("expected publish drops on overflow, got 0 (queue=%d)", publishQueueSize)
+	}
+
+	// Release the broker and tear down. The worker must drain and exit.
+	bc.release()
+	pub.Close()
+}
+
+// TestPublisher_AsyncCloseDrainsQueue ensures Close() waits for the
+// worker to drain in-flight jobs rather than orphaning them.
+func TestPublisher_AsyncCloseDrainsQueue(t *testing.T) {
+	store := state.NewStore()
+	rt := device.NewRuntime(device.Profile{Class: device.ClassCyclePower}, 30*time.Minute)
+	store.Upsert("k", model.Device{
+		ID:       "k",
+		Class:    device.ClassCyclePower,
+		Identity: model.DeviceIdentity{Scheme: "zigbee", Primary: "k", Display: "k"},
+	}, rt)
+	fc := NewFakeClient()
+	pub := &Publisher{Client: fc, Prefix: "house", Store: store}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pub.Start(ctx)
+
+	for i := 0; i < 5; i++ {
+		pub.OnDerivedEvent(model.DerivedEvent{
+			ID:        "evt",
+			Timestamp: time.Now().UTC(),
+			Type:      model.EvtCycleStarted,
+			DeviceID:  "k",
+		})
+	}
+	pub.Close()
+
+	// All non-dropped jobs should have made it to the fake client by
+	// the time Close returns.
+	if got := len(fc.PublishedOn("house/events/derived")); got != 5 {
+		t.Fatalf("expected 5 derived publishes after Close drain, got %d", got)
 	}
 }
 
