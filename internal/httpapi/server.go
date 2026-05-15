@@ -80,6 +80,7 @@ func newMux(s *Server) *http.ServeMux {
 	mux.HandleFunc("/state/house", s.handleHouse)
 	mux.HandleFunc("/state/devices", s.handleDevices)
 	mux.HandleFunc("/state/devices/", s.handleDevice)
+	mux.HandleFunc("/state/activity", s.handleActivity)
 	mux.HandleFunc("/events/recent", s.handleRecent)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	return mux
@@ -138,7 +139,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, buildSnapshot(s.Store.Snapshot(), time.Now(), s.stalenessFor))
+	now := time.Now()
+	writeJSON(w, http.StatusOK, buildSnapshot(s.Store.Snapshot(), s.Store.ActiveSignals(now), s.Store.RecentActivity(state.ActivityLogSize), now, s.stalenessFor))
 }
 
 func (s *Server) handleHouse(w http.ResponseWriter, _ *http.Request) {
@@ -153,6 +155,11 @@ func (s *Server) handleDevices(w http.ResponseWriter, _ *http.Request) {
 		out[id] = buildDeviceResponse(d, now, s.stalenessFor(d.Class))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleActivity(w http.ResponseWriter, _ *http.Request) {
+	now := time.Now()
+	writeJSON(w, http.StatusOK, buildActivityStateResponse(s.Store.ActiveSignals(now), s.Store.RecentActivity(state.ActivityLogSize), now))
 }
 
 func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
@@ -205,7 +212,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)

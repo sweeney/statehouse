@@ -42,6 +42,7 @@ type AdaptersConfig struct {
 	UPS         UPSConfig         `yaml:"ups"`
 	Climate     ClimateConfig     `yaml:"climate"`
 	Meter       MeterConfig       `yaml:"meter"`
+	Intercom    IntercomConfig    `yaml:"intercom"`
 }
 
 // Zigbee2MQTTConfig configures the Zigbee2MQTT adapter.
@@ -122,6 +123,20 @@ func (m MeterConfig) IsEnabled() bool {
 		return false
 	}
 	return *m.Enabled
+}
+
+// IntercomConfig configures the Intercom (Asterisk-via-MQTT) adapter.
+// BaseTopic defaults to "asterisk".
+type IntercomConfig struct {
+	Enabled   *bool  `yaml:"enabled"`
+	BaseTopic string `yaml:"base_topic"`
+}
+
+func (i IntercomConfig) IsEnabled() bool {
+	if i.Enabled == nil {
+		return false
+	}
+	return *i.Enabled
 }
 
 type HTTPConfig struct {
@@ -304,6 +319,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Adapters.Meter.BaseTopic == "" {
 		cfg.Adapters.Meter.BaseTopic = "energy"
+	}
+	if cfg.Adapters.Intercom.BaseTopic == "" {
+		cfg.Adapters.Intercom.BaseTopic = "asterisk"
 	}
 	// Normalise legacy Z2M shorthand on device entries.
 	for id, d := range cfg.Devices {
