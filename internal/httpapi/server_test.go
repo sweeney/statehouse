@@ -197,7 +197,7 @@ func freshDevice(id, class string) model.Device {
 func TestSnapshot_SchemaVersion(t *testing.T) {
 	snap := makeDeviceSnap(freshDevice("d1", "short_burst_power_device"))
 	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 	if resp.SchemaVersion != "net.swee.statehouse.snapshot.v1" {
 		t.Errorf("expected schema_version %q, got %q", "net.swee.statehouse.snapshot.v1", resp.SchemaVersion)
 	}
@@ -210,7 +210,7 @@ func TestSnapshot_NoZeroTimestamps(t *testing.T) {
 
 	snap := makeDeviceSnap(d)
 	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 	if dev.Activity.Since != nil {
@@ -234,7 +234,7 @@ func TestSnapshot_AgeAndStale(t *testing.T) {
 	d.Latest.LastSeen = lastSeen
 
 	snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 	if !dev.Latest.Stale {
@@ -270,7 +270,7 @@ func TestSnapshot_CycleType(t *testing.T) {
 	}
 
 	snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 	if dev.Cycle == nil {
@@ -292,7 +292,7 @@ func TestSnapshot_DivergencePending(t *testing.T) {
 	}
 
 	snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 	if dev.Cycle == nil {
@@ -333,7 +333,7 @@ func TestSnapshot_DivergenceEvaluated(t *testing.T) {
 	}
 
 	snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 	if dev.Cycle == nil {
@@ -361,7 +361,7 @@ func TestSnapshot_WarningsAlwaysPresent(t *testing.T) {
 	d.Latest.LastSeen = now.Add(-1 * time.Minute) // recent → not stale
 
 	snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 	if dev.Warnings == nil {
@@ -398,7 +398,7 @@ func TestSnapshot_Summary(t *testing.T) {
 			"d2": d2,
 		},
 	}
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	if resp.Summary.DeviceCount != 2 {
 		t.Errorf("expected device_count=2, got %d", resp.Summary.DeviceCount)
@@ -436,7 +436,7 @@ func TestSnapshot_CycleDivergenceWarningInWarnings(t *testing.T) {
 		},
 	}
 	snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 	found := false
@@ -474,7 +474,7 @@ func TestSnapshot_CycleDivergenceNotFlaggedWhenOK(t *testing.T) {
 		},
 	}
 	snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 	for _, w := range dev.Warnings {
@@ -507,7 +507,7 @@ func TestSnapshot_CompressorCycleType(t *testing.T) {
 		}
 
 		snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+		resp := buildSnapshot(snap, nil, nil, now, nil)
 
 		dev := resp.Devices["d1"]
 		if dev.Cycle == nil {
@@ -542,7 +542,7 @@ func TestSnapshot_DivergenceWarning(t *testing.T) {
 	}
 
 	snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 	if dev.Cycle == nil {
@@ -577,7 +577,7 @@ func TestSnapshot_ZeroLastSeenNotStale(t *testing.T) {
 	d := freshDevice("d1", "short_burst_power_device")
 
 	snap := makeDeviceSnap(d)
-resp := buildSnapshot(snap, nil, nil, now, nil)
+	resp := buildSnapshot(snap, nil, nil, now, nil)
 
 	dev := resp.Devices["d1"]
 

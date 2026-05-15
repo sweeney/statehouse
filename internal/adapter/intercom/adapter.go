@@ -88,10 +88,10 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, retained bool) {
 
 // callPayload covers the common fields across ringing/answered/hungup.
 type callPayload struct {
-	Event       string `json:"event"`
-	CallID      string `json:"call_id"`
-	Timestamp   string `json:"timestamp"`
-	From        struct {
+	Event     string `json:"event"`
+	CallID    string `json:"call_id"`
+	Timestamp string `json:"timestamp"`
+	From      struct {
 		Extension string `json:"extension"`
 		Name      string `json:"name"`
 	} `json:"from"`
