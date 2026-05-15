@@ -369,12 +369,10 @@ func TestPublisher_AsyncCloseConcurrentSendIsRaceSafe(t *testing.T) {
 	}
 }
 
-// TestPublisher_AsyncCloseDrainsQueueAfterCtxCancel is the production
-// shutdown shape: the worker is no longer keyed off ctx, so a
-// cancelled parent context doesn't stop the worker — Close() does,
-// and only after the buffered jobs have drained. Test asserts both
-// properties.
-func TestPublisher_AsyncCloseDrainsQueueAfterCtxCancel(t *testing.T) {
+// TestPublisher_AsyncCloseDrainsAfterFlood is the production
+// shutdown shape: the worker exits only when Close() closes the
+// channel, after the buffered jobs have drained. No ctx involved.
+func TestPublisher_AsyncCloseDrainsAfterFlood(t *testing.T) {
 	store := state.NewStore()
 	rt := device.NewRuntime(device.Profile{Class: device.ClassCyclePower}, 30*time.Minute)
 	store.Upsert("k", model.Device{
