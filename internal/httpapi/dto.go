@@ -65,6 +65,7 @@ type SnapshotResponse struct {
 	Summary       SummaryResponse           `json:"summary"`
 	House         HouseResponse             `json:"house"`
 	Devices       map[string]DeviceResponse `json:"devices"`
+	Activity      ActivityStateResponse     `json:"activity"`
 }
 
 // SummaryResponse contains aggregate counts across all devices.
@@ -192,8 +193,8 @@ type CycleResponse struct {
 // publisher) that want the same DTO shape as GET /state — same
 // schema_version, summary, warnings, staleness. lookupStaleness may be
 // nil to use class defaults.
-func BuildSnapshot(snap model.Snapshot, now time.Time, lookupStaleness func(class string) *int) SnapshotResponse {
-	return buildSnapshot(snap, now, lookupStaleness)
+func BuildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int) SnapshotResponse {
+	return buildSnapshot(snap, signals, records, now, lookupStaleness)
 }
 
 // BuildHouseResponse is the exported HTTP-DTO builder for model.House.
@@ -207,9 +208,8 @@ func BuildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) D
 
 // buildSnapshot converts a model.Snapshot into a SnapshotResponse. now is used
 // to compute age/staleness so tests can inject a fixed value. lookupStaleness
-// returns the per-class override (nil → class default); pass a no-op if not
-// needed.
-func buildSnapshot(snap model.Snapshot, now time.Time, lookupStaleness func(class string) *int) SnapshotResponse {
+// returns the per-class override (nil → class default); pass nil if not needed.
+func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int) SnapshotResponse {
 	if lookupStaleness == nil {
 		lookupStaleness = func(string) *int { return nil }
 	}
@@ -226,7 +226,74 @@ func buildSnapshot(snap model.Snapshot, now time.Time, lookupStaleness func(clas
 		Summary:       summary,
 		House:         buildHouseResponse(snap.House),
 		Devices:       devices,
+		Activity:      buildActivityStateResponse(signals, records, now),
 	}
+}
+
+// SignalResponse is the DTO for one ActivitySignal in GET /state/activity.
+type SignalResponse struct {
+	ID         string         `json:"id"`
+	Source     string         `json:"source"`
+	Location   string         `json:"location,omitempty"`
+	Type       string         `json:"type"`
+	Confidence float64        `json:"confidence"`
+	Since      time.Time      `json:"since"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
+	Meta       map[string]any `json:"meta,omitempty"`
+}
+
+// ActivityRecordResponse is the DTO for one entry in the recent-activity log.
+type ActivityRecordResponse struct {
+	ID        string         `json:"id"`
+	Source    string         `json:"source"`
+	Location  string         `json:"location,omitempty"`
+	Type      string         `json:"type"`
+	StartedAt time.Time      `json:"started_at"`
+	EndedAt   *time.Time     `json:"ended_at,omitempty"`
+	Meta      map[string]any `json:"meta,omitempty"`
+}
+
+// ActivityStateResponse is returned by GET /state/activity.
+type ActivityStateResponse struct {
+	GeneratedAt time.Time                `json:"generated_at"`
+	Signals     []SignalResponse         `json:"signals"`
+	Recent      []ActivityRecordResponse `json:"recent"`
+}
+
+// buildActivityStateResponse converts active signals and recent records into the API DTO.
+func buildActivityStateResponse(signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time) ActivityStateResponse {
+	out := ActivityStateResponse{
+		GeneratedAt: now,
+		Signals:     make([]SignalResponse, 0, len(signals)),
+		Recent:      make([]ActivityRecordResponse, 0, len(records)),
+	}
+	for _, s := range signals {
+		sr := SignalResponse{
+			ID:         s.ID,
+			Source:     s.Source,
+			Location:   s.Location,
+			Type:       s.Type,
+			Confidence: s.Confidence,
+			Since:      s.Since,
+			Meta:       s.Meta,
+		}
+		if !s.ExpiresAt.IsZero() {
+			sr.ExpiresAt = &s.ExpiresAt
+		}
+		out.Signals = append(out.Signals, sr)
+	}
+	for _, r := range records {
+		out.Recent = append(out.Recent, ActivityRecordResponse{
+			ID:        r.ID,
+			Source:    r.Source,
+			Location:  r.Location,
+			Type:      r.Type,
+			StartedAt: r.StartedAt,
+			EndedAt:   r.EndedAt,
+			Meta:      r.Meta,
+		})
+	}
+	return out
 }
 
 // buildSummary computes the aggregate counts from the already-built device DTOs.
@@ -238,7 +305,7 @@ func buildSummary(devices map[string]DeviceResponse) SummaryResponse {
 		if d.Availability == model.AvailabilityOnline {
 			s.OnlineCount++
 		}
-		if activeActivityStates[d.Activity.State] {
+		if d.Class != device.ClassContinuous && activeActivityStates[d.Activity.State] {
 			s.ActiveCount++
 		}
 		if len(d.Warnings) > 0 {

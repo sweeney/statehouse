@@ -49,7 +49,7 @@ func TestDeriveHouseState_BinaryStateIdleWithinQuietAfter(t *testing.T) {
 		"boiler": makeBinaryDevice("boiler", model.ActivityIdle, idledAt),
 	}
 
-	h := DeriveHouseState(now, cfg, devices)
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 	if h.Occupancy.State != model.OccupancyOccupied {
 		t.Errorf("expected OccupancyOccupied while within QuietAfter window, got %q", h.Occupancy.State)
 	}
@@ -68,7 +68,7 @@ func TestDeriveHouseState_BinaryStateCurrentlyActive(t *testing.T) {
 		"boiler": makeBinaryDevice("boiler", model.ActivityActive, activeSince),
 	}
 
-	h := DeriveHouseState(now, cfg, devices)
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 	if h.Occupancy.State != model.OccupancyOccupied {
 		t.Errorf("expected OccupancyOccupied while binary device is active, got %q", h.Occupancy.State)
 	}
@@ -83,7 +83,7 @@ func TestDeriveHouseState_NoDevices(t *testing.T) {
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	cfg := defaultCfg()
 
-	h := DeriveHouseState(now, cfg, map[string]model.Device{})
+	h := DeriveHouseState(now, cfg, map[string]model.Device{}, nil, time.Time{})
 
 	if h.Occupancy.State != model.OccupancyUnknown {
 		t.Errorf("expected OccupancyUnknown for empty device map, got %q", h.Occupancy.State)
@@ -115,7 +115,7 @@ func TestDeriveHouseState_OccupancyOccupiedWhenDeviceActive(t *testing.T) {
 		},
 	}
 
-	h := DeriveHouseState(now, cfg, devices)
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 	if h.Occupancy.State != model.OccupancyOccupied {
 		t.Errorf("expected OccupancyOccupied for active device, got %q", h.Occupancy.State)
 	}
@@ -144,7 +144,7 @@ func TestDeriveHouseState_OccupancyEmptyAfterTimeout(t *testing.T) {
 		},
 	}
 
-	h := DeriveHouseState(now, cfg, devices)
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 	if h.Occupancy.State != model.OccupancyEmpty {
 		t.Errorf("expected OccupancyEmpty after EmptyAfter timeout, got %q", h.Occupancy.State)
 	}
@@ -173,7 +173,7 @@ func TestDeriveHouseState_ActivityCountsActiveDevices(t *testing.T) {
 		"toaster": makeActive("toaster", device.ClassShortBurst),
 	}
 
-	h := DeriveHouseState(now, cfg, devices)
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 	if h.Activity.State != model.HouseActivityActive {
 		t.Errorf("expected HouseActivityActive for 2 active devices, got %q", h.Activity.State)
 	}
@@ -199,7 +199,7 @@ func TestDeriveHouseState_ModeAway(t *testing.T) {
 		},
 	}
 
-	h := DeriveHouseState(now, cfg, devices)
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 	if h.Occupancy.State != model.OccupancyEmpty {
 		t.Errorf("expected OccupancyEmpty before checking ModeAway, got %q", h.Occupancy.State)
 	}
@@ -245,7 +245,7 @@ func TestDeriveHouseState_ModeSleeping(t *testing.T) {
 		},
 	}
 
-	h := DeriveHouseState(now, cfg, devices)
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 	// OccupancyUnknown gives sleeping "benefit of doubt".
 	if h.Occupancy.State != model.OccupancyUnknown {
 		t.Errorf("expected OccupancyUnknown at 90min with QuietAfter=30m/EmptyAfter=2h, got %q", h.Occupancy.State)
@@ -274,7 +274,7 @@ func TestDeriveHouseState_ActiveDevicesList(t *testing.T) {
 			},
 		},
 	}
-	h := DeriveHouseState(now, cfg, devices)
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 	if len(h.ActiveDevices) != 1 || h.ActiveDevices[0] != "boiler" {
 		t.Errorf("expected [boiler] in ActiveDevices, got %v", h.ActiveDevices)
 	}
@@ -312,7 +312,7 @@ func TestDeriveHouseState_ModeNight_HonoursConfiguredTimezone(t *testing.T) {
 		},
 	}
 
-	h := DeriveHouseState(nowLocal, cfg, devices)
+	h := DeriveHouseState(nowLocal, cfg, devices, nil, time.Time{})
 	if h.Occupancy.State != model.OccupancyOccupied {
 		t.Fatalf("expected OccupancyOccupied 5min after activity, got %q", h.Occupancy.State)
 	}
@@ -363,7 +363,7 @@ func TestDeriveHouseState_ActiveDevicesSortedAndStable(t *testing.T) {
 	}
 	want := []string{"alpha", "monkey", "zebra"}
 	for i := 0; i < 50; i++ {
-		h := DeriveHouseState(now, cfg, devices)
+		h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 		if len(h.ActiveDevices) != len(want) {
 			t.Fatalf("iter %d: len=%d want %d (%v)", i, len(h.ActiveDevices), len(want), h.ActiveDevices)
 		}
@@ -372,6 +372,186 @@ func TestDeriveHouseState_ActiveDevicesSortedAndStable(t *testing.T) {
 				t.Fatalf("iter %d: got %v want %v", i, h.ActiveDevices, want)
 			}
 		}
+	}
+}
+
+// TestDeriveHouseState_ContinuousDeviceExcludedFromActivity verifies that
+// a continuous_power_device in active_cycle does not appear in ActiveDevices
+// and does not inflate the house activity dimension.
+func TestDeriveHouseState_ContinuousDeviceExcludedFromActivity(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg()
+	activeSince := now.Add(-5 * time.Minute)
+	devices := map[string]model.Device{
+		"bigfridge": {
+			ID:    "bigfridge",
+			Class: device.ClassContinuous,
+			Activity: model.Activity{
+				State:       model.ActivityActiveCycle,
+				LastChanged: activeSince,
+				Confidence:  0.9,
+			},
+		},
+	}
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
+	if len(h.ActiveDevices) != 0 {
+		t.Errorf("continuous device must not appear in ActiveDevices, got %v", h.ActiveDevices)
+	}
+	if h.Activity.State != model.HouseActivityIdle {
+		t.Errorf("expected HouseActivityIdle with only continuous devices, got %q", h.Activity.State)
+	}
+}
+
+// TestDeriveHouseState_ContinuousDoesNotContributeToOccupancy verifies that
+// a continuous_power_device does not update mostRecentActivity and therefore
+// cannot prevent the house from reaching OccupancyEmpty.
+func TestDeriveHouseState_ContinuousDoesNotContributeToOccupancy(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg() // EmptyAfter = 2h
+	// Fridge was last "active" 3 hours ago — but continuous devices are excluded.
+	lastSeen := now.Add(-3 * time.Hour)
+	devices := map[string]model.Device{
+		"bigfridge": {
+			ID:    "bigfridge",
+			Class: device.ClassContinuous,
+			Activity: model.Activity{
+				State:       model.ActivityNormalIdle,
+				LastChanged: lastSeen,
+				Confidence:  0.9,
+			},
+		},
+	}
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
+	// With no occupancy-relevant devices, we expect unknown (not empty or occupied).
+	if h.Occupancy.State != model.OccupancyUnknown {
+		t.Errorf("continuous-only device map should yield OccupancyUnknown, got %q", h.Occupancy.State)
+	}
+}
+
+// --- Signal tests ---
+
+func makeCallSignal(id string, since time.Time) model.ActivitySignal {
+	return model.ActivitySignal{
+		ID:         id,
+		Source:     "intercom",
+		Type:       "call_active",
+		Confidence: 0.9,
+		Since:      since,
+	}
+}
+
+// TestDeriveHouseState_SignalAloneProducesOccupied verifies that a
+// single active signal with no devices drives OccupancyOccupied.
+func TestDeriveHouseState_SignalAloneProducesOccupied(t *testing.T) {
+	now := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg()
+	signals := []model.ActivitySignal{makeCallSignal("call-1", now.Add(-2*time.Minute))}
+
+	h := DeriveHouseState(now, cfg, map[string]model.Device{}, signals, time.Time{})
+	if h.Occupancy.State != model.OccupancyOccupied {
+		t.Errorf("expected OccupancyOccupied from active signal, got %q", h.Occupancy.State)
+	}
+	if h.Activity.State != model.HouseActivityQuiet {
+		t.Errorf("expected HouseActivityQuiet for one signal, got %q", h.Activity.State)
+	}
+}
+
+// TestDeriveHouseState_NoDevicesNoSignalsIsUnknown verifies that an
+// empty device map and empty signal slice produces all-unknown dimensions.
+func TestDeriveHouseState_NoDevicesNoSignalsIsUnknown(t *testing.T) {
+	now := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	h := DeriveHouseState(now, defaultCfg(), map[string]model.Device{}, nil, time.Time{})
+	if h.Occupancy.State != model.OccupancyUnknown {
+		t.Errorf("expected OccupancyUnknown with no sources, got %q", h.Occupancy.State)
+	}
+}
+
+// TestDeriveHouseState_SignalAndIdleDeviceCombine verifies that an active
+// signal overrides an otherwise-idle device map to produce OccupancyOccupied.
+func TestDeriveHouseState_SignalAndIdleDeviceCombine(t *testing.T) {
+	now := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg()
+	// Device went idle 3 hours ago — beyond EmptyAfter (2h).
+	devices := map[string]model.Device{
+		"kettle": {
+			ID:    "kettle",
+			Class: "short_burst_power_device",
+			Activity: model.Activity{
+				State:       model.ActivityIdle,
+				LastChanged: now.Add(-3 * time.Hour),
+			},
+		},
+	}
+	signals := []model.ActivitySignal{makeCallSignal("call-1", now.Add(-1*time.Minute))}
+
+	h := DeriveHouseState(now, cfg, devices, signals, time.Time{})
+	if h.Occupancy.State != model.OccupancyOccupied {
+		t.Errorf("expected OccupancyOccupied with active signal despite idle device, got %q", h.Occupancy.State)
+	}
+}
+
+// TestDeriveHouseState_TwoSignalsProducesActive verifies that two active
+// signals produce HouseActivityActive (activeCount==2).
+func TestDeriveHouseState_TwoSignalsProducesActive(t *testing.T) {
+	now := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	signals := []model.ActivitySignal{
+		makeCallSignal("call-1", now.Add(-2*time.Minute)),
+		makeCallSignal("call-2", now.Add(-1*time.Minute)),
+	}
+	h := DeriveHouseState(now, defaultCfg(), map[string]model.Device{}, signals, time.Time{})
+	if h.Activity.State != model.HouseActivityActive {
+		t.Errorf("expected HouseActivityActive for 2 signals, got %q", h.Activity.State)
+	}
+}
+
+// TestDeriveHouseState_SignalContributesToMostRecentActivity verifies
+// that the most recent signal Since time feeds into the quiet/empty timeout
+// so that a house with only an old idle device but a recent signal does
+// not reach OccupancyEmpty.
+func TestDeriveHouseState_SignalContributesToMostRecentActivity(t *testing.T) {
+	now := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg() // QuietAfter=30m, EmptyAfter=2h
+	// No devices. Signal fired 10 minutes ago — within QuietAfter.
+	signals := []model.ActivitySignal{makeCallSignal("call-1", now.Add(-10*time.Minute))}
+	// Clear the signal so it is no longer active (caller passes empty slice).
+	h := DeriveHouseState(now, cfg, map[string]model.Device{}, nil, time.Time{})
+	if h.Occupancy.State != model.OccupancyUnknown {
+		t.Errorf("pre-condition: expected OccupancyUnknown with no sources")
+	}
+	// But with the signal's Since feeding mostRecentActivity, result should be Occupied.
+	h = DeriveHouseState(now, cfg, map[string]model.Device{}, signals, time.Time{})
+	if h.Occupancy.State != model.OccupancyOccupied {
+		t.Errorf("expected OccupancyOccupied while signal is active, got %q", h.Occupancy.State)
+	}
+}
+
+// TestDeriveHouseState_LastSignalAtLingers verifies that a cleared signal
+// still contributes to the QuietAfter window via lastSignalAt, so the house
+// doesn't snap immediately to unknown/empty when a call ends.
+func TestDeriveHouseState_LastSignalAtLingers(t *testing.T) {
+	now := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg() // QuietAfter=30m
+	// Call ended 5 minutes ago — within QuietAfter.
+	hangupAt := now.Add(-5 * time.Minute)
+
+	// No active signals, no devices, but lastSignalAt is recent.
+	h := DeriveHouseState(now, cfg, map[string]model.Device{}, nil, hangupAt)
+	if h.Occupancy.State != model.OccupancyOccupied {
+		t.Errorf("expected OccupancyOccupied within QuietAfter of last signal, got %q", h.Occupancy.State)
+	}
+}
+
+// TestDeriveHouseState_LastSignalAtExpires verifies that once lastSignalAt
+// is beyond EmptyAfter, the house reaches OccupancyEmpty (no other sources).
+func TestDeriveHouseState_LastSignalAtExpires(t *testing.T) {
+	now := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	cfg := defaultCfg() // EmptyAfter=2h
+	// Call ended 3 hours ago — beyond EmptyAfter.
+	hangupAt := now.Add(-3 * time.Hour)
+
+	h := DeriveHouseState(now, cfg, map[string]model.Device{}, nil, hangupAt)
+	if h.Occupancy.State != model.OccupancyEmpty {
+		t.Errorf("expected OccupancyEmpty after EmptyAfter of last signal, got %q", h.Occupancy.State)
 	}
 }
 
@@ -389,7 +569,7 @@ func TestDeriveHouseState_ActiveDevicesEmptyWhenIdle(t *testing.T) {
 			},
 		},
 	}
-	h := DeriveHouseState(now, cfg, devices)
+	h := DeriveHouseState(now, cfg, devices, nil, time.Time{})
 	if len(h.ActiveDevices) != 0 {
 		t.Errorf("expected empty ActiveDevices when all idle, got %v", h.ActiveDevices)
 	}

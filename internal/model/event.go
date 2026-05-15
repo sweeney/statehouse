@@ -39,6 +39,17 @@ const (
 	EvtMediaInactive             DerivedEventType = "media_inactive"
 	EvtEnergyDivergenceWarning   DerivedEventType = "energy_divergence_warning"
 	EvtHouseStateChanged         DerivedEventType = "house_state_changed"
+
+	// Intercom events. Source is the intercom adapter; the call_id and
+	// participant details are in Evidence.
+	EvtIntercomRinging  DerivedEventType = "intercom_ringing"
+	EvtIntercomAnswered DerivedEventType = "intercom_answered"
+	EvtIntercomHungup   DerivedEventType = "intercom_hungup"
+
+	// Signal lifecycle events emitted by the engine when a signal is
+	// asserted or cleared.
+	EvtSignalAsserted DerivedEventType = "signal_asserted"
+	EvtSignalCleared  DerivedEventType = "signal_cleared"
 )
 
 // DerivedEvent is something the engine concluded from one or more

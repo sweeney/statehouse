@@ -13,6 +13,7 @@ import (
 	"github.com/sweeney/statehouse/internal/adapter"
 	"github.com/sweeney/statehouse/internal/adapter/boiler"
 	"github.com/sweeney/statehouse/internal/adapter/climate"
+	"github.com/sweeney/statehouse/internal/adapter/intercom"
 	"github.com/sweeney/statehouse/internal/adapter/meter"
 	"github.com/sweeney/statehouse/internal/adapter/ups"
 	"github.com/sweeney/statehouse/internal/adapter/zigbee2mqtt"
@@ -82,6 +83,9 @@ func main() {
 	if cfg.Adapters.Meter.IsEnabled() {
 		adapters = append(adapters, meter.New(engine, cfg.Adapters.Meter.BaseTopic, logger))
 	}
+	if cfg.Adapters.Intercom.IsEnabled() {
+		adapters = append(adapters, intercom.New(engine, cfg.Adapters.Intercom.BaseTopic, logger))
+	}
 	for _, a := range adapters {
 		for _, filter := range a.Subscriptions() {
 			if err := mqttClient.Subscribe(filter, 0, a.HandleMessage); err != nil {
@@ -104,7 +108,7 @@ func main() {
 		Store:  store,
 		Logger: logger,
 		BuildSnapshot: func(snap model.Snapshot, now time.Time) any {
-			return httpapi.BuildSnapshot(snap, now, stalenessFor)
+			return httpapi.BuildSnapshot(snap, store.ActiveSignals(now), store.RecentActivity(state.ActivityLogSize), now, stalenessFor)
 		},
 		BuildHouse: func(h model.House) any {
 			return httpapi.BuildHouseResponse(h)
@@ -127,6 +131,13 @@ func main() {
 	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger, cfg.DeviceClasses)
 	engine.AddCanonicalSink(api)
 	engine.AddDerivedSink(api)
+
+	// Wire rich intercom events to the API sink now that api is available.
+	for _, a := range adapters {
+		if ic, ok := a.(*intercom.Adapter); ok {
+			ic.SetDerivedSink(api)
+		}
+	}
 
 	ctx, cancel := signalContext()
 	defer cancel()
