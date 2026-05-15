@@ -376,3 +376,80 @@ func TestStepContinuous_ExplicitZeroCompressorAboveW(t *testing.T) {
 		t.Errorf("expected ActivityActiveCycle, got %s", out.NewActivity)
 	}
 }
+
+func cyclePowerTh() config.Thresholds {
+	return config.Thresholds{
+		IdleBelowW:           ptrF(5),
+		ActiveAboveW:         ptrF(20),
+		ActiveSustainedFor:   ptrDur(1 * time.Second),
+		InactiveSustainedFor: ptrDur(1 * time.Second),
+	}
+}
+
+// runCycleToFinished drives a cycle device to ActivityFinishedRecently
+// and returns the runtime and the time at which the cycle finished.
+func runCycleToFinished(t *testing.T) (*Runtime, time.Time) {
+	t.Helper()
+	now := time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassCyclePower, cyclePowerTh(), energy.StrategyCounter)
+	rt.OnReading(now, model.Reading{Timestamp: now, PowerW: ptrF(1800)})
+	rt.OnReading(now.Add(2*time.Second), model.Reading{Timestamp: now.Add(2 * time.Second), PowerW: ptrF(1800)})
+	// Drop below idle; sustain 1s to finish.
+	rt.OnReading(now.Add(3*time.Second), model.Reading{Timestamp: now.Add(3 * time.Second), PowerW: ptrF(1)})
+	finishAt := now.Add(5 * time.Second)
+	out := rt.OnReading(finishAt, model.Reading{Timestamp: finishAt, PowerW: ptrF(1)})
+	if out.NewActivity != model.ActivityFinishedRecently {
+		t.Fatalf("expected FinishedRecently, got %s", out.NewActivity)
+	}
+	return rt, finishAt
+}
+
+func TestCycle_FinishedRecentlyDecaysAfterConsecutiveLowReadings(t *testing.T) {
+	rt, finishAt := runCycleToFinished(t)
+	// Two low readings: not enough.
+	out := rt.OnReading(finishAt.Add(time.Minute), model.Reading{Timestamp: finishAt.Add(time.Minute), PowerW: ptrF(1)})
+	if out.NewActivity != model.ActivityFinishedRecently {
+		t.Fatalf("should still be FinishedRecently after 1 low reading, got %s", out.NewActivity)
+	}
+	out = rt.OnReading(finishAt.Add(2*time.Minute), model.Reading{Timestamp: finishAt.Add(2 * time.Minute), PowerW: ptrF(1)})
+	if out.NewActivity != model.ActivityFinishedRecently {
+		t.Fatalf("should still be FinishedRecently after 2 low readings, got %s", out.NewActivity)
+	}
+	// Third low reading: should decay to idle.
+	out = rt.OnReading(finishAt.Add(3*time.Minute), model.Reading{Timestamp: finishAt.Add(3 * time.Minute), PowerW: ptrF(1)})
+	if out.NewActivity != model.ActivityIdle {
+		t.Fatalf("expected ActivityIdle after 3 consecutive low readings, got %s", out.NewActivity)
+	}
+}
+
+func TestCycle_FinishedRecentlyCounterResetsOnNonLowReading(t *testing.T) {
+	rt, finishAt := runCycleToFinished(t)
+	// Two low readings then a non-low (residual draw) resets the counter.
+	rt.OnReading(finishAt.Add(time.Minute), model.Reading{Timestamp: finishAt.Add(time.Minute), PowerW: ptrF(1)})
+	rt.OnReading(finishAt.Add(2*time.Minute), model.Reading{Timestamp: finishAt.Add(2 * time.Minute), PowerW: ptrF(1)})
+	rt.OnReading(finishAt.Add(3*time.Minute), model.Reading{Timestamp: finishAt.Add(3 * time.Minute), PowerW: ptrF(10)}) // above idle threshold
+	// Two more lows: counter restarted, still not at 3.
+	rt.OnReading(finishAt.Add(4*time.Minute), model.Reading{Timestamp: finishAt.Add(4 * time.Minute), PowerW: ptrF(1)})
+	out := rt.OnReading(finishAt.Add(5*time.Minute), model.Reading{Timestamp: finishAt.Add(5 * time.Minute), PowerW: ptrF(1)})
+	if out.NewActivity == model.ActivityIdle {
+		t.Fatalf("should not have decayed: counter was reset at 3min, only 2 low readings since; got %s", out.NewActivity)
+	}
+}
+
+func TestCycle_FinishedRecentlyTTLDecayViaTick(t *testing.T) {
+	rt, finishAt := runCycleToFinished(t)
+	// No readings arrive; Tick fires after TTL.
+	justBefore := finishAt.Add(finishedRecentlyTTL - time.Second)
+	out := rt.Tick(justBefore)
+	if out.NewActivity != model.ActivityFinishedRecently {
+		t.Fatalf("should not decay before TTL, got %s", out.NewActivity)
+	}
+	atTTL := finishAt.Add(finishedRecentlyTTL)
+	out = rt.Tick(atTTL)
+	if out.NewActivity != model.ActivityIdle {
+		t.Fatalf("expected ActivityIdle after TTL, got %s", out.NewActivity)
+	}
+	if out.PrevActivity != model.ActivityFinishedRecently {
+		t.Fatalf("expected PrevActivity=FinishedRecently, got %s", out.PrevActivity)
+	}
+}

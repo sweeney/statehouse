@@ -26,6 +26,8 @@ type Store struct {
 	byPrimary map[string]string
 	byDisplay map[string]string
 	house     model.House
+	signals   *SignalStore
+	actLog    *activityLog
 }
 
 type deviceEntry struct {
@@ -43,6 +45,8 @@ func NewStore() *Store {
 		dev:       make(map[string]*deviceEntry),
 		byPrimary: make(map[string]string),
 		byDisplay: make(map[string]string),
+		signals:   newSignalStore(),
+		actLog:    newActivityLog(),
 		house: model.House{
 			Occupancy: model.OccupancyDimension{State: model.OccupancyUnknown},
 			Activity:  model.HouseActivityDimension{State: model.HouseActivityUnknown},
@@ -194,6 +198,33 @@ func (s *Store) Snapshot() model.Snapshot {
 		out.Devices[id] = e.Device
 	}
 	return out
+}
+
+// ActiveSignals returns all non-expired ActivitySignals as of now.
+func (s *Store) ActiveSignals(now time.Time) []model.ActivitySignal {
+	return s.signals.Active(now)
+}
+
+// LastSignalAt returns the high-water mark of signal activity: the
+// most recent time a signal was asserted, explicitly cleared, or
+// expired via TTL. Zero if no signal has ever been seen.
+func (s *Store) LastSignalAt() time.Time {
+	return s.signals.LastAt()
+}
+
+// AppendActivity adds a record to the recent-activity ring buffer.
+func (s *Store) AppendActivity(r model.ActivityRecord) {
+	s.actLog.Append(r)
+}
+
+// UpdateActivity finds the most recent record with the given ID and calls fn.
+func (s *Store) UpdateActivity(id string, fn func(*model.ActivityRecord)) {
+	s.actLog.Update(id, fn)
+}
+
+// RecentActivity returns up to limit recent activity records, newest first.
+func (s *Store) RecentActivity(limit int) []model.ActivityRecord {
+	return s.actLog.Recent(limit)
 }
 
 // withEntry is a helper that runs fn while holding the write lock.

@@ -96,13 +96,19 @@ device_classes:
       active_sustained_for: 0s
       inactive_sustained_for: 0s
 
+  # intercom — Asterisk-via-MQTT phone system. Disabled by default; enable
+  # on sites with an Asterisk bridge publishing to asterisk/#.
+  intercom:
+    enabled: false
+    base_topic: asterisk
+
   # Measurement-only devices: climate sensors (Sonoff SNZB-02 etc.),
   # air-quality, illuminance. No cycle, no activity machine —
   # activity stays "reporting" while the device transmits. Latest
   # values (temp / humidity / battery) flow into the device record
   # and into Influx as device_environment / device_battery samples.
   sensor_device:
-    name_hints: [climate, thsensor, snzb]
+    name_hints: [climate, thsensor, snzb, ups]
 
 devices:
   kitchen_dishwasher:
