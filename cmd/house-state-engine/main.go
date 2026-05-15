@@ -125,16 +125,17 @@ func main() {
 	engine.AddDerivedSink(influxWriter)
 
 	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger, cfg.DeviceClasses)
+	api.Publisher = publisher
 	engine.AddCanonicalSink(api)
 	engine.AddDerivedSink(api)
 
-	ctx, cancel := signalContext()
-	defer cancel()
-
 	// Run the publisher with a non-blocking bounded queue so broker
 	// stalls don't park paho dispatch goroutines on the publisher
-	// mutex (issue #50).
-	publisher.Start(ctx)
+	// mutex (issue #50). Close() drains the queue at shutdown.
+	publisher.Start()
+
+	ctx, cancel := signalContext()
+	defer cancel()
 
 	// Tick: drives the availability debounce + house recompute.
 	go func() {

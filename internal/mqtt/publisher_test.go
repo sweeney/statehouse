@@ -1,9 +1,9 @@
 package mqtt
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -263,9 +263,7 @@ func TestPublisher_AsyncDoesNotBlockOnStalledBroker(t *testing.T) {
 
 	bc := newBlockingClient()
 	pub := &Publisher{Client: bc, Prefix: "house", Store: store}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pub.Start(ctx)
+	pub.Start()
 
 	// Fire 100 derived events against the stalled client. Each call
 	// must return promptly — the budget here is generous (1s for the
@@ -311,9 +309,7 @@ func TestPublisher_AsyncCloseDrainsQueue(t *testing.T) {
 	}, rt)
 	fc := NewFakeClient()
 	pub := &Publisher{Client: fc, Prefix: "house", Store: store}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pub.Start(ctx)
+	pub.Start()
 
 	for i := 0; i < 5; i++ {
 		pub.OnDerivedEvent(model.DerivedEvent{
@@ -329,6 +325,81 @@ func TestPublisher_AsyncCloseDrainsQueue(t *testing.T) {
 	// the time Close returns.
 	if got := len(fc.PublishedOn("house/events/derived")); got != 5 {
 		t.Fatalf("expected 5 derived publishes after Close drain, got %d", got)
+	}
+}
+
+// TestPublisher_AsyncCloseConcurrentSendIsRaceSafe stresses the
+// reported race between Close() closing the queue and publishJSON's
+// non-blocking send. Run under `go test -race` and many publishers
+// firing during shutdown: a send-on-closed-channel would panic.
+func TestPublisher_AsyncCloseConcurrentSendIsRaceSafe(t *testing.T) {
+	for iter := 0; iter < 20; iter++ {
+		store := state.NewStore()
+		rt := device.NewRuntime(device.Profile{Class: device.ClassCyclePower}, 30*time.Minute)
+		store.Upsert("k", model.Device{
+			ID:       "k",
+			Class:    device.ClassCyclePower,
+			Identity: model.DeviceIdentity{Scheme: "zigbee", Primary: "k", Display: "k"},
+		}, rt)
+		fc := NewFakeClient()
+		pub := &Publisher{Client: fc, Prefix: "house", Store: store}
+		pub.Start()
+
+		var wg sync.WaitGroup
+		// Many concurrent producers racing against Close.
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 50; j++ {
+					pub.OnDerivedEvent(model.DerivedEvent{
+						ID:        "evt",
+						Timestamp: time.Now().UTC(),
+						Type:      model.EvtCycleStarted,
+						DeviceID:  "k",
+					})
+				}
+			}()
+		}
+		// Close while producers are still firing — any closed-channel
+		// send would panic here.
+		time.Sleep(time.Microsecond) // let some producers start
+		pub.Close()
+		wg.Wait()
+	}
+}
+
+// TestPublisher_AsyncCloseDrainsQueueAfterCtxCancel is the production
+// shutdown shape: the worker is no longer keyed off ctx, so a
+// cancelled parent context doesn't stop the worker — Close() does,
+// and only after the buffered jobs have drained. Test asserts both
+// properties.
+func TestPublisher_AsyncCloseDrainsQueueAfterCtxCancel(t *testing.T) {
+	store := state.NewStore()
+	rt := device.NewRuntime(device.Profile{Class: device.ClassCyclePower}, 30*time.Minute)
+	store.Upsert("k", model.Device{
+		ID:       "k",
+		Class:    device.ClassCyclePower,
+		Identity: model.DeviceIdentity{Scheme: "zigbee", Primary: "k", Display: "k"},
+	}, rt)
+	fc := NewFakeClient()
+	pub := &Publisher{Client: fc, Prefix: "house", Store: store}
+	pub.Start()
+
+	for i := 0; i < 7; i++ {
+		pub.OnDerivedEvent(model.DerivedEvent{
+			ID:        "evt",
+			Timestamp: time.Now().UTC(),
+			Type:      model.EvtCycleStarted,
+			DeviceID:  "k",
+		})
+	}
+	pub.Close()
+
+	// All 7 derived publishes (plus their per-device retained
+	// publishes) must have landed by the time Close returns.
+	if got := len(fc.PublishedOn("house/events/derived")); got != 7 {
+		t.Fatalf("expected 7 derived publishes after Close drain, got %d", got)
 	}
 }
 

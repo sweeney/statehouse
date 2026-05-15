@@ -133,6 +133,13 @@ func TestHandleMetrics(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"device_count":1`) {
 		t.Fatalf("expected device_count=1, got %s", w.Body.String())
 	}
+	// mqtt_publishes_dropped_total must be present so operators can
+	// alert on the new failure mode introduced by the bounded publish
+	// queue (issue #50). The field reports 0 here because no Publisher
+	// is wired to the test Server.
+	if !strings.Contains(w.Body.String(), `"mqtt_publishes_dropped_total":0`) {
+		t.Fatalf("expected mqtt_publishes_dropped_total=0 to be surfaced, got %s", w.Body.String())
+	}
 }
 
 func TestHandleHouse(t *testing.T) {
