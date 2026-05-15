@@ -117,6 +117,10 @@ func main() {
 			return httpapi.BuildDeviceResponse(d, now, stalenessFor(d.Class))
 		},
 	}
+	// Start the bounded-queue worker before wiring the publisher as a
+	// sink so the first inbound MQTT message can't take the
+	// synchronous fallback path (issue #50).
+	publisher.Start()
 	engine.AddDerivedSink(publisher)
 
 	influxWriter := influx.New(cfg.Influx.Enabled, influx.Config{
@@ -139,11 +143,6 @@ func main() {
 			ic.SetDerivedSink(api)
 		}
 	}
-
-	// Run the publisher with a non-blocking bounded queue so broker
-	// stalls don't park paho dispatch goroutines on the publisher
-	// mutex (issue #50). Close() drains the queue at shutdown.
-	publisher.Start()
 
 	ctx, cancel := signalContext()
 	defer cancel()
