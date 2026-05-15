@@ -8,6 +8,15 @@ import (
 	"github.com/sweeney/statehouse/internal/model"
 )
 
+const (
+	// finishedRecentlyLowReadings is the number of consecutive low-power
+	// readings required to decay finished_recently → idle.
+	finishedRecentlyLowReadings = 3
+	// finishedRecentlyTTL is the fallback timeout: if readings don't
+	// arrive, Tick decays finished_recently → idle after this duration.
+	finishedRecentlyTTL = 30 * time.Minute
+)
+
 func derefF64(p *float64, def float64) float64 {
 	if p == nil {
 		return def
@@ -64,6 +73,10 @@ type Runtime struct {
 	activity    model.DeviceActivityState
 	activeSince time.Time
 	candidate   *candidateSample
+
+	// finishedLowCount tracks consecutive low-power readings while in
+	// ActivityFinishedRecently so stepCycle can decay to idle.
+	finishedLowCount int
 
 	counter    energy.Counter
 	integrator *energy.Integrator
@@ -200,6 +213,21 @@ func (r *Runtime) stepCycle(at time.Time, p float64, out *Outcome) {
 		out.NewActivity = model.ActivityFinishedRecently
 		out.CycleFinished = true
 		r.finishCycle(at)
+		return
+	}
+	// Decay finished_recently → idle on N consecutive low-power readings.
+	// A non-low reading resets the counter (residual heat, standby draw, etc.).
+	if r.activity == model.ActivityFinishedRecently {
+		if p < derefF64(r.Thresholds.IdleBelowW, 0) {
+			r.finishedLowCount++
+			if r.finishedLowCount >= finishedRecentlyLowReadings {
+				r.activity = model.ActivityIdle
+				out.NewActivity = model.ActivityIdle
+				r.finishedLowCount = 0
+			}
+		} else {
+			r.finishedLowCount = 0
+		}
 		return
 	}
 	// First low-power reading: resolve unknown → idle immediately.
@@ -426,6 +454,7 @@ func (r *Runtime) maybeEnd(at time.Time, p float64) bool {
 }
 
 func (r *Runtime) startCycle(at time.Time) {
+	r.finishedLowCount = 0
 	r.cycle = &model.Cycle{Active: true, StartedAt: at}
 	r.activeSince = at
 	// Move the counter baseline to the current latest reading. This
@@ -490,6 +519,25 @@ func (r *Runtime) MarkDivergence(pct float64) {
 	}
 	r.cycle.Energy.DivergencePct = pct
 	r.cycle.Energy.DivergenceWarning = true
+}
+
+// Tick applies time-driven transitions. The engine calls this on its
+// periodic tick so TTL-based decays fire even when readings are absent.
+// Currently handles: finished_recently → idle after finishedRecentlyTTL.
+func (r *Runtime) Tick(at time.Time) Outcome {
+	out := Outcome{PrevActivity: r.activity, NewActivity: r.activity}
+	if r.activity != model.ActivityFinishedRecently {
+		return out
+	}
+	if r.cycle == nil || r.cycle.FinishedAt == nil {
+		return out
+	}
+	if at.Sub(*r.cycle.FinishedAt) >= finishedRecentlyTTL {
+		r.activity = model.ActivityIdle
+		r.finishedLowCount = 0
+		out.NewActivity = model.ActivityIdle
+	}
+	return out
 }
 
 // IntegrationGapsClamped exposes the number of times the integrator

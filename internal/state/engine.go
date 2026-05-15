@@ -370,31 +370,102 @@ func (e *Engine) SetAvailability(identity model.DeviceIdentity, sourceTopic stri
 	}
 }
 
+// IngestSignal asserts an ActivitySignal. If a signal with the same ID
+// already exists it is replaced (upsert). RecomputeHouse is called so
+// house state reflects the change immediately.
+func (e *Engine) IngestSignal(s model.ActivitySignal) {
+	if s.Timestamp.IsZero() {
+		s.Timestamp = e.clock.Now()
+	}
+	if s.Since.IsZero() {
+		s.Since = s.Timestamp
+	}
+	e.store.signals.Upsert(s)
+	e.emitDerived(model.DerivedEvent{
+		ID:        newEventID(),
+		Timestamp: s.Timestamp,
+		Type:      model.EvtSignalAsserted,
+		Summary:   s.Source + "/" + s.Type,
+		Evidence: map[string]any{
+			"signal_id": s.ID,
+			"source":    s.Source,
+			"type":      s.Type,
+			"location":  s.Location,
+			"meta":      s.Meta,
+		},
+	})
+	e.RecomputeHouse()
+}
+
+// ClearSignal removes the signal with the given ID. No-op if not
+// present. RecomputeHouse is called so house state reflects the change.
+func (e *Engine) ClearSignal(id string, ts time.Time) {
+	if ts.IsZero() {
+		ts = e.clock.Now()
+	}
+	e.store.signals.ClearAt(id, ts)
+	e.emitDerived(model.DerivedEvent{
+		ID:        newEventID(),
+		Timestamp: ts,
+		Type:      model.EvtSignalCleared,
+		Evidence:  map[string]any{"signal_id": id},
+	})
+	e.RecomputeHouse()
+}
+
+// RecordActivity appends an ActivityRecord to the recent-activity log.
+func (e *Engine) RecordActivity(r model.ActivityRecord) {
+	e.store.AppendActivity(r)
+}
+
+// UpdateActivity updates the most recent ActivityRecord with the given ID.
+func (e *Engine) UpdateActivity(id string, fn func(*model.ActivityRecord)) {
+	e.store.UpdateActivity(id, fn)
+}
+
 // Tick is meant to be called by a periodic ticker. It applies any
-// time-driven transitions (e.g. offline debounce maturing) and
-// re-derives whole-house state.
+// time-driven transitions (e.g. offline debounce maturing,
+// finished_recently TTL decay) and re-derives whole-house state.
 func (e *Engine) Tick() {
 	now := e.clock.Now()
 	debounce := e.cfg.Availability.OfflineDebounce
-	type matured struct {
+	type maturedAvail struct {
 		id   string
 		from model.Availability
 	}
-	var changed []matured
+	type maturedActivity struct {
+		id      string
+		profile device.Profile
+		outcome device.Outcome
+	}
+	var availChanged []maturedAvail
+	var activityChanged []maturedActivity
 	devices := e.store.Devices()
 	for id := range devices {
 		e.store.withEntry(id, func(ent *deviceEntry) {
-			if ent.availabilityOfflineAt == nil {
-				return
-			}
-			if ent.Device.Availability == model.AvailabilityOfflinePending && now.Sub(*ent.availabilityOfflineAt) >= debounce {
+			if ent.availabilityOfflineAt != nil &&
+				ent.Device.Availability == model.AvailabilityOfflinePending &&
+				now.Sub(*ent.availabilityOfflineAt) >= debounce {
 				from := ent.Device.Availability
 				ent.Device.Availability = model.AvailabilityOffline
-				changed = append(changed, matured{id: id, from: from})
+				availChanged = append(availChanged, maturedAvail{id: id, from: from})
+			}
+			if ent.Runtime != nil {
+				tickOut := ent.Runtime.Tick(now)
+				if tickOut.PrevActivity != tickOut.NewActivity {
+					ent.Device.Activity.State = tickOut.NewActivity
+					ent.Device.Activity.LastChanged = now
+					ent.Device.Activity.Since = now
+					activityChanged = append(activityChanged, maturedActivity{
+						id:      id,
+						profile: ent.Runtime.Profile,
+						outcome: tickOut,
+					})
+				}
 			}
 		})
 	}
-	for _, c := range changed {
+	for _, c := range availChanged {
 		e.emitDerived(model.DerivedEvent{
 			ID:        newEventID(),
 			Timestamp: now,
@@ -403,6 +474,10 @@ func (e *Engine) Tick() {
 			Evidence:  map[string]any{"availability": string(model.AvailabilityOffline)},
 		})
 	}
+	for _, c := range activityChanged {
+		e.emitActivityChange(c.id, c.profile, c.outcome, now)
+	}
+	e.store.signals.Prune(now)
 	e.RecomputeHouse()
 }
 
@@ -410,7 +485,7 @@ func (e *Engine) Tick() {
 // current device state and notifies sinks on change.
 func (e *Engine) RecomputeHouse() {
 	now := e.clock.Now()
-	house := DeriveHouseState(now, e.cfg.House, e.store.Devices())
+	house := DeriveHouseState(now, e.cfg.House, e.store.Devices(), e.store.ActiveSignals(now), e.store.LastSignalAt())
 	changed := e.store.setHouse(house)
 	if changed {
 		e.emitDerived(model.DerivedEvent{
