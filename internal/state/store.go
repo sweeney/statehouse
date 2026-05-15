@@ -61,10 +61,14 @@ func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.dev[id]
+	var prevScheme, prevPrimary, prevDisplay string
 	if !ok {
 		entry = &deviceEntry{Device: d, Runtime: rt}
 		s.dev[id] = entry
 	} else {
+		prevScheme = entry.Device.Identity.Scheme
+		prevPrimary = entry.Device.Identity.Primary
+		prevDisplay = entry.Device.Identity.Display
 		if d.DisplayName != "" {
 			entry.Device.DisplayName = d.DisplayName
 		}
@@ -88,6 +92,19 @@ func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 	// Refresh indexes from the merged identity, not from the raw input
 	// — that way a partial Upsert doesn't drop indexes set earlier.
 	merged := entry.Device.Identity
+	// Evict orphan index entries when the scheme or key changes (e.g.
+	// phantom Primary=Display gets upgraded to a real IEEE). Without
+	// this, byPrimary/byDisplay retain forever-pointing entries to the
+	// live id for every identity transition — both a slow memory leak
+	// and a correctness hazard for LookupID against stale keys.
+	if prevScheme != "" && prevPrimary != "" &&
+		(prevScheme != merged.Scheme || prevPrimary != merged.Primary) {
+		delete(s.byPrimary, prevScheme+":"+prevPrimary)
+	}
+	if prevScheme != "" && prevDisplay != "" &&
+		(prevScheme != merged.Scheme || prevDisplay != merged.Display) {
+		delete(s.byDisplay, prevScheme+":"+prevDisplay)
+	}
 	if merged.Scheme != "" && merged.Primary != "" {
 		s.byPrimary[merged.Scheme+":"+merged.Primary] = id
 	}

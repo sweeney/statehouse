@@ -74,6 +74,38 @@ func TestStore_UpsertDoesNotEraseKnownPrimaryWithEmptyOne(t *testing.T) {
 	}
 }
 
+func TestStore_PhantomUpgradeEvictsOldPrimaryIndex(t *testing.T) {
+	// Reproduces the leak in issue #49: a phantom Primary=Display key
+	// must not linger in byPrimary after the IEEE upgrade lands.
+	s := NewStore()
+	phantom := model.DeviceIdentity{Scheme: "zigbee", Primary: "kitchen_kettle", Display: "kitchen_kettle"}
+	s.Upsert("kitchen_kettle", model.Device{ID: "kitchen_kettle", Identity: phantom}, nil)
+	canonical := model.DeviceIdentity{Scheme: "zigbee", Primary: "0x00158d000123abcd", Display: "kitchen_kettle"}
+	s.Upsert("kitchen_kettle", model.Device{ID: "kitchen_kettle", Identity: canonical}, nil)
+	// The phantom Primary key must no longer resolve — otherwise a stale
+	// lookup against the old key still returns the live device id.
+	if got := s.LookupID(model.DeviceIdentity{Scheme: "zigbee", Primary: "kitchen_kettle"}); got != "" {
+		t.Fatalf("expected phantom byPrimary key evicted after upgrade, got %q", got)
+	}
+	if got := s.LookupID(canonical); got != "kitchen_kettle" {
+		t.Fatalf("canonical lookup after upgrade: got %q", got)
+	}
+}
+
+func TestStore_UpsertRenameEvictsOldDisplayIndex(t *testing.T) {
+	// A display change via Upsert (not Rename) must also evict the old
+	// byDisplay entry — Rename is not the only mutator.
+	s := NewStore()
+	s.Upsert("k", model.Device{ID: "k", Identity: model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc", Display: "old_name"}}, nil)
+	s.Upsert("k", model.Device{ID: "k", Identity: model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc", Display: "new_name"}}, nil)
+	if got := s.LookupID(model.DeviceIdentity{Scheme: "zigbee", Display: "old_name"}); got != "" {
+		t.Fatalf("expected old display evicted after Upsert rename, got %q", got)
+	}
+	if got := s.LookupID(model.DeviceIdentity{Scheme: "zigbee", Display: "new_name"}); got != "k" {
+		t.Fatalf("new display lookup: got %q", got)
+	}
+}
+
 func TestStore_RenameUpdatesDisplayIndex(t *testing.T) {
 	s := NewStore()
 	s.Upsert("k", model.Device{ID: "k", Identity: model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc", Display: "old"}}, nil)
