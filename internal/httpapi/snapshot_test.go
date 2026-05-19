@@ -38,13 +38,13 @@ func TestStalenessConfigOverride(t *testing.T) {
 	d.Latest.LastSeen = lastSeen
 
 	// Class default threshold is 900 s; 120 s < 900 s → not stale.
-	resp := buildDeviceResponse(d, now, nil)
+	resp := buildDeviceResponse(d, now, nil, false)
 	if resp.Latest.Stale {
 		t.Error("expected stale=false with class-default threshold (900 s) and LastSeen 2 min ago")
 	}
 
 	// Override to 60 s; 120 s >= 60 s → stale.
-	resp = buildDeviceResponse(d, now, &sixty)
+	resp = buildDeviceResponse(d, now, &sixty, false)
 	if !resp.Latest.Stale {
 		t.Error("expected stale=true with override threshold (60 s) and LastSeen 2 min ago")
 	}

@@ -636,3 +636,80 @@ func TestSnapshot_ZeroLastSeenNotStale(t *testing.T) {
 		t.Errorf("expected last_seen_ago:null in JSON for zero LastSeen, got %s", rawStr)
 	}
 }
+
+// TestIdentity_PresentInDevicesEndpoint verifies that /state/devices/{id}
+// and /state/devices include the identity block with scheme, primary, and display.
+func TestIdentity_PresentInDevicesEndpoint(t *testing.T) {
+	srv, engine := setup(t)
+	mux := newMux(srv)
+	ts := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	p := 2000.0
+	engine.IngestReading(model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc123", Display: "kettle"}, "zigbee2mqtt/kettle",
+		model.Reading{Timestamp: ts, PowerW: &p})
+
+	// Single device endpoint.
+	r := httptest.NewRequest(http.MethodGet, "/state/devices/kettle", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	var dev DeviceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &dev); err != nil {
+		t.Fatalf("parse /state/devices/kettle: %v", err)
+	}
+	if dev.Identity == nil {
+		t.Fatal("identity must be present in /state/devices/{id}, got nil")
+	}
+	if dev.Identity.Scheme != "zigbee" {
+		t.Errorf("identity.scheme = %q, want zigbee", dev.Identity.Scheme)
+	}
+	if dev.Identity.Primary != "0xabc123" {
+		t.Errorf("identity.primary = %q, want 0xabc123", dev.Identity.Primary)
+	}
+	if dev.Identity.Display != "kettle" {
+		t.Errorf("identity.display = %q, want kettle", dev.Identity.Display)
+	}
+
+	// Device list endpoint.
+	r = httptest.NewRequest(http.MethodGet, "/state/devices", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	var devMap map[string]DeviceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &devMap); err != nil {
+		t.Fatalf("parse /state/devices: %v", err)
+	}
+	if devMap["kettle"].Identity == nil {
+		t.Fatal("identity must be present in /state/devices list, got nil")
+	}
+}
+
+// TestIdentity_AbsentInSnapshot verifies that the identity block is omitted
+// from device entries in the /state snapshot response.
+func TestIdentity_AbsentInSnapshot(t *testing.T) {
+	srv, engine := setup(t)
+	mux := newMux(srv)
+	ts := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	p := 2000.0
+	engine.IngestReading(model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc123", Display: "kettle"}, "zigbee2mqtt/kettle",
+		model.Reading{Timestamp: ts, PowerW: &p})
+
+	r := httptest.NewRequest(http.MethodGet, "/state", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	var snap SnapshotResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("parse /state: %v", err)
+	}
+	dev, ok := snap.Devices["kettle"]
+	if !ok {
+		t.Fatal("kettle not found in snapshot devices")
+	}
+	if dev.Identity != nil {
+		t.Errorf("identity must be absent in /state snapshot, got %+v", dev.Identity)
+	}
+
+	// Also verify via raw JSON that the key is not present at all.
+	raw := w.Body.Bytes()
+	if strings.Contains(string(raw), `"identity"`) {
+		t.Error("identity key must not appear anywhere in /state JSON")
+	}
+}

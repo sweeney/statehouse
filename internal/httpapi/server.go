@@ -158,7 +158,7 @@ func (s *Server) handleDevices(w http.ResponseWriter, _ *http.Request) {
 	devices := s.Store.Devices()
 	out := make(map[string]DeviceResponse, len(devices))
 	for id, d := range devices {
-		out[id] = buildDeviceResponse(d, now, s.stalenessFor(d.Class))
+		out[id] = buildDeviceResponse(d, now, s.stalenessFor(d.Class), true)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -179,7 +179,7 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "device not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, buildDeviceResponse(d, time.Now(), s.stalenessFor(d.Class)))
+	writeJSON(w, http.StatusOK, buildDeviceResponse(d, time.Now(), s.stalenessFor(d.Class), true))
 }
 
 func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {

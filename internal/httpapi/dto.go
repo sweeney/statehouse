@@ -121,12 +121,23 @@ type HouseResponse struct {
 	ActiveDevices []string               `json:"active_devices"`
 }
 
+// IdentityResponse is the protocol-agnostic identity of a device.
+// Scheme names the adapter ("zigbee", "boiler", "ups", …); Primary is
+// the stable adapter-specific id (IEEE address for zigbee, device name
+// for others); Display is the human-readable mutable name.
+type IdentityResponse struct {
+	Scheme  string `json:"scheme"`
+	Primary string `json:"primary,omitempty"`
+	Display string `json:"display,omitempty"`
+}
+
 // DeviceResponse is the DTO for a single device.
 type DeviceResponse struct {
 	ID           string             `json:"id"`
 	DisplayName  string             `json:"display_name,omitempty"`
 	Class        string             `json:"class"`
 	Location     string             `json:"location,omitempty"`
+	Identity     *IdentityResponse  `json:"identity,omitempty"`
 	Availability model.Availability `json:"availability"`
 	Activity     ActivityResponse   `json:"activity"`
 	Latest       LatestResponse     `json:"latest"`
@@ -221,7 +232,7 @@ func BuildHouseResponse(h model.House, now time.Time) HouseResponse {
 // BuildDeviceResponse is the exported HTTP-DTO builder for model.Device.
 // stalenessSeconds may be nil to use the class default.
 func BuildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) DeviceResponse {
-	return buildDeviceResponse(d, now, stalenessSeconds)
+	return buildDeviceResponse(d, now, stalenessSeconds, true)
 }
 
 // buildSnapshot converts a model.Snapshot into a SnapshotResponse. now is used
@@ -234,7 +245,7 @@ func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records 
 	}
 	devices := make(map[string]DeviceResponse, len(snap.Devices))
 	for id, d := range snap.Devices {
-		devices[id] = buildDeviceResponse(d, now, lookupStaleness(d.Class))
+		devices[id] = buildDeviceResponse(d, now, lookupStaleness(d.Class), false)
 	}
 
 	summary := buildSummary(devices)
@@ -369,8 +380,10 @@ func buildHouseResponse(h model.House, now time.Time) HouseResponse {
 }
 
 // buildDeviceResponse converts a model.Device into a DeviceResponse.
-// stalenessSeconds may be nil to use the class default.
-func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) DeviceResponse {
+// stalenessSeconds may be nil to use the class default. includeIdentity
+// controls whether the identity block is populated; pass false for the
+// snapshot endpoint to keep that payload lean.
+func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int, includeIdentity bool) DeviceResponse {
 	warnings := []string{}
 
 	latest, stale := buildLatestResponse(d.Latest, d.Class, now, stalenessSeconds)
@@ -384,11 +397,20 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) D
 		warnings = append(warnings, "stale_counter")
 	}
 
+	var identity *IdentityResponse
+	if includeIdentity {
+		identity = &IdentityResponse{
+			Scheme:  d.Identity.Scheme,
+			Primary: d.Identity.Primary,
+			Display: d.Identity.Display,
+		}
+	}
 	return DeviceResponse{
 		ID:           d.ID,
 		DisplayName:  d.DisplayName,
 		Class:        d.Class,
 		Location:     d.Location,
+		Identity:     identity,
 		Availability: d.Availability,
 		Activity:     buildActivityResponse(d.Activity, now),
 		Latest:       latest,
