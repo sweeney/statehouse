@@ -21,9 +21,9 @@ func TestBuildClientOptions_Broker(t *testing.T) {
 }
 
 func TestBuildClientOptions_ClientID(t *testing.T) {
-	opts := buildClientOptions(Config{Broker: "tcp://localhost:1883", ClientID: "house-state-engine"})
-	if opts.ClientID != "house-state-engine" {
-		t.Fatalf("ClientID: got %q want house-state-engine", opts.ClientID)
+	opts := buildClientOptions(Config{Broker: "tcp://localhost:1883", ClientID: "statehouse"})
+	if opts.ClientID != "statehouse" {
+		t.Fatalf("ClientID: got %q want statehouse", opts.ClientID)
 	}
 }
 

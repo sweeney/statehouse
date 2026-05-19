@@ -8,14 +8,14 @@ implements the V1 scope described in the originating spec.
 ## Build
 
 ```
-go build ./cmd/house-state-engine
+go build ./cmd/statehouse
 go test ./...
 ```
 
 ## Run
 
 ```
-house-state-engine -config config/config.example.yaml
+statehouse -config config/config.example.yaml
 ```
 
 Endpoints:
@@ -104,7 +104,7 @@ Device classes today:
 
 ## Layout
 
-- `cmd/house-state-engine` — daemon entrypoint.
+- `cmd/statehouse` — daemon entrypoint.
 - `cmd/fixture-capture` — MQTT-to-JSONL fixture recorder.
 - `internal/adapter` — protocol-agnostic Adapter interface.
 - `internal/adapter/zigbee2mqtt` — Z2M adapter.

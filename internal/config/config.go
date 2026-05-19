@@ -262,12 +262,12 @@ func Default() Config {
 	return Config{
 		MQTT: MQTTConfig{
 			Broker:        "tcp://localhost:1883",
-			ClientID:      "house-state-engine",
+			ClientID:      "statehouse",
 			PublishPrefix: "house",
 		},
 		HTTP: HTTPConfig{Listen: ":8080"},
 		RecentLog: RecentLogConfig{
-			Path:           "/var/lib/house-state-engine/events.jsonl",
+			Path:           "/var/lib/statehouse/events.jsonl",
 			RetentionHours: 72,
 			MaxSizeMB:      256,
 		},

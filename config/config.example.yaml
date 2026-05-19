@@ -1,6 +1,6 @@
 mqtt:
   broker: tcp://localhost:1883
-  client_id: house-state-engine
+  client_id: statehouse
   publish_prefix: house
 
 # Adapters translate protocol-specific MQTT traffic into engine calls.
@@ -22,7 +22,7 @@ http:
   listen: :8080
 
 recent_log:
-  path: /var/lib/house-state-engine/events.jsonl
+  path: /var/lib/statehouse/events.jsonl
   retention_hours: 72
   max_size_mb: 256
 
@@ -31,7 +31,7 @@ influx:
   url: http://localhost:8086
   org: home
   bucket: house
-  token_file: /etc/house-state-engine/influx-token
+  token_file: /etc/statehouse/influx-token
 
 energy:
   divergence_warning_pct: 20
