@@ -198,16 +198,16 @@ func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	type metrics struct {
-		StartedAgo       int     `json:"started_ago"`
-		DeviceCount      int     `json:"device_count"`
-		CanonicalEvents  uint64  `json:"canonical_events_total"`
-		DerivedEvents    uint64  `json:"derived_events_total"`
-		InfluxQueued     uint64  `json:"influx_writes_queued,omitempty"`
-		InfluxFailure    uint64  `json:"influx_writes_failure,omitempty"`
-		PublisherDropped uint64  `json:"mqtt_publishes_dropped_total"`
+		StartedAgo       int    `json:"started_ago"`
+		DeviceCount      int    `json:"device_count"`
+		CanonicalEvents  uint64 `json:"canonical_events_total"`
+		DerivedEvents    uint64 `json:"derived_events_total"`
+		InfluxQueued     uint64 `json:"influx_writes_queued,omitempty"`
+		InfluxFailure    uint64 `json:"influx_writes_failure,omitempty"`
+		PublisherDropped uint64 `json:"mqtt_publishes_dropped_total"`
 	}
 	m := metrics{
-		StartedAgo: int((time.Since(s.started) + 500*time.Millisecond) / time.Second),
+		StartedAgo:      int((time.Since(s.started) + 500*time.Millisecond) / time.Second),
 		DeviceCount:     len(s.Store.Devices()),
 		CanonicalEvents: atomic.LoadUint64(&s.canonicalCount),
 		DerivedEvents:   atomic.LoadUint64(&s.derivedCount),

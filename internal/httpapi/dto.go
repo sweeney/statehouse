@@ -12,12 +12,12 @@ const schemaVersion = "net.swee.statehouse.snapshot.v1"
 // activeActivityStates is the set of activity states that count as "active"
 // for the summary's ActiveCount.
 var activeActivityStates = map[model.DeviceActivityState]bool{
-	model.ActivityActive:          true,
-	model.ActivityStarting:        true,
-	model.ActivityRunning:         true,
-	model.ActivityFinishing:       true,
+	model.ActivityActive:           true,
+	model.ActivityStarting:         true,
+	model.ActivityRunning:          true,
+	model.ActivityFinishing:        true,
 	model.ActivityFinishedRecently: true,
-	model.ActivityActiveCycle:     true,
+	model.ActivityActiveCycle:      true,
 }
 
 // stalenessSecondsForClass returns the staleness threshold (in seconds) for a
@@ -73,8 +73,8 @@ func agoInt(t time.Time, now time.Time) *int {
 type SnapshotResponse struct {
 	SchemaVersion string                    `json:"schema_version"`
 	GeneratedAt   time.Time                 `json:"generated_at"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	StartedAgo *int       `json:"started_ago,omitempty"`
+	StartedAt     *time.Time                `json:"started_at,omitempty"`
+	StartedAgo    *int                      `json:"started_ago,omitempty"`
 	Summary       SummaryResponse           `json:"summary"`
 	House         HouseResponse             `json:"house"`
 	Devices       map[string]DeviceResponse `json:"devices"`
@@ -123,16 +123,16 @@ type HouseResponse struct {
 
 // DeviceResponse is the DTO for a single device.
 type DeviceResponse struct {
-	ID           string               `json:"id"`
-	DisplayName  string               `json:"display_name,omitempty"`
-	Class        string               `json:"class"`
-	Location     string               `json:"location,omitempty"`
-	Availability model.Availability   `json:"availability"`
-	Activity     ActivityResponse     `json:"activity"`
-	Latest       LatestResponse       `json:"latest"`
-	Cycle        *CycleResponse       `json:"cycle,omitempty"`
-	Unclassified bool                 `json:"unclassified,omitempty"`
-	Warnings     []string             `json:"warnings"`
+	ID           string             `json:"id"`
+	DisplayName  string             `json:"display_name,omitempty"`
+	Class        string             `json:"class"`
+	Location     string             `json:"location,omitempty"`
+	Availability model.Availability `json:"availability"`
+	Activity     ActivityResponse   `json:"activity"`
+	Latest       LatestResponse     `json:"latest"`
+	Cycle        *CycleResponse     `json:"cycle,omitempty"`
+	Unclassified bool               `json:"unclassified,omitempty"`
+	Warnings     []string           `json:"warnings"`
 }
 
 // ActivityResponse is the DTO for a device's activity sub-state.
@@ -172,9 +172,9 @@ type LatestResponse struct {
 	LinkQuality *int     `json:"linkquality,omitempty"`
 	RSSI        *int     `json:"rssi_dbm,omitempty"`
 
-	LastSeen   *time.Time `json:"last_seen"`
-	LastSeenAgo *int      `json:"last_seen_ago"`
-	Stale      bool       `json:"stale"`
+	LastSeen    *time.Time `json:"last_seen"`
+	LastSeenAgo *int       `json:"last_seen_ago"`
+	Stale       bool       `json:"stale"`
 }
 
 // DivergenceResponse describes the energy divergence status for a cycle.
@@ -214,7 +214,9 @@ func BuildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records 
 }
 
 // BuildHouseResponse is the exported HTTP-DTO builder for model.House.
-func BuildHouseResponse(h model.House, now time.Time) HouseResponse { return buildHouseResponse(h, now) }
+func BuildHouseResponse(h model.House, now time.Time) HouseResponse {
+	return buildHouseResponse(h, now)
+}
 
 // BuildDeviceResponse is the exported HTTP-DTO builder for model.Device.
 // stalenessSeconds may be nil to use the class default.
