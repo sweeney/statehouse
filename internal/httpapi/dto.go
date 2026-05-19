@@ -63,6 +63,8 @@ func nilIfZero(t time.Time) *time.Time {
 type SnapshotResponse struct {
 	SchemaVersion string                    `json:"schema_version"`
 	GeneratedAt   time.Time                 `json:"generated_at"`
+	StartedAt     *time.Time                `json:"started_at,omitempty"`
+	UptimeSeconds *float64                  `json:"uptime_seconds,omitempty"`
 	Summary       SummaryResponse           `json:"summary"`
 	House         HouseResponse             `json:"house"`
 	Devices       map[string]DeviceResponse `json:"devices"`
@@ -194,9 +196,9 @@ type CycleResponse struct {
 // BuildSnapshot is the exported entry point for other packages (MQTT
 // publisher) that want the same DTO shape as GET /state — same
 // schema_version, summary, warnings, staleness. lookupStaleness may be
-// nil to use class defaults.
-func BuildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int) SnapshotResponse {
-	return buildSnapshot(snap, signals, records, now, lookupStaleness)
+// nil to use class defaults. Pass a zero startedAt to omit uptime fields.
+func BuildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int, startedAt time.Time) SnapshotResponse {
+	return buildSnapshot(snap, signals, records, now, lookupStaleness, startedAt)
 }
 
 // BuildHouseResponse is the exported HTTP-DTO builder for model.House.
@@ -211,7 +213,8 @@ func BuildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) D
 // buildSnapshot converts a model.Snapshot into a SnapshotResponse. now is used
 // to compute age/staleness so tests can inject a fixed value. lookupStaleness
 // returns the per-class override (nil → class default); pass nil if not needed.
-func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int) SnapshotResponse {
+// startedAt, when non-zero, populates started_at and uptime_seconds.
+func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int, startedAt time.Time) SnapshotResponse {
 	if lookupStaleness == nil {
 		lookupStaleness = func(string) *int { return nil }
 	}
@@ -222,7 +225,7 @@ func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records 
 
 	summary := buildSummary(devices)
 
-	return SnapshotResponse{
+	r := SnapshotResponse{
 		SchemaVersion: schemaVersion,
 		GeneratedAt:   snap.GeneratedAt,
 		Summary:       summary,
@@ -230,6 +233,12 @@ func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records 
 		Devices:       devices,
 		Activity:      buildActivityStateResponse(signals, records, now),
 	}
+	if !startedAt.IsZero() {
+		r.StartedAt = &startedAt
+		u := now.Sub(startedAt).Seconds()
+		r.UptimeSeconds = &u
+	}
+	return r
 }
 
 // SignalResponse is the DTO for one ActivitySignal in GET /state/activity.

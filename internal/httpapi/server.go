@@ -120,15 +120,17 @@ func (s *Server) Start(ctx context.Context) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	type health struct {
-		Status          string  `json:"status"`
-		UptimeSeconds   float64 `json:"uptime_seconds"`
-		MQTTConnected   bool    `json:"mqtt_connected"`
-		InfluxEnabled   bool    `json:"influx_enabled"`
-		InfluxReachable bool    `json:"influx_reachable,omitempty"`
-		Goroutines      int     `json:"goroutines"`
+		Status          string    `json:"status"`
+		StartedAt       time.Time `json:"started_at"`
+		UptimeSeconds   float64   `json:"uptime_seconds"`
+		MQTTConnected   bool      `json:"mqtt_connected"`
+		InfluxEnabled   bool      `json:"influx_enabled"`
+		InfluxReachable bool      `json:"influx_reachable,omitempty"`
+		Goroutines      int       `json:"goroutines"`
 	}
 	h := health{
 		Status:        "ok",
+		StartedAt:     s.started,
 		UptimeSeconds: time.Since(s.started).Seconds(),
 		MQTTConnected: s.MQTT != nil && s.MQTT.IsConnected(),
 		InfluxEnabled: s.Influx != nil && s.Influx.Enabled,
@@ -144,7 +146,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 	now := time.Now()
-	writeJSON(w, http.StatusOK, buildSnapshot(s.Store.Snapshot(), s.Store.ActiveSignals(now), s.Store.RecentActivity(state.ActivityLogSize), now, s.stalenessFor))
+	writeJSON(w, http.StatusOK, buildSnapshot(s.Store.Snapshot(), s.Store.ActiveSignals(now), s.Store.RecentActivity(state.ActivityLogSize), now, s.stalenessFor, s.started))
 }
 
 func (s *Server) handleHouse(w http.ResponseWriter, _ *http.Request) {
