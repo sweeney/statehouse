@@ -210,18 +210,39 @@ func TestSnapshot_SchemaVersion(t *testing.T) {
 	}
 }
 
+func TestSnapshot_AgoFieldsPresentWhenTimestampNull(t *testing.T) {
+	// When last_changed and last_seen are null (device not yet seen), the
+	// _ago fields must still appear in the JSON as null — not be omitted.
+	// A consumer should be able to rely on the key always being present.
+	d := freshDevice("d1", "continuous_power_device")
+	// zero times → both timestamps will be null
+
+	snap := makeDeviceSnap(d)
+	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	resp := buildSnapshot(snap, nil, nil, now, nil, time.Time{})
+
+	raw, _ := json.Marshal(resp.Devices["d1"])
+	rawStr := string(raw)
+
+	for _, key := range []string{`"last_changed_ago"`, `"last_seen_ago"`} {
+		if !strings.Contains(rawStr, key) {
+			t.Errorf("expected %s key in device JSON even when null, got: %s", key, rawStr)
+		}
+	}
+}
+
 func TestSnapshot_NoZeroTimestamps(t *testing.T) {
-	// Device with zero-value Activity.Since — should become null, not "0001-01-01T00:00:00Z"
+	// Device with zero-value Activity.LastChanged — should become null, not "0001-01-01T00:00:00Z"
 	d := freshDevice("d1", "short_burst_power_device")
-	d.Activity.Since = time.Time{} // zero
+	d.Activity.LastChanged = time.Time{} // zero
 
 	snap := makeDeviceSnap(d)
 	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
 	resp := buildSnapshot(snap, nil, nil, now, nil, time.Time{})
 
 	dev := resp.Devices["d1"]
-	if dev.Activity.Since != nil {
-		t.Errorf("expected null Since for zero time, got %v", dev.Activity.Since)
+	if dev.Activity.LastChanged != nil {
+		t.Errorf("expected null LastChanged for zero time, got %v", dev.Activity.LastChanged)
 	}
 
 	// Verify via raw JSON that there's no "0001-01-01" string
@@ -247,12 +268,12 @@ func TestSnapshot_AgeAndStale(t *testing.T) {
 	if !dev.Latest.Stale {
 		t.Error("expected stale=true for device with LastSeen 20 min ago and 900s threshold")
 	}
-	if dev.Latest.AgeSeconds == nil {
+	if dev.Latest.LastSeenAgo == nil {
 		t.Fatal("expected age_seconds to be present")
 	}
-	const wantAge = 1200.0
-	if math.Abs(*dev.Latest.AgeSeconds-wantAge) > 1.0 {
-		t.Errorf("expected age_seconds ≈ %v, got %v", wantAge, *dev.Latest.AgeSeconds)
+	const wantAge = 1200
+	if got := *dev.Latest.LastSeenAgo; got < wantAge-1 || got > wantAge+1 {
+		t.Errorf("expected last_seen_ago ≈ %v, got %v", wantAge, got)
 	}
 
 	hasStaleWarning := false
@@ -591,8 +612,8 @@ func TestSnapshot_ZeroLastSeenNotStale(t *testing.T) {
 	if dev.Latest.Stale {
 		t.Error("expected stale=false for device with zero LastSeen")
 	}
-	if dev.Latest.AgeSeconds != nil {
-		t.Errorf("expected age_seconds to be absent for zero LastSeen, got %v", *dev.Latest.AgeSeconds)
+	if dev.Latest.LastSeenAgo != nil {
+		t.Errorf("expected last_seen_ago to be null for zero LastSeen, got %v", *dev.Latest.LastSeenAgo)
 	}
 
 	hasStaleWarning := false
@@ -605,13 +626,13 @@ func TestSnapshot_ZeroLastSeenNotStale(t *testing.T) {
 		t.Errorf("expected warnings to not contain %q for zero LastSeen, got %v", "stale_device", dev.Warnings)
 	}
 
-	// Verify raw JSON: last_seen must be null, age_seconds must be absent.
+	// Verify raw JSON: last_seen must be null, last_seen_ago must be null (present but null).
 	raw, _ := json.Marshal(dev.Latest)
 	rawStr := string(raw)
 	if !strings.Contains(rawStr, `"last_seen":null`) {
 		t.Errorf("expected last_seen:null in JSON for zero LastSeen, got %s", rawStr)
 	}
-	if strings.Contains(rawStr, `"age_seconds"`) {
-		t.Errorf("expected age_seconds to be absent in JSON for zero LastSeen, got %s", rawStr)
+	if !strings.Contains(rawStr, `"last_seen_ago":null`) {
+		t.Errorf("expected last_seen_ago:null in JSON for zero LastSeen, got %s", rawStr)
 	}
 }

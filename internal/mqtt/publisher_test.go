@@ -182,7 +182,7 @@ func TestPublisher_BuildersWrapPayloads(t *testing.T) {
 	pub.BuildSnapshot = func(snap model.Snapshot, now time.Time) any {
 		return map[string]any{"schema_version": "v1", "devices": len(snap.Devices)}
 	}
-	pub.BuildHouse = func(h model.House) any {
+	pub.BuildHouse = func(h model.House, now time.Time) any {
 		return map[string]any{"shape": "house_dto"}
 	}
 	pub.BuildDevice = func(d model.Device, now time.Time) any {

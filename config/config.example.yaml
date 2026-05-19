@@ -102,13 +102,25 @@ device_classes:
     enabled: false
     base_topic: asterisk
 
-  # Measurement-only devices: climate sensors (Sonoff SNZB-02 etc.),
-  # air-quality, illuminance. No cycle, no activity machine —
-  # activity stays "reporting" while the device transmits. Latest
-  # values (temp / humidity / battery) flow into the device record
-  # and into Influx as device_environment / device_battery samples.
-  sensor_device:
-    name_hints: [climate, thsensor, snzb, ups]
+  # Measurement-only environmental devices: climate sensors (Sonoff
+  # SNZB-02 etc.), air-quality, illuminance. No cycle, no activity
+  # machine — activity stays "reporting" while the device transmits.
+  # Latest values (temp / humidity / battery) flow into the device
+  # record and into Influx as device_environment / device_battery.
+  environmental_sensor:
+    name_hints: [climate, thsensor, snzb]
+
+  # UPS devices. Like environmental_sensor they are measurement-only
+  # (no cycles, no occupancy contribution) but carry UPS-specific
+  # fields: on_battery, low_battery, battery_runtime_mins.
+  ups_sensor:
+    name_hints: [ups]
+
+  # Whole-home electricity meters and IHD devices. Measurement-only:
+  # reports cumulative kWh, import/export, instantaneous power.
+  # No cycles, no occupancy contribution.
+  energy_meter:
+    name_hints: [electricitymeter, meter]
 
 devices:
   kitchen_dishwasher:
@@ -179,16 +191,16 @@ devices:
   # shorthand still works under the hood.
   ground_floor_climate:
     ieee_address: "0x00158d0000000010"
-    class: sensor_device
+    class: environmental_sensor
     display_name: Ground floor climate
     location: ground_floor
   first_floor_climate:
     ieee_address: "0x00158d0000000011"
-    class: sensor_device
+    class: environmental_sensor
     display_name: First floor climate
     location: first_floor
   loft_climate:
     ieee_address: "0x00158d0000000012"
-    class: sensor_device
+    class: environmental_sensor
     display_name: Loft climate
     location: loft

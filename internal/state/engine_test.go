@@ -155,32 +155,9 @@ func TestEngine_AvailabilityDebounce(t *testing.T) {
 }
 
 func TestEngine_DivergenceWarning(t *testing.T) {
-	// Integration-primary device reports a counter jump of 1 kWh but the run
-	// was only 1 second — divergence must exceed 20% and fire a warning.
-	// kitchen_kettle uses short_burst_power_device (integration strategy in
-	// this test config) with zero sustained timers so cycles start/end immediately.
-	engine, _, col, clock := mkEngine()
-	t0 := clock.Now()
-	id := zid("0x00158d0000000009", "kitchen_kettle")
-	// t0: high-power + counter baseline — zero sustained threshold fires cycle immediately.
-	engine.IngestReading(id, "zigbee2mqtt/kitchen_kettle",
-		model.Reading{Timestamp: t0, PowerW: ptr(2000.0), EnergyKWh: ptr(100.0)})
-	// t0+1s: power drops to zero, counter jumps to 101 → cycle ends immediately.
-	// Integration ≈ 2000W×1s ≈ 5.6e-4 kWh; counter delta = 1 kWh → ~99.9% divergence.
-	engine.IngestReading(id, "zigbee2mqtt/kitchen_kettle",
-		model.Reading{Timestamp: t0.Add(time.Second), PowerW: ptr(0.0), EnergyKWh: ptr(101.0)})
-	if _, ok := col.findDerived(model.EvtShortBurstDetected); !ok {
-		t.Fatalf("expected short_burst_detected event, derived=%v", col.derived)
-	}
-	if _, ok := col.findDerived(model.EvtEnergyDivergenceWarning); !ok {
-		t.Fatalf("expected energy_divergence_warning for integration-primary device, derived=%v", col.derived)
-	}
-}
-
-func TestEngine_NoDivergenceForCounterPrimary(t *testing.T) {
-	// Counter-primary device (cycle_power_device, strategy=counter) with a
-	// large counter/integration mismatch must NOT fire a divergence warning —
-	// we trust the counter and suppress the noise.
+	// Counter-primary device (kitchen_dishwasher, cycle_power_device) with a
+	// large counter/integration gap must fire a divergence warning — the counter
+	// is the trusted source and a large gap from integration is a data-quality alert.
 	engine, _, col, clock := mkEngine()
 	t0 := clock.Now()
 	id := zid("0x00158d0000000001", "kitchen_dishwasher")
@@ -188,7 +165,7 @@ func TestEngine_NoDivergenceForCounterPrimary(t *testing.T) {
 		model.Reading{Timestamp: t0, PowerW: ptr(50.0)})
 	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: t0.Add(2 * time.Second), PowerW: ptr(50.0), EnergyKWh: ptr(100.0)})
-	// Counter jumps 1 kWh but integration is only a few Ws — huge divergence.
+	// Counter jumps 1 kWh but integration is only ~42 Wh — ~99.9% divergence.
 	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
 		model.Reading{Timestamp: t0.Add(3 * time.Second), PowerW: ptr(1.0), EnergyKWh: ptr(101.0)})
 	engine.IngestReading(id, "zigbee2mqtt/kitchen_dishwasher",
@@ -196,8 +173,30 @@ func TestEngine_NoDivergenceForCounterPrimary(t *testing.T) {
 	if _, ok := col.findDerived(model.EvtCycleFinished); !ok {
 		t.Fatalf("expected cycle_finished event, derived=%v", col.derived)
 	}
+	if _, ok := col.findDerived(model.EvtEnergyDivergenceWarning); !ok {
+		t.Fatalf("expected energy_divergence_warning for counter-primary device, derived=%v", col.derived)
+	}
+}
+
+func TestEngine_NoDivergenceForIntegrationPrimary(t *testing.T) {
+	// Integration-primary device (kitchen_kettle, short_burst_power_device) with
+	// a large counter/integration mismatch must NOT fire a divergence warning —
+	// the counter is declared untrustworthy by the strategy choice, so any
+	// counter/integration gap is expected noise (e.g. coarse 100 Wh counter ticks).
+	engine, _, col, clock := mkEngine()
+	t0 := clock.Now()
+	id := zid("0x00158d0000000009", "kitchen_kettle")
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_kettle",
+		model.Reading{Timestamp: t0, PowerW: ptr(2000.0), EnergyKWh: ptr(100.0)})
+	// Counter jumps 1 kWh; integration ≈ 2000W×1s ≈ 5.6e-4 kWh → ~99.9% divergence.
+	// Because kitchen_kettle is integration-primary the warning must be suppressed.
+	engine.IngestReading(id, "zigbee2mqtt/kitchen_kettle",
+		model.Reading{Timestamp: t0.Add(time.Second), PowerW: ptr(0.0), EnergyKWh: ptr(101.0)})
+	if _, ok := col.findDerived(model.EvtShortBurstDetected); !ok {
+		t.Fatalf("expected short_burst_detected event, derived=%v", col.derived)
+	}
 	if _, ok := col.findDerived(model.EvtEnergyDivergenceWarning); ok {
-		t.Fatal("must NOT emit divergence warning for counter-primary device")
+		t.Fatal("must NOT emit divergence warning for integration-primary device")
 	}
 }
 
@@ -305,14 +304,14 @@ func TestEngine_HouseRecomputesOnActivity(t *testing.T) {
 }
 
 // TestEngine_SensorPopulatesBatteryAndReportingActivity verifies
-// the new sensor_device class: a climate sensor reading populates
+// the environmental_sensor class: a climate sensor reading populates
 // Latest temp/humidity/battery, the device's activity flips
 // unknown→reporting, and the engine emits canonical events for each
 // measurement (including battery) so downstream sinks can record them.
 func TestEngine_SensorPopulatesBatteryAndReportingActivity(t *testing.T) {
 	cfg := config.Default()
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
-		"sensor_device": {
+		"environmental_sensor": {
 			NameHints: []string{"climate"},
 		},
 	}
@@ -336,8 +335,8 @@ func TestEngine_SensorPopulatesBatteryAndReportingActivity(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected device 'bedroom_climate' classified by name-hint")
 	}
-	if d.Class != "sensor_device" {
-		t.Fatalf("expected sensor_device class, got %q", d.Class)
+	if d.Class != "environmental_sensor" {
+		t.Fatalf("expected environmental_sensor class, got %q", d.Class)
 	}
 	if d.Activity.State != model.ActivityReporting {
 		t.Errorf("expected activity=reporting, got %q", d.Activity.State)
@@ -373,7 +372,7 @@ func TestEngine_SensorDoesNotMakeHouseActive(t *testing.T) {
 	// presence.
 	cfg := config.Default()
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
-		"sensor_device": {NameHints: []string{"climate"}},
+		"environmental_sensor": {NameHints: []string{"climate"}},
 	}
 	store := NewStore()
 	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC))
@@ -509,11 +508,11 @@ func TestEngine_ContinuousDevice_NoStaleCounterOnSmallCycle(t *testing.T) {
 	}
 }
 
-func TestEngine_ContinuousDevice_DivergenceStillFires(t *testing.T) {
-	// Even with integration strategy, if the counter does tick during a cycle
-	// and disagrees with integration by >20%, the divergence warning fires.
-	// This preserves the cross-check for cases where the counter IS granular
-	// enough to say something meaningful.
+func TestEngine_ContinuousDevice_NoDivergenceForIntegrationPrimary(t *testing.T) {
+	// Continuous device (chestfreezer, integration strategy): even when the
+	// counter ticks once during a short compressor cycle (coarse 100 Wh
+	// resolution), the divergence warning must NOT fire. The counter is
+	// untrustworthy by class design — the mismatch is expected noise.
 	engine, _, col, clock := mkEngine()
 	t0 := clock.Now()
 	id := zid("0x00158d0000000020", "chestfreezer")
@@ -521,21 +520,21 @@ func TestEngine_ContinuousDevice_DivergenceStillFires(t *testing.T) {
 		model.Reading{Timestamp: t0, PowerW: ptr(2.0), EnergyKWh: ptr(10.0)})
 	engine.IngestReading(id, "zigbee2mqtt/chestfreezer",
 		model.Reading{Timestamp: t0.Add(2 * time.Second), PowerW: ptr(60.0), EnergyKWh: ptr(10.0)})
-	// Cycle starts at t0+3s. Counter baseline = 10.0.
 	engine.IngestReading(id, "zigbee2mqtt/chestfreezer",
 		model.Reading{Timestamp: t0.Add(3 * time.Second), PowerW: ptr(60.0), EnergyKWh: ptr(10.0)})
 	engine.IngestReading(id, "zigbee2mqtt/chestfreezer",
 		model.Reading{Timestamp: t0.Add(35 * time.Second), PowerW: ptr(2.0), EnergyKWh: ptr(11.0)})
-	// t0+36s: cycle finishes. Counter delta=1 kWh; integration≈60W×32s≈5.3e-4 kWh → ~99.9% divergence.
+	// Counter delta=1 kWh; integration≈60W×32s≈5.3e-4 kWh → ~99.9% nominal divergence —
+	// but must be suppressed because chestfreezer is integration-primary.
 	engine.IngestReading(id, "zigbee2mqtt/chestfreezer",
 		model.Reading{Timestamp: t0.Add(36 * time.Second), PowerW: ptr(2.0), EnergyKWh: ptr(11.0)})
 	if _, ok := col.findDerived(model.EvtContinuousCycleFinished); !ok {
 		t.Fatalf("expected continuous_cycle_finished, derived=%v", col.derived)
 	}
-	if _, ok := col.findDerived(model.EvtEnergyDivergenceWarning); !ok {
-		t.Fatalf("expected energy_divergence_warning for integration-primary device with large counter discrepancy, derived=%v", col.derived)
+	if _, ok := col.findDerived(model.EvtEnergyDivergenceWarning); ok {
+		t.Fatal("must NOT emit divergence_warning for integration-primary continuous device")
 	}
 	if _, ok := col.findDerived(model.EvtEnergyStaleCounterWarning); ok {
-		t.Fatal("must NOT emit stale_counter_warning alongside divergence_warning")
+		t.Fatal("must NOT emit stale_counter_warning for integration-strategy device")
 	}
 }

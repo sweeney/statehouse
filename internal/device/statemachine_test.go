@@ -256,7 +256,7 @@ func TestBinary_NoStateIsNoOp(t *testing.T) {
 
 func TestSensor_FirstReadingFlipsToReporting(t *testing.T) {
 	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
-	rt := mkRuntime(ClassSensor, config.Thresholds{}, "")
+	rt := mkRuntime(ClassEnvironmentalSensor, config.Thresholds{}, "")
 	temp := 21.4
 	out := rt.OnReading(now, model.Reading{Timestamp: now, TemperatureC: &temp})
 	if out.PrevActivity != model.ActivityUnknown {
@@ -275,7 +275,7 @@ func TestSensor_FirstReadingFlipsToReporting(t *testing.T) {
 
 func TestSensor_SubsequentReadingDoesNotRetransition(t *testing.T) {
 	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
-	rt := mkRuntime(ClassSensor, config.Thresholds{}, "")
+	rt := mkRuntime(ClassEnvironmentalSensor, config.Thresholds{}, "")
 	temp := 21.4
 	rt.OnReading(now, model.Reading{Timestamp: now, TemperatureC: &temp})
 	// Second reading — activity unchanged; PrevActivity must equal
@@ -291,7 +291,7 @@ func TestSensor_NoPowerNeeded(t *testing.T) {
 	// A sensor reading carries no power; the power short-circuit in
 	// the power-based dispatcher must not affect sensor handling.
 	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
-	rt := mkRuntime(ClassSensor, config.Thresholds{}, "")
+	rt := mkRuntime(ClassEnvironmentalSensor, config.Thresholds{}, "")
 	hum := 55.0
 	out := rt.OnReading(now, model.Reading{Timestamp: now, HumidityPct: &hum})
 	if out.NewActivity != model.ActivityReporting {

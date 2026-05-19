@@ -10,7 +10,7 @@ import (
 )
 
 // isOccupancyRelevant reports whether a device class contributes to
-// occupancy signals. Measurement-only sensors (ClassSensor) do not.
+// occupancy signals. Passive sensors (IsPassiveSensor) do not.
 func isOccupancyRelevant(class string) bool {
 	switch class {
 	case device.ClassShortBurst, device.ClassCyclePower,

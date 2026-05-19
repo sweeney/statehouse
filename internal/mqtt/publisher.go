@@ -41,7 +41,7 @@ type Publisher struct {
 	Logger *slog.Logger
 
 	BuildSnapshot func(snap model.Snapshot, now time.Time) any
-	BuildHouse    func(h model.House) any
+	BuildHouse    func(h model.House, now time.Time) any
 	BuildDevice   func(d model.Device, now time.Time) any
 
 	// mu guards p.in for the Start/Close lifecycle, serialises the
@@ -142,7 +142,7 @@ func (p *Publisher) OnDerivedEvent(ev model.DerivedEvent) {
 	}
 	switch ev.Type {
 	case model.EvtHouseStateChanged:
-		p.publishJSON(p.Prefix+"/state/house", true, p.housePayload(p.Store.House()))
+		p.publishJSON(p.Prefix+"/state/house", true, p.housePayload(p.Store.House(), now))
 	}
 	if relevantForSnapshot(ev.Type) {
 		p.publishJSON(p.Prefix+"/state/snapshot", true, p.snapshotPayload(p.Store.Snapshot(), now))
@@ -157,7 +157,7 @@ func (p *Publisher) PublishSnapshot() {
 	}
 	now := time.Now()
 	p.publishJSON(p.Prefix+"/state/snapshot", true, p.snapshotPayload(p.Store.Snapshot(), now))
-	p.publishJSON(p.Prefix+"/state/house", true, p.housePayload(p.Store.House()))
+	p.publishJSON(p.Prefix+"/state/house", true, p.housePayload(p.Store.House(), now))
 }
 
 func (p *Publisher) snapshotPayload(snap model.Snapshot, now time.Time) any {
@@ -167,9 +167,9 @@ func (p *Publisher) snapshotPayload(snap model.Snapshot, now time.Time) any {
 	return snap
 }
 
-func (p *Publisher) housePayload(h model.House) any {
+func (p *Publisher) housePayload(h model.House, now time.Time) any {
 	if p.BuildHouse != nil {
-		return p.BuildHouse(h)
+		return p.BuildHouse(h, now)
 	}
 	return h
 }

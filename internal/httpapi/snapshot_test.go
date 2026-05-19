@@ -94,7 +94,7 @@ func TestHandleDevice_StalenessOverridePassesThroughHandler(t *testing.T) {
 		t.Fatalf("parse response: %v", err)
 	}
 	if !dev.Latest.Stale {
-		t.Errorf("expected Stale=true with 60s override and reading 120s old, got stale=false (age=%v)", dev.Latest.AgeSeconds)
+		t.Errorf("expected Stale=true with 60s override and reading 120s old, got stale=false (age=%v)", dev.Latest.LastSeenAgo)
 	}
 }
 
@@ -109,7 +109,7 @@ func TestCycleTypeForClass(t *testing.T) {
 		{device.ClassMedia, "appliance_cycle"},
 		{device.ClassContinuous, "compressor_cycle"},
 		{device.ClassBinaryState, "binary_cycle"},
-		{device.ClassSensor, "unknown"},
+		{device.ClassEnvironmentalSensor, "unknown"},
 		{"", "unknown"},
 	}
 	for _, tc := range cases {
@@ -162,7 +162,7 @@ func TestHandleDevices_DTOFields(t *testing.T) {
 		t.Error("expected Latest.LastSeen to be non-nil after ingesting a reading")
 	}
 
-	// Activity.Since and Activity.LastChanged must not be the zero time.
+	// Activity.LastChanged must not be the zero time.
 	raw, err := json.Marshal(dev)
 	if err != nil {
 		t.Fatalf("marshal device: %v", err)

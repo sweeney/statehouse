@@ -110,8 +110,8 @@ func main() {
 		BuildSnapshot: func(snap model.Snapshot, now time.Time) any {
 			return httpapi.BuildSnapshot(snap, store.ActiveSignals(now), store.RecentActivity(state.ActivityLogSize), now, stalenessFor, time.Time{})
 		},
-		BuildHouse: func(h model.House) any {
-			return httpapi.BuildHouseResponse(h)
+		BuildHouse: func(h model.House, now time.Time) any {
+			return httpapi.BuildHouseResponse(h, now)
 		},
 		BuildDevice: func(d model.Device, now time.Time) any {
 			return httpapi.BuildDeviceResponse(d, now, stalenessFor(d.Class))

@@ -23,14 +23,30 @@ const (
 	// contact sensor, a motion sensor, a smart switch reporting
 	// state without power. Activity derives from State, not PowerW.
 	ClassBinaryState = "binary_state_device"
-	// ClassSensor covers measurement-only devices (climate, air
-	// quality, illuminance) that have no behavioural state. They
-	// just periodically emit readings; Activity stays at "reporting"
-	// once the engine has seen at least one reading. No cycles, no
-	// hysteresis, no occupancy contribution.
-	ClassSensor       = "sensor_device"
+	// ClassEnvironmentalSensor covers measurement-only devices (climate,
+	// air quality, illuminance, Zigbee TH sensors) that have no
+	// behavioural state. Activity stays at "reporting" once the engine
+	// has seen at least one reading. No cycles, no hysteresis, no
+	// occupancy contribution.
+	ClassEnvironmentalSensor = "environmental_sensor"
+	// ClassUPSSensor covers uninterruptible power supply devices. Like
+	// ClassEnvironmentalSensor they are measurement-only (no cycles, no
+	// hysteresis, no occupancy contribution), but carry UPS-specific
+	// fields (on_battery, low_battery, battery_runtime_mins).
+	ClassUPSSensor = "ups_sensor"
+	// ClassEnergyMeter covers whole-home electricity meters and IHD
+	// devices. Measurement-only: reports cumulative kWh, import/export,
+	// and instantaneous power. No cycles, no occupancy contribution.
+	ClassEnergyMeter  = "energy_meter"
 	ClassUnclassified = "unclassified"
 )
+
+// IsPassiveSensor reports whether class is a measurement-only sensor
+// class that has no active/idle state machine — currently
+// ClassEnvironmentalSensor, ClassUPSSensor, and ClassEnergyMeter.
+func IsPassiveSensor(class string) bool {
+	return class == ClassEnvironmentalSensor || class == ClassUPSSensor || class == ClassEnergyMeter
+}
 
 // Profile is the resolved per-device configuration used at runtime.
 type Profile struct {

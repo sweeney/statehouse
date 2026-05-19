@@ -30,7 +30,7 @@ func stalenessSecondsForClass(class string, staleness *int) float64 {
 	switch class {
 	case device.ClassShortBurst, device.ClassCyclePower, device.ClassContinuous, device.ClassMedia:
 		return 900
-	case device.ClassBinaryState, device.ClassSensor:
+	case device.ClassBinaryState:
 		return 3600
 	default:
 		return 3600
@@ -59,12 +59,22 @@ func nilIfZero(t time.Time) *time.Time {
 	return &t
 }
 
+// agoInt returns the elapsed seconds since t, rounded to the nearest int,
+// or nil if t is zero.
+func agoInt(t time.Time, now time.Time) *int {
+	if t.IsZero() {
+		return nil
+	}
+	v := int((now.Sub(t) + 500*time.Millisecond) / time.Second)
+	return &v
+}
+
 // SnapshotResponse is the top-level DTO returned by GET /state.
 type SnapshotResponse struct {
 	SchemaVersion string                    `json:"schema_version"`
 	GeneratedAt   time.Time                 `json:"generated_at"`
-	StartedAt     *time.Time                `json:"started_at,omitempty"`
-	UptimeSeconds *float64                  `json:"uptime_seconds,omitempty"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	StartedAgo *int       `json:"started_ago,omitempty"`
 	Summary       SummaryResponse           `json:"summary"`
 	House         HouseResponse             `json:"house"`
 	Devices       map[string]DeviceResponse `json:"devices"`
@@ -81,23 +91,26 @@ type SummaryResponse struct {
 
 // HouseOccupancyResponse is the DTO for the occupancy dimension.
 type HouseOccupancyResponse struct {
-	State       model.OccupancyState `json:"state"`
-	Confidence  float64              `json:"confidence"`
-	LastChanged *time.Time           `json:"last_changed"`
+	State          model.OccupancyState `json:"state"`
+	Confidence     float64              `json:"confidence"`
+	LastChanged    *time.Time           `json:"last_changed"`
+	LastChangedAgo *int                 `json:"last_changed_ago,omitempty"`
 }
 
 // HouseActivityResponse is the DTO for the house activity dimension.
 type HouseActivityResponse struct {
-	State       model.HouseActivityState `json:"state"`
-	Confidence  float64                  `json:"confidence"`
-	LastChanged *time.Time               `json:"last_changed"`
+	State          model.HouseActivityState `json:"state"`
+	Confidence     float64                  `json:"confidence"`
+	LastChanged    *time.Time               `json:"last_changed"`
+	LastChangedAgo *int                     `json:"last_changed_ago,omitempty"`
 }
 
 // HouseModeResponse is the DTO for the mode dimension.
 type HouseModeResponse struct {
-	State       model.ModeState `json:"state"`
-	Confidence  float64         `json:"confidence"`
-	LastChanged *time.Time      `json:"last_changed"`
+	State          model.ModeState `json:"state"`
+	Confidence     float64         `json:"confidence"`
+	LastChanged    *time.Time      `json:"last_changed"`
+	LastChangedAgo *int            `json:"last_changed_ago,omitempty"`
 }
 
 // HouseResponse is the DTO for the whole-house state.
@@ -114,7 +127,6 @@ type DeviceResponse struct {
 	DisplayName  string               `json:"display_name,omitempty"`
 	Class        string               `json:"class"`
 	Location     string               `json:"location,omitempty"`
-	Identity     model.DeviceIdentity `json:"identity"`
 	Availability model.Availability   `json:"availability"`
 	Activity     ActivityResponse     `json:"activity"`
 	Latest       LatestResponse       `json:"latest"`
@@ -125,10 +137,10 @@ type DeviceResponse struct {
 
 // ActivityResponse is the DTO for a device's activity sub-state.
 type ActivityResponse struct {
-	State       model.DeviceActivityState `json:"state"`
-	Since       *time.Time                `json:"since"`
-	LastChanged *time.Time                `json:"last_changed"`
-	Confidence  float64                   `json:"confidence"`
+	State          model.DeviceActivityState `json:"state"`
+	LastChanged    *time.Time                `json:"last_changed"`
+	LastChangedAgo *int                      `json:"last_changed_ago"`
+	Confidence     float64                   `json:"confidence"`
 }
 
 // LatestResponse is the DTO for the latest observed values of a device.
@@ -161,7 +173,7 @@ type LatestResponse struct {
 	RSSI        *int     `json:"rssi_dbm,omitempty"`
 
 	LastSeen   *time.Time `json:"last_seen"`
-	AgeSeconds *float64   `json:"age_seconds,omitempty"`
+	LastSeenAgo *int      `json:"last_seen_ago"`
 	Stale      bool       `json:"stale"`
 }
 
@@ -202,7 +214,7 @@ func BuildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records 
 }
 
 // BuildHouseResponse is the exported HTTP-DTO builder for model.House.
-func BuildHouseResponse(h model.House) HouseResponse { return buildHouseResponse(h) }
+func BuildHouseResponse(h model.House, now time.Time) HouseResponse { return buildHouseResponse(h, now) }
 
 // BuildDeviceResponse is the exported HTTP-DTO builder for model.Device.
 // stalenessSeconds may be nil to use the class default.
@@ -213,7 +225,7 @@ func BuildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) D
 // buildSnapshot converts a model.Snapshot into a SnapshotResponse. now is used
 // to compute age/staleness so tests can inject a fixed value. lookupStaleness
 // returns the per-class override (nil → class default); pass nil if not needed.
-// startedAt, when non-zero, populates started_at and uptime_seconds.
+// startedAt, when non-zero, populates started_at and started_ago.
 func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int, startedAt time.Time) SnapshotResponse {
 	if lookupStaleness == nil {
 		lookupStaleness = func(string) *int { return nil }
@@ -229,14 +241,13 @@ func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records 
 		SchemaVersion: schemaVersion,
 		GeneratedAt:   snap.GeneratedAt,
 		Summary:       summary,
-		House:         buildHouseResponse(snap.House),
+		House:         buildHouseResponse(snap.House, now),
 		Devices:       devices,
 		Activity:      buildActivityStateResponse(signals, records, now),
 	}
 	if !startedAt.IsZero() {
 		r.StartedAt = &startedAt
-		u := now.Sub(startedAt).Seconds()
-		r.UptimeSeconds = &u
+		r.StartedAgo = agoInt(startedAt, now)
 	}
 	return r
 }
@@ -327,26 +338,29 @@ func buildSummary(devices map[string]DeviceResponse) SummaryResponse {
 }
 
 // buildHouseResponse converts a model.House into a HouseResponse.
-func buildHouseResponse(h model.House) HouseResponse {
+func buildHouseResponse(h model.House, now time.Time) HouseResponse {
 	activeDevices := h.ActiveDevices
 	if activeDevices == nil {
 		activeDevices = []string{}
 	}
 	return HouseResponse{
 		Occupancy: HouseOccupancyResponse{
-			State:       h.Occupancy.State,
-			Confidence:  h.Occupancy.Confidence,
-			LastChanged: nilIfZero(h.Occupancy.LastChanged),
+			State:          h.Occupancy.State,
+			Confidence:     h.Occupancy.Confidence,
+			LastChanged:    nilIfZero(h.Occupancy.LastChanged),
+			LastChangedAgo: agoInt(h.Occupancy.LastChanged, now),
 		},
 		Activity: HouseActivityResponse{
-			State:       h.Activity.State,
-			Confidence:  h.Activity.Confidence,
-			LastChanged: nilIfZero(h.Activity.LastChanged),
+			State:          h.Activity.State,
+			Confidence:     h.Activity.Confidence,
+			LastChanged:    nilIfZero(h.Activity.LastChanged),
+			LastChangedAgo: agoInt(h.Activity.LastChanged, now),
 		},
 		Mode: HouseModeResponse{
-			State:       h.Mode.State,
-			Confidence:  h.Mode.Confidence,
-			LastChanged: nilIfZero(h.Mode.LastChanged),
+			State:          h.Mode.State,
+			Confidence:     h.Mode.Confidence,
+			LastChanged:    nilIfZero(h.Mode.LastChanged),
+			LastChangedAgo: agoInt(h.Mode.LastChanged, now),
 		},
 		ActiveDevices: activeDevices,
 	}
@@ -373,9 +387,8 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) D
 		DisplayName:  d.DisplayName,
 		Class:        d.Class,
 		Location:     d.Location,
-		Identity:     d.Identity,
 		Availability: d.Availability,
-		Activity:     buildActivityResponse(d.Activity),
+		Activity:     buildActivityResponse(d.Activity, now),
 		Latest:       latest,
 		Cycle:        buildCycleResponse(d.Cycle, d.Class),
 		Unclassified: d.Unclassified,
@@ -384,12 +397,12 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) D
 }
 
 // buildActivityResponse converts a model.Activity into an ActivityResponse.
-func buildActivityResponse(a model.Activity) ActivityResponse {
+func buildActivityResponse(a model.Activity, now time.Time) ActivityResponse {
 	return ActivityResponse{
-		State:       a.State,
-		Since:       nilIfZero(a.Since),
-		LastChanged: nilIfZero(a.LastChanged),
-		Confidence:  a.Confidence,
+		State:          a.State,
+		LastChanged:    nilIfZero(a.LastChanged),
+		LastChangedAgo: agoInt(a.LastChanged, now),
+		Confidence:     a.Confidence,
 	}
 }
 
@@ -419,10 +432,9 @@ func buildLatestResponse(l model.Latest, class string, now time.Time, stalenessS
 
 	stale := false
 	if !l.LastSeen.IsZero() {
-		age := now.Sub(l.LastSeen).Seconds()
-		r.AgeSeconds = &age
+		r.LastSeenAgo = agoInt(l.LastSeen, now)
 		threshold := stalenessSecondsForClass(class, stalenessSeconds)
-		if age >= threshold {
+		if now.Sub(l.LastSeen).Seconds() >= threshold {
 			stale = true
 		}
 	}

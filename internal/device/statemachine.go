@@ -134,7 +134,7 @@ func (r *Runtime) OnReading(at time.Time, reading model.Reading) Outcome {
 	// Measurement-only sensors have no activity machine. Any reading
 	// transitions unknown→reporting once; subsequent readings update
 	// Latest values (in the engine) but don't transition activity.
-	if r.Profile.Class == ClassSensor {
+	if IsPassiveSensor(r.Profile.Class) {
 		if r.activity == model.ActivityUnknown {
 			r.activity = model.ActivityReporting
 		}

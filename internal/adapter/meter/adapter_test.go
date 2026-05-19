@@ -17,7 +17,7 @@ import (
 func sensorCfg() config.Config {
 	cfg := config.Default()
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
-		"sensor_device": {},
+		"energy_meter": {},
 	}
 	return cfg
 }

@@ -122,7 +122,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	type health struct {
 		Status          string    `json:"status"`
 		StartedAt       time.Time `json:"started_at"`
-		UptimeSeconds   float64   `json:"uptime_seconds"`
+		StartedAgo      int       `json:"started_ago"`
 		MQTTConnected   bool      `json:"mqtt_connected"`
 		InfluxEnabled   bool      `json:"influx_enabled"`
 		InfluxReachable bool      `json:"influx_reachable,omitempty"`
@@ -131,7 +131,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	h := health{
 		Status:        "ok",
 		StartedAt:     s.started,
-		UptimeSeconds: time.Since(s.started).Seconds(),
+		StartedAgo:    int((time.Since(s.started) + 500*time.Millisecond) / time.Second),
 		MQTTConnected: s.MQTT != nil && s.MQTT.IsConnected(),
 		InfluxEnabled: s.Influx != nil && s.Influx.Enabled,
 		Goroutines:    runtime.NumGoroutine(),
@@ -150,7 +150,7 @@ func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleHouse(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, buildHouseResponse(s.Store.House()))
+	writeJSON(w, http.StatusOK, buildHouseResponse(s.Store.House(), time.Now()))
 }
 
 func (s *Server) handleDevices(w http.ResponseWriter, _ *http.Request) {
@@ -198,7 +198,7 @@ func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	type metrics struct {
-		UptimeSeconds    float64 `json:"uptime_seconds"`
+		StartedAgo       int     `json:"started_ago"`
 		DeviceCount      int     `json:"device_count"`
 		CanonicalEvents  uint64  `json:"canonical_events_total"`
 		DerivedEvents    uint64  `json:"derived_events_total"`
@@ -207,7 +207,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		PublisherDropped uint64  `json:"mqtt_publishes_dropped_total"`
 	}
 	m := metrics{
-		UptimeSeconds:   time.Since(s.started).Seconds(),
+		StartedAgo: int((time.Since(s.started) + 500*time.Millisecond) / time.Second),
 		DeviceCount:     len(s.Store.Devices()),
 		CanonicalEvents: atomic.LoadUint64(&s.canonicalCount),
 		DerivedEvents:   atomic.LoadUint64(&s.derivedCount),

@@ -106,7 +106,7 @@ func TestWriter_TempAndHumidityGoToDeviceEnvironment(t *testing.T) {
 
 func TestWriter_BatterySampleGoesToDeviceBattery(t *testing.T) {
 	w, api, store := newWriterTest(t)
-	seedDevice(t, store, "bedroom_climate", device.ClassSensor, "bedroom")
+	seedDevice(t, store, "bedroom_climate", device.ClassEnvironmentalSensor, "bedroom")
 	ts := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
 	w.OnCanonicalEvent(model.CanonicalEvent{
 		Timestamp: ts,
@@ -120,7 +120,7 @@ func TestWriter_BatterySampleGoesToDeviceBattery(t *testing.T) {
 	}
 	p := got[0]
 	tags := tagMap(p)
-	if tags["device_id"] != "bedroom_climate" || tags["class"] != device.ClassSensor || tags["location"] != "bedroom" {
+	if tags["device_id"] != "bedroom_climate" || tags["class"] != device.ClassEnvironmentalSensor || tags["location"] != "bedroom" {
 		t.Errorf("battery tags wrong: %+v", tags)
 	}
 	if fieldMap(p)["battery_pct"] != 87.0 {
@@ -308,7 +308,7 @@ func TestWriter_StatsCountsQueuedCanonicalWrites(t *testing.T) {
 
 func TestWriter_QueuedIncrementsAfterOnCanonicalEvent(t *testing.T) {
 	w, _, store := newWriterTest(t)
-	seedDevice(t, store, "sensor", device.ClassSensor, "living_room")
+	seedDevice(t, store, "sensor", device.ClassEnvironmentalSensor, "living_room")
 
 	queuedBefore, _ := w.Stats()
 	w.OnCanonicalEvent(model.CanonicalEvent{

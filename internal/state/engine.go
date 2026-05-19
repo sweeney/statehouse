@@ -263,12 +263,15 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			cc := *outcome.Cycle
 			ent.Device.Cycle = &cc
 		}
-		// Divergence check on cycle completion. Only fire for
-		// integration-primary cycles: if the device is counter-primary
-		// we trust the counter and the integration difference is expected.
+		// Divergence check on cycle completion. Only fire for counter-primary
+		// devices: when the counter is the trusted source, a large gap from
+		// integration signals a measurement quality issue worth alerting on.
+		// For integration-primary devices the counter is already declared
+		// untrustworthy (via per-device override or class config), so any
+		// counter/integration mismatch is expected noise — not actionable.
 		if outcome.CycleFinished && ent.Device.Cycle != nil &&
 			ent.Device.Cycle.Energy.ReportedKWhDelta > 0 &&
-			ent.Device.Cycle.Energy.PrimarySource != "counter" {
+			profile.Strategy == energy.StrategyCounter {
 			pct := energy.DivergencePct(ent.Device.Cycle.Energy.ReportedKWhDelta, ent.Device.Cycle.Energy.IntegratedKWh)
 			if pct >= e.cfg.Energy.DivergenceWarningPct {
 				ent.Runtime.MarkDivergence(pct)
