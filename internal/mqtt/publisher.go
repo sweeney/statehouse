@@ -150,7 +150,12 @@ func (p *Publisher) OnDerivedEvent(ev model.DerivedEvent) {
 }
 
 // PublishSnapshot is exposed for periodic emission (independent of
-// derived events).
+// derived events). It publishes the full snapshot, the house state, and
+// a retained heartbeat for every per-device topic. The per-device sweep
+// is necessary for passive sensors (environmental_sensor, ups_sensor,
+// energy_meter) which only emit a derived event once — on their initial
+// unknown→reporting transition — so their retained topic is never
+// refreshed by OnDerivedEvent alone.
 func (p *Publisher) PublishSnapshot() {
 	if p == nil || p.Client == nil || p.Store == nil {
 		return
@@ -158,6 +163,9 @@ func (p *Publisher) PublishSnapshot() {
 	now := time.Now()
 	p.publishJSON(p.Prefix+"/state/snapshot", true, p.snapshotPayload(p.Store.Snapshot(), now))
 	p.publishJSON(p.Prefix+"/state/house", true, p.housePayload(p.Store.House(), now))
+	for id, d := range p.Store.Devices() {
+		p.publishJSON(p.Prefix+"/state/devices/"+id, true, p.devicePayload(d, now))
+	}
 }
 
 func (p *Publisher) snapshotPayload(snap model.Snapshot, now time.Time) any {

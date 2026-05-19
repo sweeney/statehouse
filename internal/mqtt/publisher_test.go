@@ -410,6 +410,59 @@ func contains(b []byte, sub string) bool {
 	return false
 }
 
+// TestPublisher_PublishSnapshotRefreshesAllDeviceTopics is a regression test
+// for the passive-sensor retained-message gap. Passive sensors
+// (environmental_sensor, ups_sensor, energy_meter) emit a derived event only
+// once — on the initial unknown→reporting transition. After that, readings
+// update the store but produce no events, so the publisher never re-fires the
+// per-device retained topic. If that retained message is cleared (e.g. by a
+// broker cleanup or after a fresh broker install) it is never republished.
+//
+// The fix: PublishSnapshot sweeps every device in the store so the 30-second
+// ticker acts as a heartbeat for retained device topics regardless of class.
+func TestPublisher_PublishSnapshotRefreshesAllDeviceTopics(t *testing.T) {
+	store := state.NewStore()
+	rt := device.NewRuntime(device.Profile{Class: device.ClassEnvironmentalSensor}, 30*time.Minute)
+	store.Upsert("climate_weatherstation", model.Device{
+		ID:    "climate_weatherstation",
+		Class: device.ClassEnvironmentalSensor,
+		Identity: model.DeviceIdentity{
+			Scheme:  "climate",
+			Primary: "home",
+			Display: "home",
+		},
+	}, rt)
+	client := NewFakeClient()
+	pub := &Publisher{Client: client, Prefix: "house", Store: store}
+
+	// Simulate the single discovery event that fires on first startup.
+	pub.OnDerivedEvent(model.DerivedEvent{
+		ID:        "evt_discover",
+		Timestamp: time.Now().UTC(),
+		Type:      model.EvtDeviceDiscovered,
+		DeviceID:  "climate_weatherstation",
+	})
+	if got := client.PublishedOn("house/state/devices/climate_weatherstation"); len(got) == 0 {
+		t.Fatal("per-device topic must be published on discovery (pre-condition)")
+	}
+
+	// Simulate broker retains being cleared (e.g. manual cleanup, broker
+	// restart). Subsequent sensor readings arrive but generate no new derived
+	// events — activity stays at "reporting" — so without a sweep the
+	// retained message is never refreshed.
+	client.Reset()
+
+	pub.PublishSnapshot()
+
+	got := client.PublishedOn("house/state/devices/climate_weatherstation")
+	if len(got) == 0 {
+		t.Error("PublishSnapshot must refresh per-device retained topics; passive sensors never republish via derived events")
+	}
+	if len(got) > 0 && !got[0].Retained {
+		t.Error("per-device device topic published by PublishSnapshot must be retained")
+	}
+}
+
 func TestPublisher_RecordedTopicShapeMatchesContract(t *testing.T) {
 	// Catch any accidental topic-shape regression. The README documents
 	// these as the public contract.
