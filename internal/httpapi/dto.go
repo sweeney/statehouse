@@ -12,11 +12,12 @@ const schemaVersion = "net.swee.statehouse.snapshot.v1"
 // activeActivityStates is the set of activity states that count as "active"
 // for the summary's ActiveCount.
 var activeActivityStates = map[model.DeviceActivityState]bool{
-	model.ActivityActive:      true,
-	model.ActivityStarting:    true,
-	model.ActivityRunning:     true,
-	model.ActivityFinishing:   true,
-	model.ActivityActiveCycle: true,
+	model.ActivityActive:          true,
+	model.ActivityStarting:        true,
+	model.ActivityRunning:         true,
+	model.ActivityFinishing:       true,
+	model.ActivityFinishedRecently: true,
+	model.ActivityActiveCycle:     true,
 }
 
 // stalenessSecondsForClass returns the staleness threshold (in seconds) for a
@@ -176,6 +177,7 @@ type CycleEnergyResponse struct {
 	ReportedKWhDelta float64            `json:"reported_kwh_delta"`
 	IntegratedKWh    float64            `json:"integrated_kwh"`
 	SelectedKWh      float64            `json:"selected_kwh"`
+	StaleCounter     bool               `json:"stale_counter,omitempty"`
 	Divergence       DivergenceResponse `json:"divergence"`
 }
 
@@ -353,6 +355,9 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) D
 	if d.Cycle != nil && d.Cycle.Energy.DivergenceWarning {
 		warnings = append(warnings, "cycle_divergence")
 	}
+	if d.Cycle != nil && d.Cycle.Energy.StaleCounter {
+		warnings = append(warnings, "stale_counter")
+	}
 
 	return DeviceResponse{
 		ID:           d.ID,
@@ -454,6 +459,7 @@ func buildCycleResponse(c *model.Cycle, class string) *CycleResponse {
 			ReportedKWhDelta: c.Energy.ReportedKWhDelta,
 			IntegratedKWh:    c.Energy.IntegratedKWh,
 			SelectedKWh:      c.Energy.SelectedKWh,
+			StaleCounter:     c.Energy.StaleCounter,
 			Divergence:       div,
 		},
 	}

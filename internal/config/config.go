@@ -245,6 +245,15 @@ type DeviceConfig struct {
 	DisplayName string      `yaml:"display_name"`
 	Location    string      `yaml:"location"`
 	Thresholds  *Thresholds `yaml:"thresholds"`
+
+	// EnergyStrategy overrides the class-level energy_strategy for this
+	// specific device. Use "integration" when the device's counter ticks
+	// at too coarse a resolution for its typical cycle size (e.g. a
+	// cycle_power_device whose plug reports in 100 Wh increments but
+	// whose cycles complete in 20–30 Wh). Without this override such
+	// devices raise a stale_counter warning every cycle because the
+	// counter never ticks. See config.example.yaml for diagnosis steps.
+	EnergyStrategy string `yaml:"energy_strategy"`
 }
 
 // Default returns a config populated with safe defaults; YAML values

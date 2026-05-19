@@ -521,6 +521,15 @@ func (r *Runtime) MarkDivergence(pct float64) {
 	r.cycle.Energy.DivergenceWarning = true
 }
 
+// MarkStaleCounter flags that the counter-primary device reported no
+// counter movement during the cycle despite meaningful activity.
+func (r *Runtime) MarkStaleCounter() {
+	if r.cycle == nil {
+		return
+	}
+	r.cycle.Energy.StaleCounter = true
+}
+
 // Tick applies time-driven transitions. The engine calls this on its
 // periodic tick so TTL-based decays fire even when readings are absent.
 // Currently handles: finished_recently → idle after finishedRecentlyTTL.

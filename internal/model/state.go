@@ -87,6 +87,7 @@ type CycleEnergy struct {
 	SelectedKWh       float64 `json:"selected_kwh"`
 	DivergencePct     float64 `json:"divergence_pct"`
 	DivergenceWarning bool    `json:"divergence_warning"`
+	StaleCounter      bool    `json:"stale_counter,omitempty"`
 }
 
 // Cycle represents one in-flight or recently-finished session of a

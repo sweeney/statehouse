@@ -137,6 +137,31 @@ devices:
 	}
 }
 
+// TestContinuousPowerDeviceUsesIntegrationStrategy verifies that the
+// continuous_power_device class is configured with integration strategy.
+// Compressor cycles are typically too short to accumulate a full counter
+// tick (10 Wh resolution), so integration is more accurate and prevents
+// spurious stale_counter warnings on every short cycle.
+func TestContinuousPowerDeviceUsesIntegrationStrategy(t *testing.T) {
+	yaml := `
+device_classes:
+  continuous_power_device:
+    energy_strategy: integration
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	dc, ok := cfg.DeviceClasses["continuous_power_device"]
+	if !ok {
+		t.Fatal("expected device class 'continuous_power_device'")
+	}
+	if dc.EnergyStrategy != "integration" {
+		t.Errorf("continuous_power_device must use integration strategy, got %q", dc.EnergyStrategy)
+	}
+}
+
 // TestLoadMissingTokenFileReturnsError ensures that specifying a
 // token_file that doesn't exist causes Load to return an error rather
 // than silently leaving the token blank.
@@ -358,6 +383,31 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestLoadPerDeviceEnergyStrategy verifies that a device-level
+// energy_strategy is preserved through Load() unchanged, so the resolver
+// can use it to override the class default.
+func TestLoadPerDeviceEnergyStrategy(t *testing.T) {
+	yaml := `
+devices:
+  officeheater:
+    ieee_address: "0x20a716fffed18230"
+    class: cycle_power_device
+    energy_strategy: integration
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	dev, ok := cfg.Devices["officeheater"]
+	if !ok {
+		t.Fatal("expected device 'officeheater'")
+	}
+	if dev.EnergyStrategy != "integration" {
+		t.Errorf("expected energy_strategy=integration, got %q", dev.EnergyStrategy)
+	}
 }
 
 // TestLoadExplicitSchemeBeatsLegacyShorthand verifies that when a device has

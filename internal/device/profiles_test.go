@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sweeney/statehouse/internal/config"
+	"github.com/sweeney/statehouse/internal/energy"
 	"github.com/sweeney/statehouse/internal/model"
 )
 
@@ -36,6 +37,59 @@ func TestClassifyByHints_LongerHintWins(t *testing.T) {
 		if p.Class != "kettle_class" {
 			t.Fatalf("run %d: expected 'kettle_class' (longer hint wins), got %q", i+1, p.Class)
 		}
+	}
+}
+
+// TestResolve_PerDeviceEnergyStrategyOverride verifies that a device
+// with an explicit energy_strategy field wins over its class default.
+// This exists for devices whose hardware counters tick at too coarse a
+// resolution (e.g. 100 Wh) for their typical cycle size (20–30 Wh),
+// causing a stale_counter warning every cycle. Setting energy_strategy:
+// integration on the specific device fixes it without changing the class.
+func TestResolve_PerDeviceEnergyStrategyOverride(t *testing.T) {
+	cfg := config.Config{
+		DeviceClasses: map[string]config.DeviceClassConfig{
+			"cycle_power_device": {
+				EnergyStrategy: "counter",
+			},
+		},
+		Devices: map[string]config.DeviceConfig{
+			"officeheater": {
+				Scheme:         "zigbee",
+				Primary:        "0xaabbccdd",
+				Class:          "cycle_power_device",
+				EnergyStrategy: "integration",
+			},
+		},
+	}
+	r := NewResolver(cfg)
+	p := r.Resolve(model.DeviceIdentity{Scheme: "zigbee", Primary: "0xaabbccdd"})
+	if p.Strategy != energy.StrategyIntegration {
+		t.Fatalf("expected StrategyIntegration (per-device override), got %v", p.Strategy)
+	}
+}
+
+// TestResolve_ClassStrategyUsedWhenNoDeviceOverride verifies that
+// without a per-device energy_strategy the class default is used.
+func TestResolve_ClassStrategyUsedWhenNoDeviceOverride(t *testing.T) {
+	cfg := config.Config{
+		DeviceClasses: map[string]config.DeviceClassConfig{
+			"cycle_power_device": {
+				EnergyStrategy: "counter",
+			},
+		},
+		Devices: map[string]config.DeviceConfig{
+			"dishwasher": {
+				Scheme:  "zigbee",
+				Primary: "0x11223344",
+				Class:   "cycle_power_device",
+			},
+		},
+	}
+	r := NewResolver(cfg)
+	p := r.Resolve(model.DeviceIdentity{Scheme: "zigbee", Primary: "0x11223344"})
+	if p.Strategy != energy.StrategyCounter {
+		t.Fatalf("expected StrategyCounter (class default), got %v", p.Strategy)
 	}
 }
 

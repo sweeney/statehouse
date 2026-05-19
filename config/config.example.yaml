@@ -57,7 +57,7 @@ device_classes:
       active_above_w: 50
       active_sustained_for: 3s
       inactive_sustained_for: 10s
-    energy_strategy: integration
+    energy_strategy: counter
 
   cycle_power_device:
     name_hints: [dishwasher, washing_machine, washer, tumble_dryer, dryer]
@@ -76,7 +76,7 @@ device_classes:
       compressor_above_w: 25
       active_sustained_for: 10s
       inactive_sustained_for: 30s
-    energy_strategy: counter
+    energy_strategy: integration
 
   media_power_device:
     name_hints: [tv, television, av, amplifier, receiver, apple_tv, speakers]
@@ -128,6 +128,36 @@ devices:
     class: continuous_power_device
     display_name: Garage freezer
     location: garage
+
+  # --- Per-device energy_strategy override ---
+  #
+  # Some Zigbee smart plugs report energy counters in coarse increments
+  # (commonly 10 Wh or 100 Wh depending on firmware). When a device's
+  # typical cycle completes below the counter's tick size, the counter
+  # never moves, and the engine raises a stale_counter warning every
+  # cycle because it expected the counter to advance.
+  #
+  # Diagnosis: look for a device with:
+  #   - warnings: ["stale_counter"]
+  #   - cycle.energy.reported_kwh_delta == 0
+  #   - cycle.energy.integrated_kwh > 0 (real work happened)
+  #
+  # Fix: set energy_strategy: integration on that specific device. The
+  # engine will trust the finer-grained integrated value and stop
+  # raising stale_counter. Other devices in the same class keep using
+  # the class default (counter), which is correct when their cycles are
+  # large enough for the counter to tick.
+  #
+  # Do NOT raise the stale_counter detection threshold instead: that
+  # would silently hide genuinely broken counters on any device whose
+  # cycle happens to be small.
+  #
+  # office_heater:
+  #   ieee_address: "0x00158d0000000004"
+  #   class: cycle_power_device
+  #   display_name: Office heater
+  #   location: office
+  #   energy_strategy: integration   # plug counter ticks at 100 Wh; cycles ~25 Wh
 
   # boiler-sensor devices — Scheme/Primary identify the channels
   # the adapter emits. Display name is what /state/devices shows.

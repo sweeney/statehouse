@@ -38,6 +38,7 @@ const (
 	EvtMediaActive               DerivedEventType = "media_active"
 	EvtMediaInactive             DerivedEventType = "media_inactive"
 	EvtEnergyDivergenceWarning   DerivedEventType = "energy_divergence_warning"
+	EvtEnergyStaleCounterWarning DerivedEventType = "energy_stale_counter_warning"
 	EvtHouseStateChanged         DerivedEventType = "house_state_changed"
 
 	// Intercom events. Source is the intercom adapter; the call_id and

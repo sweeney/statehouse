@@ -198,6 +198,15 @@ func profileFromOverride(d config.DeviceConfig, classes map[string]config.Device
 	if d.Thresholds != nil {
 		p.Thresholds = mergeThresholds(p.Thresholds, *d.Thresholds)
 	}
+	// Per-device strategy wins over the class default. This exists to
+	// handle devices whose hardware counter ticks at a resolution too
+	// coarse for their typical cycle size (e.g. 100 Wh increments on a
+	// device that completes cycles in 20–30 Wh). Those devices reliably
+	// raise stale_counter every cycle; the fix is to opt that specific
+	// device into integration without changing the class for all others.
+	if d.EnergyStrategy != "" {
+		p.Strategy = strategyFor(d.EnergyStrategy)
+	}
 	return p
 }
 

@@ -155,9 +155,10 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 	var (
 		outcome device.Outcome
 		profile device.Profile
-		// Snapshot of cycle state for divergence calc.
-		divergencePct float64
-		divergenceHit bool
+		// Snapshot of cycle state for divergence/stale-counter calc.
+		divergencePct   float64
+		divergenceHit   bool
+		staleCounterHit bool
 	)
 	e.store.withEntry(id, func(ent *deviceEntry) {
 		profile = ent.Runtime.Profile
@@ -262,11 +263,12 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			cc := *outcome.Cycle
 			ent.Device.Cycle = &cc
 		}
-		// Divergence check on cycle completion — only meaningful when the
-		// device reported a counter delta; if ReportedKWhDelta is zero the
-		// device has no energy counter and integration is the only source.
+		// Divergence check on cycle completion. Only fire for
+		// integration-primary cycles: if the device is counter-primary
+		// we trust the counter and the integration difference is expected.
 		if outcome.CycleFinished && ent.Device.Cycle != nil &&
-			ent.Device.Cycle.Energy.ReportedKWhDelta > 0 {
+			ent.Device.Cycle.Energy.ReportedKWhDelta > 0 &&
+			ent.Device.Cycle.Energy.PrimarySource != "counter" {
 			pct := energy.DivergencePct(ent.Device.Cycle.Energy.ReportedKWhDelta, ent.Device.Cycle.Energy.IntegratedKWh)
 			if pct >= e.cfg.Energy.DivergenceWarningPct {
 				ent.Runtime.MarkDivergence(pct)
@@ -277,6 +279,22 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 				divergencePct = pct
 				divergenceHit = true
 			}
+		}
+		// Stale counter check: counter-primary device finished a cycle
+		// with no counter movement despite meaningful activity. The
+		// counter is absent or stuck.
+		const staleCounterMinIntegratedKWh = 0.001 // 1 Wh
+		const staleCounterMinDurationS = 30
+		if outcome.CycleFinished && ent.Device.Cycle != nil &&
+			profile.Strategy == energy.StrategyCounter &&
+			ent.Device.Cycle.Energy.ReportedKWhDelta == 0 &&
+			(ent.Device.Cycle.Energy.IntegratedKWh >= staleCounterMinIntegratedKWh ||
+				ent.Device.Cycle.DurationSeconds >= staleCounterMinDurationS) {
+			ent.Runtime.MarkStaleCounter()
+			cc := *outcome.Cycle
+			cc.Energy.StaleCounter = true
+			ent.Device.Cycle = &cc
+			staleCounterHit = true
 		}
 	})
 
@@ -303,6 +321,21 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 				"integrated_kwh":     outcome.Cycle.Energy.IntegratedKWh,
 				"selected_source":    outcome.Cycle.Energy.PrimarySource,
 				"divergence_pct":     divergencePct,
+			},
+		})
+	}
+	if staleCounterHit {
+		e.emitDerived(model.DerivedEvent{
+			ID:          newEventID(),
+			Timestamp:   reading.Timestamp,
+			Type:        model.EvtEnergyStaleCounterWarning,
+			DeviceID:    id,
+			DeviceClass: profile.Class,
+			Summary:     fmt.Sprintf("Stale energy counter for %s", id),
+			Severity:    "warning",
+			Evidence: map[string]any{
+				"integrated_kwh":   outcome.Cycle.Energy.IntegratedKWh,
+				"duration_seconds": outcome.Cycle.DurationSeconds,
 			},
 		})
 	}
