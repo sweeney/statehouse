@@ -35,6 +35,10 @@ type Server struct {
 	// RemoteConfig, when non-nil, surfaces namespace fetch status on /healthz.
 	RemoteConfig *config.Fetcher
 
+	// Version is the build commit set via -ldflags; empty string when running
+	// outside a tagged deploy.
+	Version string
+
 	started time.Time
 
 	srv *http.Server
@@ -130,6 +134,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 	type health struct {
 		Status          string               `json:"status"`
+		Version         string               `json:"version,omitempty"`
 		StartedAt       time.Time            `json:"started_at"`
 		StartedAgo      int                  `json:"started_ago"`
 		MQTTConnected   bool                 `json:"mqtt_connected"`
@@ -140,6 +145,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 	h := health{
 		Status:        "ok",
+		Version:       s.Version,
 		StartedAt:     s.started,
 		StartedAgo:    int((time.Since(s.started) + 500*time.Millisecond) / time.Second),
 		MQTTConnected: s.MQTT != nil && s.MQTT.IsConnected(),

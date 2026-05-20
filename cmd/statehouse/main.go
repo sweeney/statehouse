@@ -28,6 +28,8 @@ import (
 	"github.com/sweeney/statehouse/internal/testutil"
 )
 
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "/etc/house-state-engine/config.yaml", "path to YAML config")
 	flag.Parse()
@@ -152,6 +154,7 @@ func main() {
 	engine.AddDerivedSink(influxWriter)
 
 	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger, cfg.DeviceClasses)
+	api.Version = version
 	api.Publisher = publisher
 	api.RemoteConfig = remoteCfgFetcher
 	engine.AddCanonicalSink(api)
