@@ -1,0 +1,38 @@
+[Unit]
+Description=House state engine
+After=network-online.target
+Wants=network-online.target
+Documentation=https://github.com/sweeney/statehouse
+
+[Service]
+Type=simple
+User=statehouse
+Group=statehouse
+
+ExecStart=/opt/statehouse/bin/statehouse -config /etc/statehouse/config.yaml
+WorkingDirectory=/var/lib/statehouse
+
+Restart=always
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/statehouse
+ReadOnlyPaths=/etc/statehouse
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=statehouse
+
+[Install]
+WantedBy=multi-user.target

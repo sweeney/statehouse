@@ -19,7 +19,7 @@ adapters:
     base_topic: energy/boiler/sensor
 
 http:
-  listen: :8080
+  listen: :8383
 
 recent_log:
   path: /var/lib/statehouse/events.jsonl
