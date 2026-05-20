@@ -20,6 +20,7 @@ import (
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
 	"github.com/sweeney/statehouse/internal/httpapi"
+	"github.com/sweeney/statehouse/internal/identity"
 	"github.com/sweeney/statehouse/internal/influx"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/mqtt"
@@ -39,6 +40,24 @@ func main() {
 		logger.Error("load config", "error", err)
 		os.Exit(1)
 	}
+
+	var remoteCfgFetcher *config.Fetcher
+	if cfg.Identity.BaseURL != "" && cfg.RemoteConfig.BaseURL != "" {
+		logger.Info("applying remote config", "url", cfg.RemoteConfig.BaseURL)
+		remoteCfgFetcher = &config.Fetcher{
+			BaseURL: cfg.RemoteConfig.BaseURL,
+			Tokens: &identity.TokenSource{
+				BaseURL:      cfg.Identity.BaseURL,
+				ClientID:     cfg.Identity.ClientID,
+				ClientSecret: cfg.Identity.ClientSecret,
+			},
+			Logger: logger,
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		remoteCfgFetcher.ApplyRemote(ctx, &cfg)
+		cancel()
+	}
+
 	logger.Info("starting", "config", *configPath, "broker", cfg.MQTT.Broker, "http", cfg.HTTP.Listen)
 
 	store := state.NewStore()
@@ -134,6 +153,7 @@ func main() {
 
 	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger, cfg.DeviceClasses)
 	api.Publisher = publisher
+	api.RemoteConfig = remoteCfgFetcher
 	engine.AddCanonicalSink(api)
 	engine.AddDerivedSink(api)
 

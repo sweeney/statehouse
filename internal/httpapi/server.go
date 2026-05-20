@@ -32,6 +32,9 @@ type Server struct {
 	// Set by main.go after construction; tests may leave it nil.
 	Publisher *mqtt.Publisher
 
+	// RemoteConfig, when non-nil, surfaces namespace fetch status on /healthz.
+	RemoteConfig *config.Fetcher
+
 	started time.Time
 
 	srv *http.Server
@@ -119,14 +122,21 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	type nsStatus struct {
+		OK           bool      `json:"ok"`
+		FetchedAt    time.Time `json:"fetched_at"`
+		FetchedAtAgo int       `json:"fetched_at_ago"`
+		Error        string    `json:"error,omitempty"`
+	}
 	type health struct {
-		Status          string    `json:"status"`
-		StartedAt       time.Time `json:"started_at"`
-		StartedAgo      int       `json:"started_ago"`
-		MQTTConnected   bool      `json:"mqtt_connected"`
-		InfluxEnabled   bool      `json:"influx_enabled"`
-		InfluxReachable bool      `json:"influx_reachable,omitempty"`
-		Goroutines      int       `json:"goroutines"`
+		Status          string               `json:"status"`
+		StartedAt       time.Time            `json:"started_at"`
+		StartedAgo      int                  `json:"started_ago"`
+		MQTTConnected   bool                 `json:"mqtt_connected"`
+		InfluxEnabled   bool                 `json:"influx_enabled"`
+		InfluxReachable bool                 `json:"influx_reachable,omitempty"`
+		Goroutines      int                  `json:"goroutines"`
+		RemoteConfig    map[string]*nsStatus `json:"remote_config,omitempty"`
 	}
 	h := health{
 		Status:        "ok",
@@ -140,6 +150,21 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 		h.InfluxReachable = s.Influx.Ping(ctx)
+	}
+	if s.RemoteConfig != nil {
+		now := time.Now()
+		statuses := s.RemoteConfig.Statuses()
+		if len(statuses) > 0 {
+			h.RemoteConfig = make(map[string]*nsStatus, len(statuses))
+			for ns, st := range statuses {
+				h.RemoteConfig[ns] = &nsStatus{
+					OK:           st.OK,
+					FetchedAt:    st.FetchedAt,
+					FetchedAtAgo: int((now.Sub(st.FetchedAt) + 500*time.Millisecond) / time.Second),
+					Error:        st.Error,
+				}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, h)
 }

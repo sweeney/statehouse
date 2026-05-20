@@ -20,6 +20,21 @@ type Config struct {
 	Adapters      AdaptersConfig               `yaml:"adapters"`
 	DeviceClasses map[string]DeviceClassConfig `yaml:"device_classes"`
 	Devices       map[string]DeviceConfig      `yaml:"devices"`
+	Identity      IdentityConfig               `yaml:"identity"`
+	RemoteConfig  RemoteConfigConfig           `yaml:"remote_config"`
+}
+
+// IdentityConfig holds credentials for the identity service used to
+// obtain access tokens for service-to-service calls.
+type IdentityConfig struct {
+	BaseURL      string `yaml:"base_url"`
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+}
+
+// RemoteConfigConfig holds the address of the remote config service.
+type RemoteConfigConfig struct {
+	BaseURL string `yaml:"base_url"`
 }
 
 // MQTTConfig describes broker connectivity. Per-adapter subscription
@@ -37,21 +52,21 @@ type MQTTConfig struct {
 // translate raw MQTT messages into engine calls that don't carry
 // protocol vocabulary, so each protocol gets its own settings block.
 type AdaptersConfig struct {
-	Zigbee2MQTT Zigbee2MQTTConfig `yaml:"zigbee2mqtt"`
-	Boiler      BoilerConfig      `yaml:"boiler"`
-	UPS         UPSConfig         `yaml:"ups"`
-	Climate     ClimateConfig     `yaml:"climate"`
-	Meter       MeterConfig       `yaml:"meter"`
-	Intercom    IntercomConfig    `yaml:"intercom"`
+	Zigbee2MQTT Zigbee2MQTTConfig `yaml:"zigbee2mqtt" json:"zigbee2mqtt,omitempty"`
+	Boiler      BoilerConfig      `yaml:"boiler"      json:"boiler,omitempty"`
+	UPS         UPSConfig         `yaml:"ups"         json:"ups,omitempty"`
+	Climate     ClimateConfig     `yaml:"climate"     json:"climate,omitempty"`
+	Meter       MeterConfig       `yaml:"meter"       json:"meter,omitempty"`
+	Intercom    IntercomConfig    `yaml:"intercom"    json:"intercom,omitempty"`
 }
 
 // Zigbee2MQTTConfig configures the Zigbee2MQTT adapter.
 type Zigbee2MQTTConfig struct {
 	// Enabled defaults to true if the block is present at all. Set to
 	// false to disable the adapter without removing the block.
-	Enabled *bool `yaml:"enabled"`
+	Enabled *bool `yaml:"enabled"    json:"enabled,omitempty"`
 	// BaseTopic is the topic prefix of the Z2M bridge ("zigbee2mqtt").
-	BaseTopic string `yaml:"base_topic"`
+	BaseTopic string `yaml:"base_topic" json:"base_topic,omitempty"`
 }
 
 // IsEnabled reports whether the adapter should be wired. Defaults to
@@ -69,11 +84,11 @@ func (z Zigbee2MQTTConfig) IsEnabled() bool {
 // default — the boiler-sensor publisher isn't a generic protocol so
 // users opt in by enabling it.
 type BoilerConfig struct {
-	Enabled *bool `yaml:"enabled"`
+	Enabled *bool `yaml:"enabled"    json:"enabled,omitempty"`
 	// BaseTopic is the topic prefix the publisher uses; defaults to
 	// "energy/boiler/sensor". The adapter appends "/events" and
 	// "/system" for its two subscriptions.
-	BaseTopic string `yaml:"base_topic"`
+	BaseTopic string `yaml:"base_topic" json:"base_topic,omitempty"`
 }
 
 // IsEnabled reports whether the boiler adapter should be wired.
@@ -88,8 +103,8 @@ func (b BoilerConfig) IsEnabled() bool {
 
 // UPSConfig configures the NUT-via-MQTT UPS adapter.
 type UPSConfig struct {
-	Enabled   *bool  `yaml:"enabled"`
-	BaseTopic string `yaml:"base_topic"`
+	Enabled   *bool  `yaml:"enabled"    json:"enabled,omitempty"`
+	BaseTopic string `yaml:"base_topic" json:"base_topic,omitempty"`
 }
 
 func (u UPSConfig) IsEnabled() bool {
@@ -101,8 +116,8 @@ func (u UPSConfig) IsEnabled() bool {
 
 // ClimateConfig configures the weather station adapter.
 type ClimateConfig struct {
-	Enabled   *bool  `yaml:"enabled"`
-	BaseTopic string `yaml:"base_topic"`
+	Enabled   *bool  `yaml:"enabled"    json:"enabled,omitempty"`
+	BaseTopic string `yaml:"base_topic" json:"base_topic,omitempty"`
 }
 
 func (c ClimateConfig) IsEnabled() bool {
@@ -114,8 +129,8 @@ func (c ClimateConfig) IsEnabled() bool {
 
 // MeterConfig configures the Glow/SMETS2 smart meter adapter.
 type MeterConfig struct {
-	Enabled   *bool  `yaml:"enabled"`
-	BaseTopic string `yaml:"base_topic"`
+	Enabled   *bool  `yaml:"enabled"    json:"enabled,omitempty"`
+	BaseTopic string `yaml:"base_topic" json:"base_topic,omitempty"`
 }
 
 func (m MeterConfig) IsEnabled() bool {
@@ -128,8 +143,8 @@ func (m MeterConfig) IsEnabled() bool {
 // IntercomConfig configures the Intercom (Asterisk-via-MQTT) adapter.
 // BaseTopic defaults to "asterisk".
 type IntercomConfig struct {
-	Enabled   *bool  `yaml:"enabled"`
-	BaseTopic string `yaml:"base_topic"`
+	Enabled   *bool  `yaml:"enabled"    json:"enabled,omitempty"`
+	BaseTopic string `yaml:"base_topic" json:"base_topic,omitempty"`
 }
 
 func (i IntercomConfig) IsEnabled() bool {
@@ -159,31 +174,31 @@ type InfluxConfig struct {
 }
 
 type EnergyConfig struct {
-	DivergenceWarningPct float64       `yaml:"divergence_warning_pct"`
-	MaxIntegrationGap    time.Duration `yaml:"max_integration_gap"`
+	DivergenceWarningPct float64       `yaml:"divergence_warning_pct"  json:"divergence_warning_pct"`
+	MaxIntegrationGap    time.Duration `yaml:"max_integration_gap"     json:"-"`
 }
 
 type AvailabilityConfig struct {
-	OfflineDebounce time.Duration `yaml:"offline_debounce"`
+	OfflineDebounce time.Duration `yaml:"offline_debounce" json:"-"`
 }
 
 type HouseConfig struct {
 	// QuietAfter marks the house as quiet when no activity has occurred
 	// for this long.
-	QuietAfter time.Duration `yaml:"quiet_after"`
+	QuietAfter time.Duration `yaml:"quiet_after"    json:"-"`
 	// EmptyAfter marks the house as empty if quiet for this long and no
 	// signals of presence have been seen.
-	EmptyAfter time.Duration `yaml:"empty_after"`
+	EmptyAfter time.Duration `yaml:"empty_after"    json:"-"`
 	// SleepingAfter is the sustained quiet duration beyond which the house
 	// mode transitions to sleeping (when occupied).
-	SleepingAfter time.Duration `yaml:"sleeping_after"`
+	SleepingAfter time.Duration `yaml:"sleeping_after" json:"-"`
 	// Timezone names a tz database location (e.g. "Europe/London") used to
 	// classify the mode dimension's night/day hour window. Empty means UTC
 	// (back-compat for existing configs); "Local" uses the host time zone.
 	// Load() rejects values that time.LoadLocation cannot resolve (typo,
 	// missing tzdata) with a clear error — operators see the diagnostic at
 	// startup rather than discovering it via mis-bucketed mode readings.
-	Timezone string `yaml:"timezone"`
+	Timezone string `yaml:"timezone" json:"timezone,omitempty"`
 }
 
 // Location returns the time.Location implied by Timezone. Falls back to
@@ -205,23 +220,23 @@ func (h HouseConfig) Location() *time.Location {
 // All fields are pointers so that an explicitly-set zero value is
 // honoured and not silently overridden by the class default.
 type Thresholds struct {
-	IdleBelowW           *float64       `yaml:"idle_below_w"`
-	ActiveAboveW         *float64       `yaml:"active_above_w"`
-	ActiveSustainedFor   *time.Duration `yaml:"active_sustained_for"`
-	InactiveSustainedFor *time.Duration `yaml:"inactive_sustained_for"`
+	IdleBelowW           *float64       `yaml:"idle_below_w"            json:"-"`
+	ActiveAboveW         *float64       `yaml:"active_above_w"          json:"-"`
+	ActiveSustainedFor   *time.Duration `yaml:"active_sustained_for"    json:"-"`
+	InactiveSustainedFor *time.Duration `yaml:"inactive_sustained_for"  json:"-"`
 	// CompressorAboveW is used by continuous_power_device. When set, an
 	// active cycle begins when power exceeds this value.
-	CompressorAboveW *float64 `yaml:"compressor_above_w"`
+	CompressorAboveW *float64 `yaml:"compressor_above_w" json:"-"`
 }
 
 // DeviceClassConfig describes one device class profile.
 type DeviceClassConfig struct {
-	NameHints         []string   `yaml:"name_hints"`
-	DefaultThresholds Thresholds `yaml:"default_thresholds"`
-	EnergyStrategy    string     `yaml:"energy_strategy"`
+	NameHints         []string   `yaml:"name_hints"          json:"name_hints,omitempty"`
+	DefaultThresholds Thresholds `yaml:"default_thresholds"  json:"default_thresholds,omitempty"`
+	EnergyStrategy    string     `yaml:"energy_strategy"     json:"energy_strategy,omitempty"`
 	// StalenessSeconds overrides the default class staleness threshold used
 	// by the API DTO layer. When nil the class default is used.
-	StalenessSeconds *int `yaml:"staleness_seconds"`
+	StalenessSeconds *int `yaml:"staleness_seconds" json:"staleness_seconds,omitempty"`
 }
 
 // DeviceConfig overrides classification for a specific known device.
@@ -232,19 +247,19 @@ type DeviceConfig struct {
 	// Canonical identity fields. Scheme names the adapter that owns
 	// the device ("zigbee", "tasmota", "shelly", ...). Primary is the
 	// adapter's stable identifier. Display is the human-readable name.
-	Scheme  string `yaml:"scheme"`
-	Primary string `yaml:"primary"`
-	Display string `yaml:"display"`
+	Scheme  string `yaml:"scheme"   json:"scheme,omitempty"`
+	Primary string `yaml:"primary"  json:"primary,omitempty"`
+	Display string `yaml:"display"  json:"display,omitempty"`
 
 	// Legacy Z2M shorthand. Load() converts these to scheme=zigbee +
 	// primary=ieee_address / display=friendly_name.
-	IEEEAddress  string `yaml:"ieee_address"`
-	FriendlyName string `yaml:"friendly_name"`
+	IEEEAddress  string `yaml:"ieee_address"   json:"ieee_address,omitempty"`
+	FriendlyName string `yaml:"friendly_name"  json:"friendly_name,omitempty"`
 
-	Class       string      `yaml:"class"`
-	DisplayName string      `yaml:"display_name"`
-	Location    string      `yaml:"location"`
-	Thresholds  *Thresholds `yaml:"thresholds"`
+	Class       string      `yaml:"class"            json:"class,omitempty"`
+	DisplayName string      `yaml:"display_name"     json:"display_name,omitempty"`
+	Location    string      `yaml:"location"         json:"location,omitempty"`
+	Thresholds  *Thresholds `yaml:"thresholds"       json:"thresholds,omitempty"`
 
 	// EnergyStrategy overrides the class-level energy_strategy for this
 	// specific device. Use "integration" when the device's counter ticks
@@ -253,7 +268,7 @@ type DeviceConfig struct {
 	// whose cycles complete in 20–30 Wh). Without this override such
 	// devices raise a stale_counter warning every cycle because the
 	// counter never ticks. See config.example.yaml for diagnosis steps.
-	EnergyStrategy string `yaml:"energy_strategy"`
+	EnergyStrategy string `yaml:"energy_strategy" json:"energy_strategy,omitempty"`
 }
 
 // Default returns a config populated with safe defaults; YAML values
@@ -333,7 +348,15 @@ func Load(path string) (Config, error) {
 		cfg.Adapters.Intercom.BaseTopic = "asterisk"
 	}
 	// Normalise legacy Z2M shorthand on device entries.
-	for id, d := range cfg.Devices {
+	normaliseDevices(cfg.Devices)
+	return cfg, nil
+}
+
+// normaliseDevices converts legacy ieee_address/friendly_name shorthands
+// into the canonical scheme/primary/display fields. Called by both Load
+// (for local YAML) and the remote config fetcher.
+func normaliseDevices(devices map[string]DeviceConfig) {
+	for id, d := range devices {
 		if d.Scheme == "" && (d.IEEEAddress != "" || d.FriendlyName != "") {
 			d.Scheme = "zigbee"
 		}
@@ -343,9 +366,8 @@ func Load(path string) (Config, error) {
 		if d.Display == "" && d.FriendlyName != "" {
 			d.Display = d.FriendlyName
 		}
-		cfg.Devices[id] = d
+		devices[id] = d
 	}
-	return cfg, nil
 }
 
 func trimTrailingNewline(b []byte) []byte {
