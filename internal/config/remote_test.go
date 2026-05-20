@@ -52,9 +52,9 @@ func TestFetcher_ApplyClasses(t *testing.T) {
 		"media_power_device": map[string]any{
 			"name_hints": []string{"tv", "av"},
 			"default_thresholds": map[string]any{
-				"idle_below_w":          10,
-				"active_above_w":        30,
-				"active_sustained_for":  "5s",
+				"idle_below_w":           10,
+				"active_above_w":         30,
+				"active_sustained_for":   "5s",
 				"inactive_sustained_for": "2m",
 			},
 			"energy_strategy": "integration",
@@ -159,7 +159,7 @@ func TestFetcher_ApplyBehaviour(t *testing.T) {
 	serveNamespace(mux, "statehouse_behaviour", map[string]any{
 		"energy": map[string]any{
 			"divergence_warning_pct": 15,
-			"max_integration_gap":   "45m",
+			"max_integration_gap":    "45m",
 		},
 		"availability": map[string]any{
 			"offline_debounce": "60s",
