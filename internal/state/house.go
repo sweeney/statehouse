@@ -213,10 +213,10 @@ func DeriveHouseState(now time.Time, cfg config.HouseConfig, devices map[string]
 		}
 		mode = model.ModeDimension{State: model.ModeDay, Confidence: conf}
 
-	case occ.State == model.OccupancyOccupied &&
+	case (occ.State == model.OccupancyOccupied || occ.State == model.OccupancyUnknown) &&
 		act.State == model.HouseActivityIdle &&
 		(cfg.SleepingAfter == 0 || quietDuration < cfg.SleepingAfter):
-		// Occupied and idle, not long enough for sleeping → time-based.
+		// Occupied (or uncertain) and idle, not long enough for sleeping → time-based.
 		if nightHour {
 			mode = model.ModeDimension{State: model.ModeNight, Confidence: 0.65}
 		} else {

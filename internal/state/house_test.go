@@ -555,6 +555,54 @@ func TestDeriveHouseState_LastSignalAtExpires(t *testing.T) {
 	}
 }
 
+// TestDeriveHouseState_ModeNotUnknown_WhenOccupancyUnknownAndIdle verifies
+// that a house with unknown occupancy and idle activity produces a time-based
+// mode (day or night) rather than mode=unknown. This is the "quiet limbo"
+// zone: last activity is beyond QuietAfter but not yet beyond SleepingAfter,
+// so occupancy is uncertain but mode should still be meaningful.
+func TestDeriveHouseState_ModeNotUnknown_WhenOccupancyUnknownAndIdle(t *testing.T) {
+	cfg := defaultCfg() // QuietAfter=30m, EmptyAfter=2h, SleepingAfter=2h
+	// last activity 1 hour ago: beyond QuietAfter(30m) → occ=unknown,
+	// but not beyond SleepingAfter(2h) → sleeping case won't fire.
+	lastActive := func(now time.Time) time.Time { return now.Add(-1 * time.Hour) }
+	makeIdleDevice := func(now time.Time) map[string]model.Device {
+		return map[string]model.Device{
+			"kettle": {
+				ID:    "kettle",
+				Class: device.ClassShortBurst,
+				Activity: model.Activity{
+					State:       model.ActivityIdle,
+					LastChanged: lastActive(now),
+					Confidence:  0.9,
+				},
+				Latest: model.Latest{LastSeen: lastActive(now)},
+			},
+		}
+	}
+
+	t.Run("daytime", func(t *testing.T) {
+		now := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC) // 10:00 UTC
+		h := DeriveHouseState(now, cfg, makeIdleDevice(now), nil, time.Time{})
+		if h.Occupancy.State != model.OccupancyUnknown {
+			t.Fatalf("pre-condition: expected OccupancyUnknown, got %q", h.Occupancy.State)
+		}
+		if h.Mode.State != model.ModeDay {
+			t.Errorf("expected ModeDay during daytime with unknown occupancy and idle activity, got %q", h.Mode.State)
+		}
+	})
+
+	t.Run("nighttime", func(t *testing.T) {
+		now := time.Date(2026, 5, 22, 23, 0, 0, 0, time.UTC) // 23:00 UTC
+		h := DeriveHouseState(now, cfg, makeIdleDevice(now), nil, time.Time{})
+		if h.Occupancy.State != model.OccupancyUnknown {
+			t.Fatalf("pre-condition: expected OccupancyUnknown, got %q", h.Occupancy.State)
+		}
+		if h.Mode.State != model.ModeNight {
+			t.Errorf("expected ModeNight during nighttime with unknown occupancy and idle activity, got %q", h.Mode.State)
+		}
+	})
+}
+
 func TestDeriveHouseState_ActiveDevicesEmptyWhenIdle(t *testing.T) {
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	cfg := defaultCfg()
