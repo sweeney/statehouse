@@ -111,6 +111,8 @@ func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic str
 			if rt == nil || rt.Profile.Class != prof.Class {
 				rt = device.NewRuntime(prof, e.cfg.Energy.MaxIntegrationGap)
 				ent.Runtime = rt
+			} else {
+				rt.Profile = prof
 			}
 			prevDisplay = ent.Device.Identity.Display
 			// A "phantom" record is one where Primary == Display — the

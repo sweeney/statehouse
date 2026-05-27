@@ -538,3 +538,79 @@ func TestEngine_ContinuousDevice_NoDivergenceForIntegrationPrimary(t *testing.T)
 		t.Fatal("must NOT emit stale_counter_warning for integration-strategy device")
 	}
 }
+
+// TestEngine_DeviceStrategyOverrideAppliedAfterPhantomUpgrade verifies that
+// when a device is first discovered by display name (triggering name-hint
+// classification with the class-level energy strategy) and later upgraded to
+// a full IEEE identity whose device config carries a different energy_strategy,
+// the runtime profile is updated so that the per-device override wins.
+//
+// Regression for the kitchenkettle stale_counter false-positive: the class
+// config had energy_strategy=counter but the device config overrode it to
+// integration. The name-hint path set counter on the runtime profile; the
+// phantom→real upgrade left the profile stale because only a class change
+// triggered a runtime rebuild.
+func TestEngine_DeviceStrategyOverrideAppliedAfterPhantomUpgrade(t *testing.T) {
+	cfg := config.Default()
+	cfg.Energy.MaxIntegrationGap = 30 * time.Minute
+	cfg.Energy.DivergenceWarningPct = 20
+	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
+		"short_burst_power_device": {
+			NameHints: []string{"kettle"},
+			DefaultThresholds: config.Thresholds{
+				IdleBelowW:           ptr(5.0),
+				ActiveAboveW:         ptr(50.0),
+				ActiveSustainedFor:   ptr(time.Duration(0)),
+				InactiveSustainedFor: ptr(1 * time.Second),
+			},
+			EnergyStrategy: "counter", // class default is counter
+		},
+	}
+	cfg.Devices = map[string]config.DeviceConfig{
+		"the_kettle": {
+			Scheme:         "zigbee",
+			Primary:        "0xaabbccddeeff0011",
+			Class:          "short_burst_power_device",
+			EnergyStrategy: "integration", // per-device override wins
+		},
+	}
+
+	store := NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC))
+	engine := NewEngine(cfg, store, clock)
+	col := &collector{}
+	engine.AddDerivedSink(col)
+
+	// Phase 1: display-only discovery (Z2M friendly name seen before bridge/devices).
+	// Resolver cannot find the device config (no primary, no matching display key)
+	// so falls through to name hints → class=short_burst_power_device, strategy=counter.
+	phantomID := model.DeviceIdentity{Scheme: "zigbee", Display: "kettle"}
+	engine.EnsureDiscovered(phantomID, "zigbee2mqtt/kettle")
+
+	// Phase 2: full identity arrives (IEEE address now known).
+	// Device config carries energy_strategy=integration — must replace the counter
+	// strategy that was set in phase 1.
+	fullID := model.DeviceIdentity{Scheme: "zigbee", Primary: "0xaabbccddeeff0011", Display: "kettle"}
+	engine.EnsureDiscovered(fullID, "zigbee2mqtt/kettle")
+
+	// Phase 3: run a cycle. Counter does not tick (ReportedKWhDelta = 0).
+	// Integration accumulates well above the stale-counter threshold (1 Wh).
+	// If the runtime still has strategy=counter a stale_counter_warning fires.
+	t0 := clock.Now()
+	engine.IngestReading(fullID, "zigbee2mqtt/kettle",
+		model.Reading{Timestamp: t0, PowerW: ptr(2000.0), EnergyKWh: ptr(10.0)})
+	engine.IngestReading(fullID, "zigbee2mqtt/kettle",
+		model.Reading{Timestamp: t0.Add(30 * time.Second), PowerW: ptr(2000.0), EnergyKWh: ptr(10.0)})
+	// Power drops; cycle ends after InactiveSustainedFor (1s).
+	engine.IngestReading(fullID, "zigbee2mqtt/kettle",
+		model.Reading{Timestamp: t0.Add(31 * time.Second), PowerW: ptr(0.0), EnergyKWh: ptr(10.0)})
+	engine.IngestReading(fullID, "zigbee2mqtt/kettle",
+		model.Reading{Timestamp: t0.Add(33 * time.Second), PowerW: ptr(0.0), EnergyKWh: ptr(10.0)})
+
+	if _, ok := col.findDerived(model.EvtShortBurstDetected); !ok {
+		t.Fatalf("expected short_burst_detected, got derived=%v", col.derived)
+	}
+	if _, ok := col.findDerived(model.EvtEnergyStaleCounterWarning); ok {
+		t.Error("stale_counter_warning must NOT fire when per-device energy_strategy=integration overrides class default of counter")
+	}
+}
