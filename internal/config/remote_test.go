@@ -13,12 +13,12 @@ import (
 // staticTokenSource satisfies TokenSource for tests.
 type staticTokenSource struct{ token string }
 
-func (s *staticTokenSource) Token() (string, error) { return s.token, nil }
+func (s *staticTokenSource) Token(_ context.Context) (string, error) { return s.token, nil }
 
 // errorTokenSource always returns an error.
 type errorTokenSource struct{}
 
-func (e *errorTokenSource) Token() (string, error) {
+func (e *errorTokenSource) Token(_ context.Context) (string, error) {
 	return "", fmt.Errorf("token unavailable")
 }
 

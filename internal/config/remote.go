@@ -7,13 +7,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
 // TokenSource is satisfied by identity.TokenSource.
 type TokenSource interface {
-	Token() (string, error)
+	Token(ctx context.Context) (string, error)
 }
 
 // NamespaceStatus records the outcome of the most recent fetch attempt for
@@ -37,6 +38,12 @@ type Fetcher struct {
 	mu       sync.RWMutex
 	statuses map[string]NamespaceStatus
 }
+
+// defaultFetchClient is used when Fetcher.HTTPClient is nil.
+var defaultFetchClient = &http.Client{Timeout: 10 * time.Second}
+
+// maxConfigBytes is the maximum response body size accepted from the config service.
+const maxConfigBytes = 1 << 20 // 1 MiB
 
 // Statuses returns a snapshot of the last fetch result for each namespace.
 func (f *Fetcher) Statuses() map[string]NamespaceStatus {
@@ -63,7 +70,10 @@ type behaviourDoc struct {
 // cfg. Remote values win over local on overlap. Each namespace is fetched
 // independently; a failure on one does not prevent the others from applying.
 func (f *Fetcher) ApplyRemote(ctx context.Context, cfg *Config) {
-	token, err := f.Tokens.Token()
+	if !strings.HasPrefix(f.BaseURL, "https://") {
+		f.warn("remote config: base_url is not https — bearer token will be transmitted in cleartext", "url", f.BaseURL)
+	}
+	token, err := f.Tokens.Token(ctx)
 	if err != nil {
 		f.warn("remote config: identity token fetch failed, using local config only", "error", err)
 		return
@@ -144,7 +154,7 @@ func (f *Fetcher) recordStatus(ns string, err error) {
 func (f *Fetcher) fetch(ctx context.Context, token, ns string, dst any) error {
 	client := f.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultFetchClient
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		f.BaseURL+"/api/v1/config/"+ns, nil)
@@ -160,12 +170,16 @@ func (f *Fetcher) fetch(ctx context.Context, token, ns string, dst any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxConfigBytes+1))
 	if err != nil {
 		return fmt.Errorf("read body: %w", err)
+	}
+	if int64(len(body)) > maxConfigBytes {
+		return fmt.Errorf("config response exceeds %d bytes", maxConfigBytes)
 	}
 	if err := json.Unmarshal(body, dst); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)

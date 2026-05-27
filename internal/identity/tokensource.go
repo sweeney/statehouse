@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,9 +12,8 @@ import (
 )
 
 // TokenSource fetches and caches a client_credentials access token from the
-// identity service. Token() is safe for concurrent use; only one in-flight
-// fetch runs at a time. The cached token is refreshed automatically when it
-// is within expiryBuffer of expiry.
+// identity service. Token() is safe for concurrent use. The cached token is
+// refreshed automatically when it is within expiryBuffer of expiry.
 type TokenSource struct {
 	BaseURL      string
 	ClientID     string
@@ -28,24 +28,42 @@ type TokenSource struct {
 // expiryBuffer is how early we proactively refresh before the token expires.
 const expiryBuffer = 30 * time.Second
 
+// defaultHTTPClient is used when TokenSource.HTTPClient is nil.
+var defaultHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
 // Token returns a valid Bearer token, fetching a new one if the cache is
-// empty or within expiryBuffer of expiry.
-func (ts *TokenSource) Token() (string, error) {
+// empty or within expiryBuffer of expiry. The mutex is released before any
+// network I/O so callers with a valid cached token are never blocked by an
+// in-flight fetch.
+func (ts *TokenSource) Token(ctx context.Context) (string, error) {
 	ts.mu.Lock()
-	defer ts.mu.Unlock()
-
 	if ts.cachedToken != "" && time.Now().Add(expiryBuffer).Before(ts.expiresAt) {
-		return ts.cachedToken, nil
+		tok := ts.cachedToken
+		ts.mu.Unlock()
+		return tok, nil
 	}
+	ts.mu.Unlock()
 
-	tok, expiresIn, err := ts.fetch()
+	tok, expiresIn, err := ts.fetch(ctx)
 	if err != nil {
 		return "", err
 	}
 
+	ts.mu.Lock()
 	ts.cachedToken = tok
 	ts.expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
-	return ts.cachedToken, nil
+	ts.mu.Unlock()
+
+	return tok, nil
+}
+
+// Invalidate clears the cached token, forcing the next Token() call to fetch
+// a new one. Call this when a downstream caller receives a 401.
+func (ts *TokenSource) Invalidate() {
+	ts.mu.Lock()
+	ts.cachedToken = ""
+	ts.expiresAt = time.Time{}
+	ts.mu.Unlock()
 }
 
 type tokenResponse struct {
@@ -59,10 +77,10 @@ type oauthError struct {
 	ErrorDescription string `json:"error_description"`
 }
 
-func (ts *TokenSource) fetch() (token string, expiresIn int, err error) {
+func (ts *TokenSource) fetch(ctx context.Context) (token string, expiresIn int, err error) {
 	client := ts.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultHTTPClient
 	}
 
 	body := url.Values{
@@ -71,7 +89,7 @@ func (ts *TokenSource) fetch() (token string, expiresIn int, err error) {
 		"client_secret": {ts.ClientSecret},
 	}
 
-	req, err := http.NewRequest(http.MethodPost, ts.BaseURL+"/oauth/token", strings.NewReader(body.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.BaseURL+"/oauth/token", strings.NewReader(body.Encode()))
 	if err != nil {
 		return "", 0, fmt.Errorf("identity: build request: %w", err)
 	}

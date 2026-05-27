@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -47,7 +48,7 @@ func TestTokenSource_FetchesToken(t *testing.T) {
 		})
 	})
 
-	tok, err := ts.Token()
+	tok, err := ts.Token(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestTokenSource_CachesToken(t *testing.T) {
 	})
 
 	for i := 0; i < 5; i++ {
-		if _, err := ts.Token(); err != nil {
+		if _, err := ts.Token(context.Background()); err != nil {
 			t.Fatalf("call %d: %v", i, err)
 		}
 	}
@@ -89,14 +90,14 @@ func TestTokenSource_RefreshesNearExpiry(t *testing.T) {
 	})
 
 	// Prime the cache then wind the expiry back into the buffer window.
-	if _, err := ts.Token(); err != nil {
+	if _, err := ts.Token(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	ts.mu.Lock()
 	ts.expiresAt = time.Now().Add(expiryBuffer - time.Second)
 	ts.mu.Unlock()
 
-	if _, err := ts.Token(); err != nil {
+	if _, err := ts.Token(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if n := calls.Load(); n != 2 {
@@ -113,7 +114,7 @@ func TestTokenSource_ErrorPropagated(t *testing.T) {
 		})
 	})
 
-	_, err := ts.Token()
+	_, err := ts.Token(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -122,11 +123,10 @@ func TestTokenSource_ErrorPropagated(t *testing.T) {
 	}
 }
 
-func TestTokenSource_ConcurrentCallsSingleFetch(t *testing.T) {
-	var calls atomic.Int32
-	// Add a small delay so concurrent goroutines overlap.
+func TestTokenSource_ConcurrentCallsSucceed(t *testing.T) {
+	// With the unlock-before-fetch design, multiple goroutines may race to
+	// fetch concurrently when the cache is empty. All calls must succeed.
 	_, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
 		time.Sleep(10 * time.Millisecond)
 		json.NewEncoder(w).Encode(tokenResponse{
 			AccessToken: "token",
@@ -140,17 +140,12 @@ func TestTokenSource_ConcurrentCallsSingleFetch(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := ts.Token(); err != nil {
+			if _, err := ts.Token(context.Background()); err != nil {
 				t.Errorf("concurrent call failed: %v", err)
 			}
 		}()
 	}
 	wg.Wait()
-
-	// The mutex serialises fetches, so only 1 should hit the server.
-	if n := calls.Load(); n != 1 {
-		t.Fatalf("expected 1 fetch under concurrency, got %d", n)
-	}
 }
 
 func TestTokenSource_NetworkError(t *testing.T) {
@@ -159,7 +154,7 @@ func TestTokenSource_NetworkError(t *testing.T) {
 		ClientID:     "statehouse",
 		ClientSecret: "secret",
 	}
-	_, err := ts.Token()
+	_, err := ts.Token(context.Background())
 	if err == nil {
 		t.Fatal("expected error for unreachable server, got nil")
 	}
@@ -173,7 +168,7 @@ func TestTokenSource_NonJSONErrorBody(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte("service unavailable"))
 	})
-	_, err := ts.Token()
+	_, err := ts.Token(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -190,7 +185,7 @@ func TestTokenSource_EmptyAccessToken(t *testing.T) {
 			TokenType:   "Bearer",
 		})
 	})
-	_, err := ts.Token()
+	_, err := ts.Token(context.Background())
 	if err == nil {
 		t.Fatal("expected error for empty access_token, got nil")
 	}
@@ -208,12 +203,35 @@ func TestTokenSource_ZeroExpiresInIsError(t *testing.T) {
 		})
 	})
 
-	_, err := ts.Token()
+	_, err := ts.Token(context.Background())
 	if err == nil {
 		t.Fatal("expected error for expires_in=0, got nil")
 	}
 	if !containsStr(err.Error(), "invalid expires_in") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTokenSource_Invalidate(t *testing.T) {
+	var calls atomic.Int32
+	_, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		json.NewEncoder(w).Encode(tokenResponse{
+			AccessToken: "token",
+			ExpiresIn:   900,
+			TokenType:   "Bearer",
+		})
+	})
+
+	if _, err := ts.Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ts.Invalidate()
+	if _, err := ts.Token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("expected 2 fetches after Invalidate, got %d", n)
 	}
 }
 
