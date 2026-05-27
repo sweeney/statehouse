@@ -49,6 +49,17 @@ else
     exit 1
 fi
 
+if ssh "$REMOTE" "sudo journalctl -u $SERVICE -n 20 --no-pager" \
+        | grep -qE "invalid_client|identity token fetch failed"; then
+    echo ""
+    echo "  ✗ CREDENTIAL ERROR: identity auth failed on $REMOTE"
+    echo "    Update identity.client_secret in /etc/statehouse/config.yaml"
+    echo "    then: sudo systemctl restart $SERVICE"
+    echo ""
+    exit 1
+fi
+echo "  ✓ no credential errors"
+
 echo "=== Cleaning old versions (keeping $KEEP_VERSIONS) ==="
 ssh "$REMOTE" "\
   cd $DEPLOY_DIR && \
