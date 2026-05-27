@@ -227,6 +227,21 @@ func (s *Store) RecentActivity(limit int) []model.ActivityRecord {
 	return s.actLog.Recent(limit)
 }
 
+// Profiles returns the resolved Profile for every known device that has an
+// initialised runtime. Devices without a runtime (should not occur in normal
+// operation) are omitted.
+func (s *Store) Profiles() map[string]device.Profile {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]device.Profile, len(s.dev))
+	for id, e := range s.dev {
+		if e.Runtime != nil {
+			out[id] = e.Runtime.Profile
+		}
+	}
+	return out
+}
+
 // withEntry is a helper that runs fn while holding the write lock.
 func (s *Store) withEntry(id string, fn func(*deviceEntry)) bool {
 	s.mu.Lock()

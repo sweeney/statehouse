@@ -94,6 +94,8 @@ func newMux(s *Server) *http.ServeMux {
 	mux.HandleFunc("/state/activity", s.handleActivity)
 	mux.HandleFunc("/events/recent", s.handleRecent)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/config/devices", s.handleConfigDevices)
+	mux.HandleFunc("/config/devices/", s.handleConfigDevice)
 	return mux
 }
 
@@ -250,6 +252,30 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		m.PublisherDropped = s.Publisher.Dropped()
 	}
 	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) handleConfigDevices(w http.ResponseWriter, _ *http.Request) {
+	profiles := s.Store.Profiles()
+	out := make(map[string]DeviceProfileResponse, len(profiles))
+	for id, p := range profiles {
+		out[id] = buildDeviceProfileResponse(p)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleConfigDevice(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Path[len("/config/devices/"):]
+	if id == "" {
+		s.handleConfigDevices(w, r)
+		return
+	}
+	profiles := s.Store.Profiles()
+	p, ok := profiles[id]
+	if !ok {
+		http.Error(w, "device not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, buildDeviceProfileResponse(p))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

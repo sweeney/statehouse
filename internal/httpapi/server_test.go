@@ -713,3 +713,227 @@ func TestIdentity_AbsentInSnapshot(t *testing.T) {
 		t.Error("identity key must not appear anywhere in /state JSON")
 	}
 }
+
+func TestHandleConfigDevices_EmptyStore(t *testing.T) {
+	srv, _ := setup(t)
+	mux := newMux(srv)
+	r := httptest.NewRequest(http.MethodGet, "/config/devices", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var out map[string]DeviceProfileResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("expected empty map, got %d entries", len(out))
+	}
+}
+
+func TestHandleConfigDevices_ResolutionSources(t *testing.T) {
+	cfg := config.Default()
+	cfg.Energy.MaxIntegrationGap = 30 * time.Minute
+	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
+		"short_burst_power_device": {
+			NameHints:      []string{"kettle"},
+			EnergyStrategy: "counter",
+			DefaultThresholds: config.Thresholds{
+				IdleBelowW:   testutil.PtrF64(5),
+				ActiveAboveW: testutil.PtrF64(50),
+			},
+		},
+	}
+	cfg.Devices = map[string]config.DeviceConfig{
+		"the_kettle": {
+			Scheme:         "zigbee",
+			Primary:        "0xaabbccddeeff0011",
+			Class:          "short_burst_power_device",
+			EnergyStrategy: "integration",
+		},
+	}
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	srv := New(":0", store, nil, nil, nil, nil, cfg.DeviceClasses)
+
+	mux := newMux(srv)
+
+	// device_config: matched by primary key in cfg.Devices.
+	engine.EnsureDiscovered(
+		model.DeviceIdentity{Scheme: "zigbee", Primary: "0xaabbccddeeff0011", Display: "kettle"},
+		"zigbee2mqtt/kettle",
+	)
+	// name_hint: no device config entry, display name triggers name hint.
+	engine.EnsureDiscovered(
+		model.DeviceIdentity{Scheme: "zigbee", Primary: "0xdeadbeef", Display: "another_kettle"},
+		"zigbee2mqtt/another_kettle",
+	)
+	// unclassified: no match at all.
+	engine.EnsureDiscovered(
+		model.DeviceIdentity{Scheme: "zigbee", Primary: "0x1234", Display: "mystery_box"},
+		"zigbee2mqtt/mystery_box",
+	)
+
+	r := httptest.NewRequest(http.MethodGet, "/config/devices", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var out map[string]DeviceProfileResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("expected 3 entries, got %d: %v", len(out), out)
+	}
+
+	kettle := out["the_kettle"]
+	if kettle.Resolution != "device_config" {
+		t.Errorf("the_kettle: want resolution=device_config, got %q", kettle.Resolution)
+	}
+	if kettle.Class != "short_burst_power_device" {
+		t.Errorf("the_kettle: want class=short_burst_power_device, got %q", kettle.Class)
+	}
+	if kettle.EnergyStrategy != "integration" {
+		t.Errorf("the_kettle: want energy_strategy=integration (per-device override), got %q", kettle.EnergyStrategy)
+	}
+	if kettle.Thresholds == nil {
+		t.Error("the_kettle: thresholds must be present (inherited from class config)")
+	}
+
+	// name_hint: find by display name since we don't have a stable ID.
+	var hintDevice DeviceProfileResponse
+	for id, d := range out {
+		if id != "the_kettle" && d.Class == "short_burst_power_device" {
+			hintDevice = d
+			break
+		}
+	}
+	if hintDevice.Resolution != "name_hint" {
+		t.Errorf("another_kettle: want resolution=name_hint, got %q", hintDevice.Resolution)
+	}
+	if hintDevice.EnergyStrategy != "counter" {
+		t.Errorf("another_kettle: want energy_strategy=counter (class default), got %q", hintDevice.EnergyStrategy)
+	}
+
+	// unclassified.
+	var unclassified DeviceProfileResponse
+	for _, d := range out {
+		if d.Resolution == "unclassified" {
+			unclassified = d
+			break
+		}
+	}
+	if unclassified.Class != "unclassified" {
+		t.Errorf("mystery_box: want class=unclassified, got %q", unclassified.Class)
+	}
+	if unclassified.Thresholds != nil {
+		t.Error("unclassified device must not have thresholds")
+	}
+}
+
+func TestHandleConfigDevice_SingleLookup(t *testing.T) {
+	srv, engine := setup(t)
+	mux := newMux(srv)
+	engine.EnsureDiscovered(
+		model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc", Display: "kettle"},
+		"zigbee2mqtt/kettle",
+	)
+
+	// Known device — 200.
+	r := httptest.NewRequest(http.MethodGet, "/config/devices/kettle", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var p DeviceProfileResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if p.Class != "short_burst_power_device" {
+		t.Errorf("want class=short_burst_power_device, got %q", p.Class)
+	}
+
+	// Unknown device — 404.
+	r = httptest.NewRequest(http.MethodGet, "/config/devices/no_such_device", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown device, got %d", w.Code)
+	}
+}
+
+func TestHandleConfigDevices_Thresholds(t *testing.T) {
+	cfg := config.Default()
+	cfg.Energy.MaxIntegrationGap = 30 * time.Minute
+	inactiveDur := 2 * time.Second
+	activeDur := 500 * time.Millisecond
+	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
+		"short_burst_power_device": {
+			NameHints:      []string{"kettle"},
+			EnergyStrategy: "counter",
+			DefaultThresholds: config.Thresholds{
+				IdleBelowW:           testutil.PtrF64(5),
+				ActiveAboveW:         testutil.PtrF64(50),
+				ActiveSustainedFor:   &activeDur,
+				InactiveSustainedFor: &inactiveDur,
+			},
+		},
+	}
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	srv := New(":0", store, nil, nil, nil, nil, cfg.DeviceClasses)
+	mux := newMux(srv)
+
+	engine.EnsureDiscovered(
+		model.DeviceIdentity{Scheme: "zigbee", Primary: "0xabc", Display: "kettle"},
+		"zigbee2mqtt/kettle",
+	)
+
+	r := httptest.NewRequest(http.MethodGet, "/config/devices", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	var out map[string]DeviceProfileResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var p DeviceProfileResponse
+	for _, v := range out {
+		p = v
+		break
+	}
+	if p.Thresholds == nil {
+		t.Fatal("expected thresholds to be present")
+	}
+	if p.Thresholds.IdleBelowW == nil || *p.Thresholds.IdleBelowW != 5 {
+		t.Errorf("want idle_below_w=5, got %v", p.Thresholds.IdleBelowW)
+	}
+	if p.Thresholds.ActiveAboveW == nil || *p.Thresholds.ActiveAboveW != 50 {
+		t.Errorf("want active_above_w=50, got %v", p.Thresholds.ActiveAboveW)
+	}
+	if p.Thresholds.ActiveSustainedSec == nil || *p.Thresholds.ActiveSustainedSec != 0.5 {
+		t.Errorf("want active_sustained_for_sec=0.5, got %v", p.Thresholds.ActiveSustainedSec)
+	}
+	if p.Thresholds.InactiveSustainedSec == nil || *p.Thresholds.InactiveSustainedSec != 2.0 {
+		t.Errorf("want inactive_sustained_for_sec=2.0, got %v", p.Thresholds.InactiveSustainedSec)
+	}
+}
+
+func TestHandleConfigDevices_ContentType(t *testing.T) {
+	srv, _ := setup(t)
+	mux := newMux(srv)
+	r := httptest.NewRequest(http.MethodGet, "/config/devices", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	ct := w.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+}

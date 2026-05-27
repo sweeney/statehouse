@@ -48,6 +48,15 @@ func IsPassiveSensor(class string) bool {
 	return class == ClassEnvironmentalSensor || class == ClassUPSSensor || class == ClassEnergyMeter
 }
 
+// Resolution describes which config path classified this device.
+type Resolution string
+
+const (
+	ResolutionDeviceConfig Resolution = "device_config" // explicit entry in cfg.Devices
+	ResolutionNameHint     Resolution = "name_hint"     // display-name matched a class hint
+	ResolutionUnclassified Resolution = "unclassified"  // no match found
+)
+
 // Profile is the resolved per-device configuration used at runtime.
 type Profile struct {
 	ID           string
@@ -57,6 +66,7 @@ type Profile struct {
 	Thresholds   config.Thresholds
 	Strategy     energy.Strategy
 	Unclassified bool
+	Resolution   Resolution
 }
 
 // Resolver provides classification + threshold lookup for devices.
@@ -109,6 +119,7 @@ func (r *Resolver) Resolve(identity model.DeviceIdentity) Profile {
 		Class:        ClassUnclassified,
 		DisplayName:  identity.Display,
 		Unclassified: true,
+		Resolution:   ResolutionUnclassified,
 	}
 	// 1. Explicit override by scheme:primary.
 	if d, ok := r.byPrimary[primaryKey(identity)]; ok {
@@ -119,6 +130,7 @@ func (r *Resolver) Resolve(identity model.DeviceIdentity) Profile {
 		if p.DisplayName == "" {
 			p.DisplayName = identity.Display
 		}
+		p.Resolution = ResolutionDeviceConfig
 		return p
 	}
 	// 2. Override by scheme:display.
@@ -130,6 +142,7 @@ func (r *Resolver) Resolve(identity model.DeviceIdentity) Profile {
 		if p.DisplayName == "" {
 			p.DisplayName = identity.Display
 		}
+		p.Resolution = ResolutionDeviceConfig
 		return p
 	}
 	// 3. Name-hint classification against display name.
@@ -138,6 +151,7 @@ func (r *Resolver) Resolve(identity model.DeviceIdentity) Profile {
 		p.Unclassified = false
 		p.Thresholds = r.classes[class].DefaultThresholds
 		p.Strategy = strategyFor(r.classes[class].EnergyStrategy)
+		p.Resolution = ResolutionNameHint
 	}
 	return p
 }

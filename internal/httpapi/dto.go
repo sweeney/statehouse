@@ -3,6 +3,7 @@ package httpapi
 import (
 	"time"
 
+	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/device"
 	"github.com/sweeney/statehouse/internal/model"
 )
@@ -508,4 +509,60 @@ func buildCycleResponse(c *model.Cycle, class string) *CycleResponse {
 			Divergence:       div,
 		},
 	}
+}
+
+// DeviceProfileResponse is the resolved runtime config for one device.
+type DeviceProfileResponse struct {
+	Class          string              `json:"class"`
+	EnergyStrategy string              `json:"energy_strategy"`
+	Resolution     string              `json:"resolution"`
+	DisplayName    string              `json:"display_name,omitempty"`
+	Location       string              `json:"location,omitempty"`
+	Thresholds     *ThresholdsResponse `json:"thresholds,omitempty"`
+}
+
+// ThresholdsResponse is the effective activity-detection thresholds.
+// All fields are omitted when nil (not configured for this device/class).
+type ThresholdsResponse struct {
+	IdleBelowW           *float64 `json:"idle_below_w,omitempty"`
+	ActiveAboveW         *float64 `json:"active_above_w,omitempty"`
+	ActiveSustainedSec   *float64 `json:"active_sustained_for_sec,omitempty"`
+	InactiveSustainedSec *float64 `json:"inactive_sustained_for_sec,omitempty"`
+	CompressorAboveW     *float64 `json:"compressor_above_w,omitempty"`
+}
+
+func buildDeviceProfileResponse(p device.Profile) DeviceProfileResponse {
+	return DeviceProfileResponse{
+		Class:          p.Class,
+		EnergyStrategy: string(p.Strategy),
+		Resolution:     profileResolution(p),
+		DisplayName:    p.DisplayName,
+		Location:       p.Location,
+		Thresholds:     buildThresholdsResponse(p.Thresholds),
+	}
+}
+
+func profileResolution(p device.Profile) string {
+	return string(p.Resolution)
+}
+
+func buildThresholdsResponse(t config.Thresholds) *ThresholdsResponse {
+	r := &ThresholdsResponse{
+		IdleBelowW:       t.IdleBelowW,
+		ActiveAboveW:     t.ActiveAboveW,
+		CompressorAboveW: t.CompressorAboveW,
+	}
+	if t.ActiveSustainedFor != nil {
+		s := t.ActiveSustainedFor.Seconds()
+		r.ActiveSustainedSec = &s
+	}
+	if t.InactiveSustainedFor != nil {
+		s := t.InactiveSustainedFor.Seconds()
+		r.InactiveSustainedSec = &s
+	}
+	if r.IdleBelowW == nil && r.ActiveAboveW == nil && r.CompressorAboveW == nil &&
+		r.ActiveSustainedSec == nil && r.InactiveSustainedSec == nil {
+		return nil
+	}
+	return r
 }
