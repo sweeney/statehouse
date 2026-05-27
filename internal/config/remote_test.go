@@ -14,6 +14,7 @@ import (
 type staticTokenSource struct{ token string }
 
 func (s *staticTokenSource) Token(_ context.Context) (string, error) { return s.token, nil }
+func (s *staticTokenSource) Invalidate()                             {}
 
 // errorTokenSource always returns an error.
 type errorTokenSource struct{}
@@ -21,6 +22,16 @@ type errorTokenSource struct{}
 func (e *errorTokenSource) Token(_ context.Context) (string, error) {
 	return "", fmt.Errorf("token unavailable")
 }
+func (e *errorTokenSource) Invalidate() {}
+
+// trackingTokenSource records whether Invalidate was called.
+type trackingTokenSource struct {
+	token       string
+	invalidated bool
+}
+
+func (t *trackingTokenSource) Token(_ context.Context) (string, error) { return t.token, nil }
+func (t *trackingTokenSource) Invalidate()                             { t.invalidated = true }
 
 func newTestFetcher(t *testing.T, mux *http.ServeMux) *Fetcher {
 	t.Helper()
@@ -255,6 +266,28 @@ func TestFetcher_NamespaceUnavailablePreservesOtherSections(t *testing.T) {
 	// remote behaviour still applied
 	if cfg.Energy.DivergenceWarningPct != 30 {
 		t.Errorf("behaviour not applied: got %v, want 30", cfg.Energy.DivergenceWarningPct)
+	}
+}
+
+func TestFetcher_401CallsInvalidate(t *testing.T) {
+	mux := http.NewServeMux()
+	for _, ns := range []string{"statehouse_classes", "statehouse_devices", "statehouse_behaviour"} {
+		mux.HandleFunc("/api/v1/config/"+ns, func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		})
+	}
+	src := &trackingTokenSource{token: "stale-token"}
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	f := &Fetcher{
+		BaseURL:    srv.URL,
+		Tokens:     src,
+		HTTPClient: srv.Client(),
+	}
+	cfg := Default()
+	f.ApplyRemote(context.Background(), &cfg)
+	if !src.invalidated {
+		t.Error("expected Invalidate() to be called after 401 response, but it was not")
 	}
 }
 

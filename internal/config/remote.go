@@ -15,6 +15,10 @@ import (
 // TokenSource is satisfied by identity.TokenSource.
 type TokenSource interface {
 	Token(ctx context.Context) (string, error)
+	// Invalidate clears any cached token. Called by Fetcher when the config
+	// service responds with 401, so the next Token() call fetches a fresh one
+	// rather than replaying the rejected credential for its full TTL.
+	Invalidate()
 }
 
 // NamespaceStatus records the outcome of the most recent fetch attempt for
@@ -169,6 +173,11 @@ func (f *Fetcher) fetch(ctx context.Context, token, ns string, dst any) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		f.Tokens.Invalidate()
+		return fmt.Errorf("unauthorized: token may be stale, invalidated for next retry")
+	}
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, resp.Body) //nolint:errcheck
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
