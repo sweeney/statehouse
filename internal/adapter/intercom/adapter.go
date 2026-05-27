@@ -22,9 +22,11 @@ package intercom
 import (
 	"encoding/json"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/sweeney/statehouse/internal/adapter/timeutil"
 	"github.com/sweeney/statehouse/internal/model"
 )
 
@@ -37,6 +39,10 @@ const (
 	// rather than leaving a zombie.
 	CallTTL = 10 * time.Minute
 )
+
+// reCallID is an allow-list for call_id values extracted from MQTT topics.
+// It prevents unbounded signal creation from arbitrarily crafted topic names.
+var reCallID = regexp.MustCompile(`^[a-zA-Z0-9_./:-]{1,64}$`)
 
 // Engine is the subset of state.Engine the adapter needs. Defined as an
 // interface so tests can substitute a fake without a full engine.
@@ -115,6 +121,9 @@ func (a *Adapter) handleCallEvent(sourceTopic, suffix string, payload []byte) {
 	if callID == "" {
 		return
 	}
+	if !reCallID.MatchString(callID) {
+		return
+	}
 
 	var p callPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -124,7 +133,8 @@ func (a *Adapter) handleCallEvent(sourceTopic, suffix string, payload []byte) {
 		return
 	}
 
-	ts := parseTimestamp(p.Timestamp)
+	now := time.Now()
+	ts := timeutil.Sanitise(parseTimestamp(p.Timestamp), now)
 
 	switch strings.ToLower(p.Event) {
 	case "ringing":
@@ -140,7 +150,7 @@ func (a *Adapter) handleCallEvent(sourceTopic, suffix string, payload []byte) {
 			Type:       "call_ringing",
 			Confidence: 0.85,
 			Since:      ts,
-			ExpiresAt:  ts.Add(CallTTL),
+			ExpiresAt:  now.Add(CallTTL),
 			Meta:       meta,
 		})
 		a.engine.RecordActivity(model.ActivityRecord{
@@ -160,7 +170,7 @@ func (a *Adapter) handleCallEvent(sourceTopic, suffix string, payload []byte) {
 			Type:       "call_active",
 			Confidence: 0.95,
 			Since:      ts,
-			ExpiresAt:  ts.Add(CallTTL),
+			ExpiresAt:  now.Add(CallTTL),
 			Meta: map[string]any{
 				"from_extension": p.From.Extension,
 				"from_name":      p.From.Name,
