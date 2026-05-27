@@ -36,7 +36,11 @@ echo "  /etc/$SERVICE"
 
 echo "=== Installing config ==="
 if [ ! -f /etc/$SERVICE/config.yaml ]; then
-    cat > /etc/$SERVICE/config.yaml << 'CONFIG'
+    if [ -z "${STATEHOUSE_CLIENT_SECRET:-}" ]; then
+        echo "STATEHOUSE_CLIENT_SECRET must be set in the environment" >&2
+        exit 1
+    fi
+    cat > /etc/$SERVICE/config.yaml << CONFIG
 mqtt:
   broker: tcp://192.168.1.200:1883
   client_id: statehouse
@@ -45,7 +49,7 @@ mqtt:
 identity:
   base_url: https://id.swee.net
   client_id: statehouse
-  client_secret: CcLytMcR6fr9gdtoY6fwtowzzTpjaF94Z7ZvAtzakfc
+  client_secret: ${STATEHOUSE_CLIENT_SECRET}
 
 remote_config:
   base_url: https://config.swee.net
