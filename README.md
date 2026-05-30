@@ -25,8 +25,11 @@ Endpoints:
 - `GET /state/house`
 - `GET /state/devices`
 - `GET /state/devices/{id}`
+- `GET /state/activity` — active signals and recent activity log.
 - `GET /events/recent?limit=100`
 - `GET /metrics`
+- `GET /config/devices` — resolved profile (class, thresholds, strategy) for every known device.
+- `GET /config/devices/{id}` — resolved profile for one device.
 
 MQTT topics published under `house/`:
 
@@ -85,6 +88,15 @@ Available adapters today:
   payloads + availability.
 - `internal/adapter/boiler` — [sweeney/boiler-sensor](https://github.com/sweeney/boiler-sensor)
   CH/HW relay events + lifecycle. Off by default; enable in config.
+- `internal/adapter/ups` — Network UPS Tools (NUT) devices publishing
+  aggregated state to `ups/{upsname}/state`. Off by default.
+- `internal/adapter/climate` — weather stations publishing per-location
+  observations to `{base}/{location}/observation`. Off by default.
+- `internal/adapter/meter` — Glow/SMETS2 smart meters publishing to
+  `energy/{serial}/SENSOR/electricitymeter`. Off by default.
+- `internal/adapter/intercom` — Asterisk-via-MQTT phone system. Tracks
+  in-flight calls as activity signals (`intercom_ringing`,
+  `intercom_answered`, `intercom_hungup`). Off by default.
 
 Device classes today:
 
@@ -96,11 +108,16 @@ Device classes today:
   sensors, switches that report ON/OFF without power. Activity
   derives from `Reading.State` not power; cycles record duration
   but no energy.
-- `sensor_device` — measurement-only devices (climate sensors,
-  air-quality, illuminance). No cycle, no activity machine — once
-  the device transmits, `Activity` stays at `reporting`. Latest
-  temp / humidity / battery flow into the device record; Influx
-  receives `device_environment` and `device_battery` samples.
+- `environmental_sensor` — measurement-only climate/air-quality/illuminance
+  devices. No cycle, no activity machine — `Activity` stays at `reporting`
+  while the device transmits. Temp / humidity / battery flow into the device
+  record and into Influx as `device_environment` / `device_battery`.
+- `ups_sensor` — UPS devices. Measurement-only like `environmental_sensor`
+  but carries UPS-specific fields: `on_battery`, `low_battery`,
+  `battery_runtime_mins`.
+- `energy_meter` — whole-home electricity meters and IHD devices. Reports
+  cumulative kWh and instantaneous power. No cycles, no occupancy
+  contribution.
 
 ## Layout
 
@@ -109,6 +126,10 @@ Device classes today:
 - `internal/adapter` — protocol-agnostic Adapter interface.
 - `internal/adapter/zigbee2mqtt` — Z2M adapter.
 - `internal/adapter/boiler` — sweeney/boiler-sensor adapter.
+- `internal/adapter/ups` — NUT UPS adapter.
+- `internal/adapter/climate` — weather station adapter.
+- `internal/adapter/meter` — Glow/SMETS2 smart meter adapter.
+- `internal/adapter/intercom` — Asterisk-via-MQTT intercom adapter.
 - `internal/config` — YAML config + defaults.
 - `internal/model` — canonical data types (Reading, Device, Event,
   Snapshot, House). Pointer fields keep the absent-vs-zero
@@ -129,9 +150,9 @@ Device classes today:
 - The engine refuses to integrate power across an interval larger
   than `energy.max_integration_gap` (default 30m). The cycle records
   this without smearing watts across the gap.
-- Counter-based energy is preferred for `cycle_power_device` and
-  `continuous_power_device`; integration is preferred for
-  `short_burst_power_device` and `media_power_device`.
+- Counter-based energy is preferred for `short_burst_power_device` and
+  `cycle_power_device`; integration is preferred for
+  `continuous_power_device` and `media_power_device`.
 - If counter-reported and integrated energy disagree by more than
   `energy.divergence_warning_pct` (default 20%), an
   `energy_divergence_warning` derived event is emitted.

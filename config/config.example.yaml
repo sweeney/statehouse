@@ -17,6 +17,23 @@ adapters:
   boiler:
     enabled: false
     base_topic: energy/boiler/sensor
+  # NUT-via-MQTT UPS adapter. Subscribes to ups/{upsname}/state.
+  ups:
+    enabled: false
+    base_topic: ups
+  # Weather station adapter. Subscribes to {base}/{location}/observation.
+  climate:
+    enabled: false
+    base_topic: climate
+  # Glow/SMETS2 smart meter adapter. Subscribes to energy/{serial}/SENSOR/...
+  meter:
+    enabled: false
+    base_topic: energy
+  # Asterisk-via-MQTT intercom adapter. Tracks in-flight calls as
+  # activity signals. Subscribes to {base}/call/... and {base}/status.
+  intercom:
+    enabled: false
+    base_topic: asterisk
 
 http:
   listen: :8383
@@ -95,12 +112,6 @@ device_classes:
     default_thresholds:
       active_sustained_for: 0s
       inactive_sustained_for: 0s
-
-  # intercom — Asterisk-via-MQTT phone system. Disabled by default; enable
-  # on sites with an Asterisk bridge publishing to asterisk/#.
-  intercom:
-    enabled: false
-    base_topic: asterisk
 
   # Measurement-only environmental devices: climate sensors (Sonoff
   # SNZB-02 etc.), air-quality, illuminance. No cycle, no activity

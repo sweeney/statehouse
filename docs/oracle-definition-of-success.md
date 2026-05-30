@@ -89,10 +89,10 @@ Statehouse should emit events that describe house activity, not sensor mechanics
 
 Good derived events:
 
-- `device_state_changed`
-- `appliance_cycle_started`
-- `appliance_cycle_finished`
-- `kettle_used`
+- `device_activity_changed`
+- `cycle_started`
+- `cycle_finished`
+- `short_burst_detected`
 - `house_state_changed`
 - `energy_divergence_warning`
 
@@ -171,9 +171,9 @@ Where possible, both should run in parallel.
 
 The primary strategy should be selected by device class:
 
-- Short-burst devices, such as kettles and toasters: integration-first.
-- Long-cycle devices, such as dishwashers, washing machines, dryers, fridges, and freezers: counter-first.
-- Continuous devices: counter-first, with integration and duty-cycle observations retained for diagnostics.
+- Short-burst devices, such as kettles and toasters: counter-first.
+- Long-cycle devices, such as dishwashers, washing machines, and dryers: counter-first.
+- Continuous devices, such as fridges and freezers: integration-first, with counter retained for diagnostics.
 
 If the two paths diverge significantly, this should be emitted as a first-class warning rather than hidden.
 
