@@ -324,6 +324,108 @@ func TestAdapter_BridgeDevicesEvictsRemovedFriendlyNames(t *testing.T) {
 	}
 }
 
+// TestAdapter_TwoPhantomsMergeToOneDeviceOnBridgeDevices reproduces the
+// "islaav duplicate" seen in production. The problematic message ordering:
+//
+//  1. During Z2M interview the device publishes under the IEEE address as
+//     its topic (friendly_name == ieee before the user renames it).
+//  2. An availability (or payload) for the user-given friendly name arrives
+//     before bridge/devices updates the adapter's ieee→name cache, creating
+//     a second phantom keyed by the friendly name.
+//  3. bridge/devices arrives with the canonical mapping — must collapse both
+//     phantoms into exactly one device with the correct identity.
+func TestAdapter_TwoPhantomsMergeToOneDeviceOnBridgeDevices(t *testing.T) {
+	cfg := fixtureCfg()
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 30, 10, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	const ieee = "0x20a716fffea4634f"
+	const fn = "islaav"
+
+	// Step 1: payload arrives under the IEEE address as topic (Z2M
+	// interview in progress — friendly name not yet assigned by user).
+	a.HandleMessage("zigbee2mqtt/"+ieee, []byte(`{"power":0}`), false)
+
+	if got := len(store.Devices()); got != 1 {
+		t.Fatalf("after interview payload: expected 1 device, got %d", got)
+	}
+
+	// Step 2: availability for the user-given friendly name arrives before
+	// bridge/devices has mapped ieee→fn. The adapter has no cache entry
+	// yet so falls back to Primary=Display=fn, creating a second phantom.
+	a.HandleMessage("zigbee2mqtt/"+fn+"/availability", []byte(`{"state":"online"}`), false)
+
+	if got := len(store.Devices()); got != 2 {
+		t.Fatalf("after availability race: expected 2 phantom devices, got %d", got)
+	}
+
+	// Step 3: bridge/devices arrives with the canonical ieee→fn mapping.
+	// Both phantoms must collapse into exactly one device.
+	bridgePayload := []byte(`[{"ieee_address":"` + ieee + `","friendly_name":"` + fn + `","type":"EndDevice"}]`)
+	a.HandleMessage("zigbee2mqtt/bridge/devices", bridgePayload, true)
+
+	devs := store.Devices()
+	if len(devs) != 1 {
+		t.Fatalf("after bridge/devices: expected exactly 1 device, got %d: %v", len(devs), devIDs(devs))
+	}
+	for _, d := range devs {
+		if d.Identity.Primary != ieee {
+			t.Errorf("Primary: got %q, want %q", d.Identity.Primary, ieee)
+		}
+		if d.Identity.Display != fn {
+			t.Errorf("Display: got %q, want %q", d.Identity.Display, fn)
+		}
+	}
+}
+
+// TestAdapter_FriendlyNamePhantomUpgradedOnBridgeDevices covers the simpler
+// ordering where only one phantom exists (no interview-under-IEEE-topic
+// step), confirming that case still works correctly.
+func TestAdapter_FriendlyNamePhantomUpgradedOnBridgeDevices(t *testing.T) {
+	cfg := fixtureCfg()
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 30, 10, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	const ieee = "0x20a716fffea4634f"
+	const fn = "islaav"
+
+	// Only a payload under the friendly name arrives — one phantom.
+	a.HandleMessage("zigbee2mqtt/"+fn, []byte(`{"power":5}`), false)
+
+	if got := len(store.Devices()); got != 1 {
+		t.Fatalf("expected 1 phantom, got %d", got)
+	}
+
+	// bridge/devices arrives and must upgrade the phantom in-place.
+	bridgePayload := []byte(`[{"ieee_address":"` + ieee + `","friendly_name":"` + fn + `","type":"EndDevice"}]`)
+	a.HandleMessage("zigbee2mqtt/bridge/devices", bridgePayload, true)
+
+	devs := store.Devices()
+	if len(devs) != 1 {
+		t.Fatalf("expected exactly 1 device after upgrade, got %d: %v", len(devs), devIDs(devs))
+	}
+	for _, d := range devs {
+		if d.Identity.Primary != ieee {
+			t.Errorf("Primary: got %q, want %q", d.Identity.Primary, ieee)
+		}
+		if d.Identity.Display != fn {
+			t.Errorf("Display: got %q, want %q", d.Identity.Display, fn)
+		}
+	}
+}
+
+func devIDs(devs map[string]model.Device) []string {
+	out := make([]string, 0, len(devs))
+	for k := range devs {
+		out = append(out, k)
+	}
+	return out
+}
+
 func summary(evs []model.DerivedEvent) []string {
 	out := make([]string, 0, len(evs))
 	for _, ev := range evs {

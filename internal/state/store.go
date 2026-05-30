@@ -113,7 +113,23 @@ func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 		s.byPrimary[merged.Scheme+":"+merged.Primary] = id
 	}
 	if merged.Scheme != "" && merged.Display != "" {
-		s.byDisplay[merged.Scheme+":"+merged.Display] = id
+		displayKey := merged.Scheme + ":" + merged.Display
+		// If byDisplay is being reassigned to a different device, the
+		// previous holder may be an orphaned phantom (Primary == Display).
+		// Phantoms are safe to tombstone: they were created as a fallback
+		// before the IEEE was known, and the real device has now claimed
+		// their display name. A real device (Primary != Display) is NOT
+		// tombstoned — it remains reachable via its stable byPrimary key.
+		if oldID, collision := s.byDisplay[displayKey]; collision && oldID != id {
+			if orphan, exists := s.dev[oldID]; exists {
+				oid := orphan.Device.Identity
+				if oid.Primary != "" && oid.Primary == oid.Display {
+					delete(s.byPrimary, oid.Scheme+":"+oid.Primary)
+					delete(s.dev, oldID)
+				}
+			}
+		}
+		s.byDisplay[displayKey] = id
 	}
 }
 
