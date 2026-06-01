@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sweeney/identity/common/auth"
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
 	"github.com/sweeney/statehouse/internal/influx"
@@ -28,6 +29,11 @@ type Server struct {
 	Logger        *slog.Logger
 	DeviceClasses map[string]config.DeviceClassConfig
 
+	// IdentityURL is the base URL of the identity service (e.g. "https://id.swee.net").
+	// When set, all routes except /healthz require a valid Bearer JWT.
+	// When empty, auth is disabled (useful for local development and tests).
+	IdentityURL string
+
 	// Publisher, when non-nil, surfaces its drop counter on /metrics.
 	// Set by main.go after construction; tests may leave it nil.
 	Publisher *mqtt.Publisher
@@ -41,7 +47,8 @@ type Server struct {
 
 	started time.Time
 
-	srv *http.Server
+	srv      *http.Server
+	verifier *auth.JWKSVerifier
 
 	canonicalCount uint64
 	derivedCount   uint64
@@ -87,16 +94,38 @@ func (s *Server) OnDerivedEvent(_ model.DerivedEvent) { atomic.AddUint64(&s.deri
 func newMux(s *Server) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/state", s.handleState)
-	mux.HandleFunc("/state/house", s.handleHouse)
-	mux.HandleFunc("/state/devices", s.handleDevices)
-	mux.HandleFunc("/state/devices/", s.handleDevice)
-	mux.HandleFunc("/state/activity", s.handleActivity)
-	mux.HandleFunc("/events/recent", s.handleRecent)
-	mux.HandleFunc("/metrics", s.handleMetrics)
-	mux.HandleFunc("/config/devices", s.handleConfigDevices)
-	mux.HandleFunc("/config/devices/", s.handleConfigDevice)
+
+	auth := s.authMiddleware()
+	mux.Handle("/state", auth(http.HandlerFunc(s.handleState)))
+	mux.Handle("/state/house", auth(http.HandlerFunc(s.handleHouse)))
+	mux.Handle("/state/devices", auth(http.HandlerFunc(s.handleDevices)))
+	mux.Handle("/state/devices/", auth(http.HandlerFunc(s.handleDevice)))
+	mux.Handle("/state/activity", auth(http.HandlerFunc(s.handleActivity)))
+	mux.Handle("/events/recent", auth(http.HandlerFunc(s.handleRecent)))
+	mux.Handle("/metrics", auth(http.HandlerFunc(s.handleMetrics)))
+	mux.Handle("/config/devices", auth(http.HandlerFunc(s.handleConfigDevices)))
+	mux.Handle("/config/devices/", auth(http.HandlerFunc(s.handleConfigDevice)))
 	return mux
+}
+
+// authMiddleware returns a middleware that validates Bearer JWTs when
+// IdentityURL is set. When IdentityURL is empty it returns a no-op wrapper
+// so existing tests and local runs work without auth configured.
+func (s *Server) authMiddleware() func(http.Handler) http.Handler {
+	if s.IdentityURL == "" {
+		return func(h http.Handler) http.Handler { return h }
+	}
+	verifier, err := auth.NewJWKSVerifier(auth.JWKSVerifierConfig{
+		IssuerURL: s.IdentityURL,
+		Issuer:    s.IdentityURL,
+		Logger:    s.Logger,
+	})
+	if err != nil {
+		// Only fails when IssuerURL or Issuer is empty, guarded above.
+		panic(err)
+	}
+	s.verifier = verifier
+	return func(h http.Handler) http.Handler { return requireAuth(verifier, h) }
 }
 
 // Start runs the HTTP server until the context is cancelled.
@@ -230,21 +259,30 @@ func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	type jwksMetrics struct {
+		Fetches     uint64 `json:"jwks_fetches_total"`
+		FetchErrors uint64 `json:"jwks_fetch_errors_total"`
+		KidMisses   uint64 `json:"jwks_kid_misses_total"`
+		Rotations   uint64 `json:"jwks_rotations_total"`
+		StaleServed uint64 `json:"jwks_stale_served_total"`
+		KeyCount    int    `json:"jwks_key_count"`
+	}
 	type metrics struct {
-		StartedAgo       int     `json:"started_ago"`
-		DeviceCount      int     `json:"device_count"`
-		CanonicalEvents  uint64  `json:"canonical_events_total"`
-		DerivedEvents    uint64  `json:"derived_events_total"`
-		InfluxQueued     uint64  `json:"influx_writes_queued,omitempty"`
-		InfluxFailure    uint64  `json:"influx_writes_failure,omitempty"`
-		PublisherDropped uint64  `json:"mqtt_publishes_dropped_total"`
-		MQTTReconnects   uint64  `json:"mqtt_reconnects_total"`
-		HeapAllocBytes   uint64  `json:"heap_alloc_bytes"`
-		HeapSysBytes     uint64  `json:"heap_sys_bytes"`
-		GCCycles         uint32  `json:"gc_cycles_total"`
-		LastGCPauseMS    float64 `json:"last_gc_pause_ms"`
-		RecentLogEvents  int     `json:"recent_log_events"`
-		RecentLogBytes   int64   `json:"recent_log_size_bytes"`
+		StartedAgo       int          `json:"started_ago"`
+		DeviceCount      int          `json:"device_count"`
+		CanonicalEvents  uint64       `json:"canonical_events_total"`
+		DerivedEvents    uint64       `json:"derived_events_total"`
+		InfluxQueued     uint64       `json:"influx_writes_queued,omitempty"`
+		InfluxFailure    uint64       `json:"influx_writes_failure,omitempty"`
+		PublisherDropped uint64       `json:"mqtt_publishes_dropped_total"`
+		MQTTReconnects   uint64       `json:"mqtt_reconnects_total"`
+		HeapAllocBytes   uint64       `json:"heap_alloc_bytes"`
+		HeapSysBytes     uint64       `json:"heap_sys_bytes"`
+		GCCycles         uint32       `json:"gc_cycles_total"`
+		LastGCPauseMS    float64      `json:"last_gc_pause_ms"`
+		RecentLogEvents  int          `json:"recent_log_events"`
+		RecentLogBytes   int64        `json:"recent_log_size_bytes"`
+		JWKS             *jwksMetrics `json:"jwks,omitempty"`
 	}
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
@@ -269,6 +307,17 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.Log != nil {
 		m.RecentLogEvents, m.RecentLogBytes = s.Log.Stats()
+	}
+	if s.verifier != nil {
+		vm := s.verifier.Metrics()
+		m.JWKS = &jwksMetrics{
+			Fetches:     vm.Fetches,
+			FetchErrors: vm.FetchErrors,
+			KidMisses:   vm.KidMisses,
+			Rotations:   vm.Rotations,
+			StaleServed: vm.StaleServed,
+			KeyCount:    vm.KeyCount,
+		}
 	}
 	writeJSON(w, http.StatusOK, m)
 }

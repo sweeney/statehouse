@@ -162,6 +162,7 @@ func main() {
 	api.Version = version
 	api.Publisher = publisher
 	api.RemoteConfig = remoteCfgFetcher
+	api.IdentityURL = cfg.Identity.BaseURL
 	engine.AddCanonicalSink(api)
 	engine.AddDerivedSink(api)
 
