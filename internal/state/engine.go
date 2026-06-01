@@ -29,6 +29,7 @@ type CanonicalSink interface {
 // state machines, derives whole-house state, and emits derived
 // events to all registered sinks.
 type Engine struct {
+	cfgMu    sync.RWMutex
 	cfg      config.Config
 	resolver *device.Resolver
 	store    *Store
@@ -37,6 +38,17 @@ type Engine struct {
 	mu             sync.Mutex
 	derivedSinks   []EventSink
 	canonicalSinks []CanonicalSink
+}
+
+type engineSnap struct {
+	cfg      config.Config
+	resolver *device.Resolver
+}
+
+func (e *Engine) snap() engineSnap {
+	e.cfgMu.RLock()
+	defer e.cfgMu.RUnlock()
+	return engineSnap{cfg: e.cfg, resolver: e.resolver}
 }
 
 // NewEngine constructs an engine with the given store and config.
@@ -70,16 +82,17 @@ func (e *Engine) AddCanonicalSink(s CanonicalSink) {
 // discovery message like Z2M's bridge/devices), and again on every
 // IngestReading.
 func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic string) string {
+	snap := e.snap()
 	// Identity lookup first; preserves runtime state across renames
 	// where the protocol-stable Primary key is stable.
 	id := e.store.LookupID(identity)
 	if id == "" {
-		id = e.resolver.ConfiguredID(identity)
+		id = snap.resolver.ConfiguredID(identity)
 		if id == "" {
 			id = deriveID(identity)
 		}
 	}
-	prof := e.resolver.Resolve(identity)
+	prof := snap.resolver.Resolve(identity)
 	prof.ID = id
 	dev := model.Device{
 		ID:           id,
@@ -92,7 +105,7 @@ func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic str
 		Unclassified: prof.Unclassified,
 	}
 	if _, exists := e.store.Get(id); !exists {
-		rt := device.NewRuntime(prof, e.cfg.Energy.MaxIntegrationGap)
+		rt := device.NewRuntime(prof, snap.cfg.Energy.MaxIntegrationGap)
 		e.store.Upsert(id, dev, rt)
 		e.emitDerived(model.DerivedEvent{
 			ID:          newEventID(),
@@ -148,6 +161,7 @@ func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic str
 // identity and Reading struct; the protocol-specific details have
 // already been parsed away by the adapter.
 func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string, reading model.Reading) {
+	snap := e.snap()
 	id := e.EnsureDiscovered(identity, sourceTopic)
 	if reading.Timestamp.IsZero() {
 		reading.Timestamp = e.clock.Now()
@@ -275,7 +289,7 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			ent.Device.Cycle.Energy.ReportedKWhDelta > 0 &&
 			profile.Strategy == energy.StrategyCounter {
 			pct := energy.DivergencePct(ent.Device.Cycle.Energy.ReportedKWhDelta, ent.Device.Cycle.Energy.IntegratedKWh)
-			if pct >= e.cfg.Energy.DivergenceWarningPct {
+			if pct >= snap.cfg.Energy.DivergenceWarningPct {
 				ent.Runtime.MarkDivergence(pct)
 				cc := *outcome.Cycle
 				cc.Energy.DivergencePct = pct
@@ -355,12 +369,13 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 // reported by an adapter. Offline transitions are debounced; online
 // transitions are immediate.
 func (e *Engine) SetAvailability(identity model.DeviceIdentity, sourceTopic string, a model.Availability) {
+	snap := e.snap()
 	id := e.EnsureDiscovered(identity, sourceTopic)
 	now := e.clock.Now()
 	var (
 		emitChange bool
 		newAvail   model.Availability
-		debounce   = e.cfg.Availability.OfflineDebounce
+		debounce   = snap.cfg.Availability.OfflineDebounce
 	)
 	e.store.withEntry(id, func(ent *deviceEntry) {
 		switch a {
@@ -451,6 +466,24 @@ func (e *Engine) ClearSignal(id string, ts time.Time) {
 	e.RecomputeHouse()
 }
 
+// ReloadConfig replaces the engine's active config and resolver with a fresh
+// copy, then re-applies profiles to all known devices so callers see the new
+// classification and thresholds without a full restart. Safe to call from any
+// goroutine; concurrent reads take a short read-lock.
+func (e *Engine) ReloadConfig(cfg config.Config) {
+	e.cfgMu.Lock()
+	e.cfg = cfg
+	e.resolver = device.NewResolver(cfg)
+	e.cfgMu.Unlock()
+
+	// Re-discover each known device under the new resolver so its
+	// profile is updated immediately.
+	devices := e.store.Devices()
+	for _, dev := range devices {
+		e.EnsureDiscovered(dev.Identity, "")
+	}
+}
+
 // RecordActivity appends an ActivityRecord to the recent-activity log.
 func (e *Engine) RecordActivity(r model.ActivityRecord) {
 	e.store.AppendActivity(r)
@@ -465,8 +498,9 @@ func (e *Engine) UpdateActivity(id string, fn func(*model.ActivityRecord)) {
 // time-driven transitions (e.g. offline debounce maturing,
 // finished_recently TTL decay) and re-derives whole-house state.
 func (e *Engine) Tick() {
+	snap := e.snap()
 	now := e.clock.Now()
-	debounce := e.cfg.Availability.OfflineDebounce
+	debounce := snap.cfg.Availability.OfflineDebounce
 	type maturedAvail struct {
 		id   string
 		from model.Availability
@@ -522,8 +556,9 @@ func (e *Engine) Tick() {
 // RecomputeHouse derives a conservative whole-house state from the
 // current device state and notifies sinks on change.
 func (e *Engine) RecomputeHouse() {
+	snap := e.snap()
 	now := e.clock.Now()
-	house := DeriveHouseState(now, e.cfg.House, e.store.Devices(), e.store.ActiveSignals(now), e.store.LastSignalAt())
+	house := DeriveHouseState(now, snap.cfg.House, e.store.Devices(), e.store.ActiveSignals(now), e.store.LastSignalAt())
 	changed := e.store.setHouse(house)
 	if changed {
 		e.emitDerived(model.DerivedEvent{

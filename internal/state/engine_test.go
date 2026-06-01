@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sweeney/statehouse/internal/config"
+	"github.com/sweeney/statehouse/internal/device"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/testutil"
 )
@@ -612,5 +613,70 @@ func TestEngine_DeviceStrategyOverrideAppliedAfterPhantomUpgrade(t *testing.T) {
 	}
 	if _, ok := col.findDerived(model.EvtEnergyStaleCounterWarning); ok {
 		t.Error("stale_counter_warning must NOT fire when per-device energy_strategy=integration overrides class default of counter")
+	}
+}
+
+func TestEngine_ReloadConfig_UpdatesDeviceProfile(t *testing.T) {
+	cfg := config.Default()
+	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
+		"short_burst_power_device": {
+			NameHints:      []string{"toaster"},
+			EnergyStrategy: "integration",
+			DefaultThresholds: config.Thresholds{
+				IdleBelowW:   ptr(5.0),
+				ActiveAboveW: ptr(50.0),
+			},
+		},
+		"cycle_power_device": {
+			EnergyStrategy: "counter",
+			DefaultThresholds: config.Thresholds{
+				IdleBelowW:   ptr(5.0),
+				ActiveAboveW: ptr(20.0),
+			},
+		},
+	}
+	// No cfg.Devices entry — device will be classified by name hint.
+	store := NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC))
+	engine := NewEngine(cfg, store, clock)
+
+	identity := model.DeviceIdentity{Scheme: "zigbee", Primary: "0xaabbccdd", Display: "kitchen_toaster"}
+	engine.IngestReading(identity, "zigbee2mqtt/kitchen_toaster", model.Reading{Timestamp: clock.Now()})
+
+	var gotResolution device.Resolution
+	var gotClass string
+	store.withEntry("kitchen_toaster", func(ent *deviceEntry) {
+		gotResolution = ent.Runtime.Profile.Resolution
+		gotClass = ent.Runtime.Profile.Class
+	})
+	if gotResolution != device.ResolutionNameHint {
+		t.Fatalf("before reload: want resolution %q, got %q", device.ResolutionNameHint, gotResolution)
+	}
+	if gotClass != "short_burst_power_device" {
+		t.Fatalf("before reload: want class short_burst_power_device, got %q", gotClass)
+	}
+
+	// Reload with an explicit device_config override promoting the toaster
+	// to cycle_power_device. ReloadConfig does not exist yet — this test is RED.
+	newCfg := cfg
+	newCfg.Devices = map[string]config.DeviceConfig{
+		"kitchen_toaster": {
+			Scheme:      "zigbee",
+			Primary:     "0xaabbccdd",
+			Class:       "cycle_power_device",
+			DisplayName: "Kitchen Toaster",
+		},
+	}
+	engine.ReloadConfig(newCfg)
+
+	store.withEntry("kitchen_toaster", func(ent *deviceEntry) {
+		gotResolution = ent.Runtime.Profile.Resolution
+		gotClass = ent.Runtime.Profile.Class
+	})
+	if gotResolution != device.ResolutionDeviceConfig {
+		t.Fatalf("after reload: want resolution %q, got %q", device.ResolutionDeviceConfig, gotResolution)
+	}
+	if gotClass != "cycle_power_device" {
+		t.Fatalf("after reload: want class cycle_power_device, got %q", gotClass)
 	}
 }

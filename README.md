@@ -145,6 +145,27 @@ Device classes today:
 - `internal/testutil` — fake clock, fixture loader.
 - `internal/testdata/fixtures` — anonymised MQTT JSONL fixtures.
 
+## Remote config
+
+Device classification, per-device overrides, and behaviour tuning are
+managed through a remote config service rather than the local YAML file.
+On startup the daemon fetches three namespaces from the URL set in
+`remote_config.base_url` (authenticated via the identity service):
+
+- `statehouse_devices` — per-device overrides (class, thresholds,
+  `energy_strategy`, `display_name`, `location`).
+- `statehouse_classes` — device class definitions (name hints, default
+  thresholds, energy strategy).
+- `statehouse_behaviour` — runtime tuning (energy, availability, house,
+  adapter config).
+
+Remote values win over local config on overlap. A namespace that fails
+to fetch is skipped non-fatally; the local config value is preserved.
+The `/healthz` endpoint reports the fetch status of each namespace.
+
+To update device config (e.g. override a device's energy strategy),
+edit the remote config service — not the local YAML.
+
 ## Notes
 
 - The engine refuses to integrate power across an interval larger

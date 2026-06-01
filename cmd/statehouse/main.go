@@ -43,6 +43,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// baseCfg is the local-only config (no remote overlay). On SIGHUP we
+	// re-apply remote config against a fresh copy of baseCfg so that
+	// removed remote entries don't accumulate across reloads.
+	baseCfg := cfg
+
 	var remoteCfgFetcher *config.Fetcher
 	if cfg.Identity.BaseURL != "" && cfg.RemoteConfig.BaseURL != "" {
 		logger.Info("applying remote config", "url", cfg.RemoteConfig.BaseURL)
@@ -167,6 +172,8 @@ func main() {
 		}
 	}
 
+	go watchSIGHUP(baseCfg, remoteCfgFetcher, engine, logger)
+
 	ctx, cancel := signalContext()
 	defer cancel()
 
@@ -221,4 +228,24 @@ func signalContext() (context.Context, context.CancelFunc) {
 		cancel()
 	}()
 	return ctx, cancel
+}
+
+// watchSIGHUP listens for SIGHUP and re-applies remote config to the engine
+// without restarting the process. On each signal it re-fetches all three
+// remote namespaces against the local-only baseCfg (no stale remote values
+// carry over), then calls engine.ReloadConfig with the result.
+func watchSIGHUP(baseCfg config.Config, fetcher *config.Fetcher, eng *state.Engine, logger *slog.Logger) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGHUP)
+	for range ch {
+		logger.Info("SIGHUP: reloading remote config")
+		newCfg := baseCfg
+		if fetcher != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			fetcher.ApplyRemote(ctx, &newCfg)
+			cancel()
+		}
+		eng.ReloadConfig(newCfg)
+		logger.Info("SIGHUP: remote config reload complete")
+	}
 }
