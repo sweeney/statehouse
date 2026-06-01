@@ -34,8 +34,8 @@ func TestBuildHouseResponse_ElectricityPresent(t *testing.T) {
 	h := model.House{
 		Electricity: model.ElectricitySummary{
 			GrossW: 1500, MonitoredW: 800, UnmonitoredW: 700,
-			Coverage:       0.5333,
-			GrossKWh:       2.5, MonitoredKWh: 1.3, UnmonitoredKWh: 1.2,
+			Coverage: 0.5333,
+			GrossKWh: 2.5, MonitoredKWh: 1.3, UnmonitoredKWh: 1.2,
 			StaleDeviceCount: 1, StaleDevices: []string{"plug_a"},
 			ComputedAt: computedAt,
 		},

@@ -45,9 +45,9 @@ type Engine struct {
 	derivedSinks   []EventSink
 	canonicalSinks []CanonicalSink
 
-	elecMu               sync.Mutex
-	grossIntegrator      *energy.Integrator
-	monitoredIntegrator  *energy.Integrator
+	elecMu                sync.Mutex
+	grossIntegrator       *energy.Integrator
+	monitoredIntegrator   *energy.Integrator
 	unmonitoredIntegrator *energy.Integrator
 }
 

@@ -116,11 +116,11 @@ type HouseModeResponse struct {
 
 // HouseResponse is the DTO for the whole-house state.
 type HouseResponse struct {
-	Occupancy     HouseOccupancyResponse        `json:"occupancy"`
-	Activity      HouseActivityResponse         `json:"activity"`
-	Mode          HouseModeResponse             `json:"mode"`
-	ActiveDevices []string                      `json:"active_devices"`
-	Electricity   *HouseElectricityResponse     `json:"electricity,omitempty"`
+	Occupancy     HouseOccupancyResponse    `json:"occupancy"`
+	Activity      HouseActivityResponse     `json:"activity"`
+	Mode          HouseModeResponse         `json:"mode"`
+	ActiveDevices []string                  `json:"active_devices"`
+	Electricity   *HouseElectricityResponse `json:"electricity,omitempty"`
 }
 
 // HouseElectricityResponse is the DTO for the whole-house electricity
