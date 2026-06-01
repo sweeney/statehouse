@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sweeney/identity/common/auth"
+	"github.com/sweeney/identity/common/spec"
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
 	"github.com/sweeney/statehouse/internal/influx"
@@ -34,6 +35,11 @@ type Server struct {
 	// When empty, auth is disabled (useful for local development and tests).
 	IdentityURL string
 
+	// PublicURL is the externally-reachable base URL of this server
+	// (e.g. "https://statehouse.swee.net"). When set it is substituted into
+	// the OpenAPI spec's servers list. When empty the placeholder is left as-is.
+	PublicURL string
+
 	// Publisher, when non-nil, surfaces its drop counter on /metrics.
 	// Set by main.go after construction; tests may leave it nil.
 	Publisher *mqtt.Publisher
@@ -47,8 +53,9 @@ type Server struct {
 
 	started time.Time
 
-	srv      *http.Server
-	verifier *auth.JWKSVerifier
+	srv           *http.Server
+	verifier      *auth.JWKSVerifier
+	specConverter *spec.Converter
 
 	canonicalCount uint64
 	derivedCount   uint64
@@ -92,8 +99,11 @@ func (s *Server) OnDerivedEvent(_ model.DerivedEvent) { atomic.AddUint64(&s.deri
 // Centralising route registration here means tests always exercise the
 // same routes as the running server.
 func newMux(s *Server) *http.ServeMux {
+	s.specConverter = buildSpecConverter(s.PublicURL)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/openapi.json", s.handleOpenAPIJSON)
 
 	auth := s.authMiddleware()
 	mux.Handle("/state", auth(http.HandlerFunc(s.handleState)))

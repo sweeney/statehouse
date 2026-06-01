@@ -1,0 +1,876 @@
+openapi: 3.0.3
+info:
+  title: Statehouse API
+  description: >
+    Read-only HTTP API for the statehouse home automation state engine.
+    All endpoints except /healthz and /openapi.json require a Bearer JWT
+    issued by the configured identity service.
+  version: "1"
+servers:
+  - url: __PUBLIC_URL__
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: system
+    description: Health, metrics, and API spec endpoints.
+  - name: state
+    description: Real-time device and house state.
+  - name: events
+    description: Historical event log.
+  - name: config
+    description: Resolved device configuration profiles.
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      description: Returns server health, MQTT/Influx status, and remote config fetch status. No auth required.
+      operationId: getHealth
+      security: []
+      tags: [system]
+      responses:
+        "200":
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /openapi.json:
+    get:
+      summary: OpenAPI spec
+      description: This spec document, as JSON. No auth required.
+      operationId: getOpenAPISpec
+      security: []
+      tags: [system]
+      responses:
+        "200":
+          description: OpenAPI 3.0 spec
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /state:
+    get:
+      summary: Full state snapshot
+      description: Complete snapshot of house state and all devices, with activity and summary.
+      operationId: getState
+      tags: [state]
+      responses:
+        "200":
+          description: Current snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /state/house:
+    get:
+      summary: House state
+      description: Occupancy, activity, and mode dimensions for the whole house.
+      operationId: getHouseState
+      tags: [state]
+      responses:
+        "200":
+          description: Current house state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HouseResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /state/devices:
+    get:
+      summary: All devices
+      description: Map of all known devices keyed by device ID, with full state.
+      operationId: getDevices
+      tags: [state]
+      responses:
+        "200":
+          description: Map of device ID to device state
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/DeviceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /state/devices/{id}:
+    get:
+      summary: Single device
+      description: State for a single device by ID. Includes the identity block (omitted in /state/devices).
+      operationId: getDevice
+      tags: [state]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Device ID
+      responses:
+        "200":
+          description: Device state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device not found
+
+  /state/activity:
+    get:
+      summary: Activity state
+      description: Active presence/activity signals and recent activity history.
+      operationId: getActivity
+      tags: [state]
+      responses:
+        "200":
+          description: Current activity state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityStateResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /events/recent:
+    get:
+      summary: Recent event log
+      description: Recent canonical and derived events from the in-memory log.
+      operationId: getRecentEvents
+      tags: [events]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+          description: Maximum number of events to return
+      responses:
+        "200":
+          description: Array of recent events (most-recent last)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /metrics:
+    get:
+      summary: System metrics
+      description: Runtime counters — events processed, MQTT, Influx, GC, JWKS.
+      operationId: getMetrics
+      tags: [system]
+      responses:
+        "200":
+          description: Current metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /config/devices:
+    get:
+      summary: All device profiles
+      description: Resolved runtime configuration (class, strategy, thresholds) for all known devices.
+      operationId: getDeviceProfiles
+      tags: [config]
+      responses:
+        "200":
+          description: Map of device ID to profile
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/DeviceProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /config/devices/{id}:
+    get:
+      summary: Single device profile
+      description: Resolved runtime configuration for a single device.
+      operationId: getDeviceProfile
+      tags: [config]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Device ID
+      responses:
+        "200":
+          description: Device profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Device not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer JWT
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+
+  schemas:
+    # ── Enums ────────────────────────────────────────────────────────────────
+
+    Availability:
+      type: string
+      enum: [unknown, online, offline_pending, offline]
+      description: Whether the engine is currently in contact with the device.
+
+    DeviceActivityState:
+      type: string
+      enum:
+        - unknown
+        - idle
+        - active
+        - starting
+        - running
+        - finishing
+        - finished_recently
+        - standby
+        - normal_idle
+        - active_cycle
+        - reporting
+      description: Behavioural state of a device derived from its telemetry.
+
+    OccupancyState:
+      type: string
+      enum: [unknown, empty, occupied]
+      description: Whole-house occupancy inference.
+
+    HouseActivityState:
+      type: string
+      enum: [unknown, idle, quiet, active, busy]
+      description: Whole-house activity level inference.
+
+    ModeState:
+      type: string
+      enum: [unknown, day, night, away, sleeping]
+      description: Whole-house behavioural mode inference.
+
+    # ── House ────────────────────────────────────────────────────────────────
+
+    HouseOccupancyResponse:
+      type: object
+      required: [state, confidence, last_changed]
+      properties:
+        state:
+          $ref: "#/components/schemas/OccupancyState"
+        confidence:
+          type: number
+          format: double
+        last_changed:
+          type: string
+          format: date-time
+          nullable: true
+        last_changed_ago:
+          type: integer
+          description: Seconds since last state change.
+
+    HouseActivityResponse:
+      type: object
+      required: [state, confidence, last_changed]
+      properties:
+        state:
+          $ref: "#/components/schemas/HouseActivityState"
+        confidence:
+          type: number
+          format: double
+        last_changed:
+          type: string
+          format: date-time
+          nullable: true
+        last_changed_ago:
+          type: integer
+          description: Seconds since last state change.
+
+    HouseModeResponse:
+      type: object
+      required: [state, confidence, last_changed]
+      properties:
+        state:
+          $ref: "#/components/schemas/ModeState"
+        confidence:
+          type: number
+          format: double
+        last_changed:
+          type: string
+          format: date-time
+          nullable: true
+        last_changed_ago:
+          type: integer
+          description: Seconds since last state change.
+
+    HouseResponse:
+      type: object
+      required: [occupancy, activity, mode, active_devices]
+      properties:
+        occupancy:
+          $ref: "#/components/schemas/HouseOccupancyResponse"
+        activity:
+          $ref: "#/components/schemas/HouseActivityResponse"
+        mode:
+          $ref: "#/components/schemas/HouseModeResponse"
+        active_devices:
+          type: array
+          items:
+            type: string
+          description: IDs of devices currently considered active.
+
+    # ── Device ───────────────────────────────────────────────────────────────
+
+    IdentityResponse:
+      type: object
+      required: [scheme]
+      properties:
+        scheme:
+          type: string
+          description: Adapter protocol ("zigbee", "boiler", "ups", etc.)
+        primary:
+          type: string
+          description: Stable adapter-specific identifier (e.g. IEEE address).
+        display:
+          type: string
+          description: Human-readable mutable name from the adapter.
+
+    ActivityResponse:
+      type: object
+      required: [state, last_changed, last_changed_ago, confidence]
+      properties:
+        state:
+          $ref: "#/components/schemas/DeviceActivityState"
+        last_changed:
+          type: string
+          format: date-time
+          nullable: true
+        last_changed_ago:
+          type: integer
+          nullable: true
+          description: Seconds since last state change.
+        confidence:
+          type: number
+          format: double
+
+    LatestResponse:
+      type: object
+      required: [last_seen, last_seen_ago, stale]
+      properties:
+        power_w:
+          type: number
+          format: double
+          description: Instantaneous power in watts.
+        voltage_v:
+          type: number
+          format: double
+          description: Voltage in volts.
+        energy_kwh:
+          type: number
+          format: double
+          description: Cumulative energy in kWh.
+        temperature_c:
+          type: number
+          format: double
+          description: Temperature in degrees Celsius.
+        humidity_pct:
+          type: number
+          format: double
+          description: Relative humidity percentage.
+        pressure_hpa:
+          type: number
+          format: double
+          description: Atmospheric pressure in hPa.
+        wind_speed_ms:
+          type: number
+          format: double
+          description: Wind speed in m/s.
+        wind_dir_deg:
+          type: number
+          format: double
+          description: Wind direction in degrees.
+        rainfall_mm:
+          type: number
+          format: double
+          description: Rainfall in mm.
+        illuminance_lux:
+          type: number
+          format: double
+          description: Illuminance in lux.
+        uv_index:
+          type: number
+          format: double
+          description: UV index.
+        battery_runtime_mins:
+          type: number
+          format: double
+          description: UPS estimated battery runtime in minutes.
+        on_battery:
+          type: boolean
+          description: UPS is running on battery.
+        low_battery:
+          type: boolean
+          description: UPS battery is low.
+        battery_pct:
+          type: number
+          format: double
+          description: Battery charge percentage.
+        linkquality:
+          type: integer
+          description: Zigbee link quality indicator (0–255).
+        rssi_dbm:
+          type: integer
+          description: Wi-Fi RSSI in dBm.
+        last_seen:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of the most recent telemetry message.
+        last_seen_ago:
+          type: integer
+          nullable: true
+          description: Seconds since last telemetry message.
+        stale:
+          type: boolean
+          description: True when last_seen exceeds the class staleness threshold.
+
+    DivergenceResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, warning, pending]
+        reason:
+          type: string
+          description: Present when status is "pending" (e.g. "cycle_active").
+        pct:
+          type: number
+          format: double
+          description: Divergence percentage between metered and integrated energy.
+        warning:
+          type: boolean
+
+    CycleEnergyResponse:
+      type: object
+      required: [primary_source, reported_kwh_delta, integrated_kwh, selected_kwh, divergence]
+      properties:
+        primary_source:
+          type: string
+          description: Energy source used for reported_kwh_delta (e.g. "zigbee_meter").
+        reported_kwh_delta:
+          type: number
+          format: double
+          description: Energy reported by the metering source for this cycle.
+        integrated_kwh:
+          type: number
+          format: double
+          description: Energy calculated by integrating instantaneous power.
+        selected_kwh:
+          type: number
+          format: double
+          description: The energy value selected as most reliable.
+        stale_counter:
+          type: boolean
+          description: True when the energy counter appears to have stalled.
+        divergence:
+          $ref: "#/components/schemas/DivergenceResponse"
+
+    CycleResponse:
+      type: object
+      required: [type, active, started_at, duration_seconds, energy]
+      properties:
+        type:
+          type: string
+          enum: [appliance_cycle, compressor_cycle, binary_cycle, unknown]
+        active:
+          type: boolean
+          description: True while the cycle is in progress.
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          description: Present once the cycle has ended.
+        duration_seconds:
+          type: integer
+          format: int64
+          description: Elapsed duration in seconds (growing while active).
+        energy:
+          $ref: "#/components/schemas/CycleEnergyResponse"
+
+    DeviceResponse:
+      type: object
+      required: [id, class, availability, activity, latest, warnings]
+      properties:
+        id:
+          type: string
+          description: Stable device identifier.
+        display_name:
+          type: string
+          description: Human-readable name override from config.
+        class:
+          type: string
+          description: Device class (e.g. "short_burst_power_device", "continuous").
+        location:
+          type: string
+          description: Room or zone label from config.
+        identity:
+          allOf:
+            - $ref: "#/components/schemas/IdentityResponse"
+          description: Protocol-agnostic identity. Present in /state/devices/{id}, absent in /state/devices.
+        availability:
+          $ref: "#/components/schemas/Availability"
+        activity:
+          $ref: "#/components/schemas/ActivityResponse"
+        latest:
+          $ref: "#/components/schemas/LatestResponse"
+        cycle:
+          allOf:
+            - $ref: "#/components/schemas/CycleResponse"
+          description: Present for cycle-tracking device classes.
+        unclassified:
+          type: boolean
+          description: True when the device has no matching class config.
+        warnings:
+          type: array
+          items:
+            type: string
+            enum: [stale_device, cycle_divergence, stale_counter]
+
+    # ── Snapshot ─────────────────────────────────────────────────────────────
+
+    SummaryResponse:
+      type: object
+      required: [device_count, online_count, active_count, warning_count]
+      properties:
+        device_count:
+          type: integer
+        online_count:
+          type: integer
+        active_count:
+          type: integer
+          description: Devices currently in an active state (excludes continuous devices).
+        warning_count:
+          type: integer
+          description: Devices with at least one active warning.
+
+    SnapshotResponse:
+      type: object
+      required: [schema_version, generated_at, summary, house, devices, activity]
+      properties:
+        schema_version:
+          type: string
+          example: net.swee.statehouse.snapshot.v1
+        generated_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          description: Server start time. Present when uptime data is available.
+        started_ago:
+          type: integer
+          description: Seconds since server start.
+        summary:
+          $ref: "#/components/schemas/SummaryResponse"
+        house:
+          $ref: "#/components/schemas/HouseResponse"
+        devices:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/DeviceResponse"
+        activity:
+          $ref: "#/components/schemas/ActivityStateResponse"
+
+    # ── Activity ─────────────────────────────────────────────────────────────
+
+    SignalResponse:
+      type: object
+      required: [id, source, type, confidence, since]
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+          description: System that asserted this signal (e.g. device ID, "intercom").
+        location:
+          type: string
+        type:
+          type: string
+          description: Signal type (e.g. "presence", "motion").
+        confidence:
+          type: number
+          format: double
+        since:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          description: When the signal auto-expires. Absent if it doesn't expire.
+        meta:
+          type: object
+          additionalProperties: true
+
+    ActivityRecordResponse:
+      type: object
+      required: [id, source, type, started_at]
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+        location:
+          type: string
+        type:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          description: Present once the activity has ended.
+        meta:
+          type: object
+          additionalProperties: true
+
+    ActivityStateResponse:
+      type: object
+      required: [generated_at, signals, recent]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        signals:
+          type: array
+          items:
+            $ref: "#/components/schemas/SignalResponse"
+          description: Currently active signals.
+        recent:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityRecordResponse"
+          description: Recent completed or in-progress activity records.
+
+    # ── Config ───────────────────────────────────────────────────────────────
+
+    ThresholdsResponse:
+      type: object
+      properties:
+        idle_below_w:
+          type: number
+          format: double
+          description: Power threshold below which the device is considered idle.
+        active_above_w:
+          type: number
+          format: double
+          description: Power threshold above which the device is considered active.
+        active_sustained_for_sec:
+          type: number
+          format: double
+          description: Seconds power must exceed active_above_w before active state is confirmed.
+        inactive_sustained_for_sec:
+          type: number
+          format: double
+          description: Seconds power must stay below idle_below_w before idle state is confirmed.
+        compressor_above_w:
+          type: number
+          format: double
+          description: Power threshold for compressor-cycle detection.
+
+    DeviceProfileResponse:
+      type: object
+      required: [class, energy_strategy, resolution]
+      properties:
+        class:
+          type: string
+        energy_strategy:
+          type: string
+          description: Which energy reading to prefer (e.g. "reported", "integrated", "best").
+        resolution:
+          type: string
+          description: Sampling resolution label (e.g. "high", "standard").
+        display_name:
+          type: string
+        location:
+          type: string
+        thresholds:
+          $ref: "#/components/schemas/ThresholdsResponse"
+
+    # ── System ───────────────────────────────────────────────────────────────
+
+    NsStatus:
+      type: object
+      required: [ok, fetched_at, fetched_at_ago]
+      properties:
+        ok:
+          type: boolean
+        fetched_at:
+          type: string
+          format: date-time
+        fetched_at_ago:
+          type: integer
+          description: Seconds since the last successful fetch.
+        error:
+          type: string
+          description: Last fetch error message, if any.
+
+    HealthResponse:
+      type: object
+      required: [status, started_at, started_ago, mqtt_connected, influx_enabled, goroutines]
+      properties:
+        status:
+          type: string
+          example: ok
+        version:
+          type: string
+          description: Build commit hash. Absent when running outside a tagged deploy.
+        started_at:
+          type: string
+          format: date-time
+        started_ago:
+          type: integer
+          description: Seconds since server start.
+        mqtt_connected:
+          type: boolean
+        influx_enabled:
+          type: boolean
+        influx_reachable:
+          type: boolean
+          description: Present when Influx is enabled.
+        goroutines:
+          type: integer
+        remote_config:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/NsStatus"
+          description: Fetch status per remote config namespace.
+
+    JwksMetrics:
+      type: object
+      required:
+        - jwks_fetches_total
+        - jwks_fetch_errors_total
+        - jwks_kid_misses_total
+        - jwks_rotations_total
+        - jwks_stale_served_total
+        - jwks_key_count
+      properties:
+        jwks_fetches_total:
+          type: integer
+          format: int64
+        jwks_fetch_errors_total:
+          type: integer
+          format: int64
+        jwks_kid_misses_total:
+          type: integer
+          format: int64
+        jwks_rotations_total:
+          type: integer
+          format: int64
+        jwks_stale_served_total:
+          type: integer
+          format: int64
+        jwks_key_count:
+          type: integer
+
+    MetricsResponse:
+      type: object
+      required:
+        - started_ago
+        - device_count
+        - canonical_events_total
+        - derived_events_total
+        - mqtt_publishes_dropped_total
+        - mqtt_reconnects_total
+        - heap_alloc_bytes
+        - heap_sys_bytes
+        - gc_cycles_total
+        - last_gc_pause_ms
+        - recent_log_events
+        - recent_log_size_bytes
+      properties:
+        started_ago:
+          type: integer
+          description: Seconds since server start.
+        device_count:
+          type: integer
+        canonical_events_total:
+          type: integer
+          format: int64
+        derived_events_total:
+          type: integer
+          format: int64
+        influx_writes_queued:
+          type: integer
+          format: int64
+          description: Present when Influx is enabled.
+        influx_writes_failure:
+          type: integer
+          format: int64
+          description: Present when Influx is enabled.
+        mqtt_publishes_dropped_total:
+          type: integer
+          format: int64
+        mqtt_reconnects_total:
+          type: integer
+          format: int64
+        heap_alloc_bytes:
+          type: integer
+          format: int64
+        heap_sys_bytes:
+          type: integer
+          format: int64
+        gc_cycles_total:
+          type: integer
+        last_gc_pause_ms:
+          type: number
+          format: double
+        recent_log_events:
+          type: integer
+        recent_log_size_bytes:
+          type: integer
+          format: int64
+        jwks:
+          allOf:
+            - $ref: "#/components/schemas/JwksMetrics"
+          description: Present when auth is configured.

@@ -155,7 +155,8 @@ func (i IntercomConfig) IsEnabled() bool {
 }
 
 type HTTPConfig struct {
-	Listen string `yaml:"listen"`
+	Listen    string `yaml:"listen"`
+	PublicURL string `yaml:"public_url"`
 }
 
 type RecentLogConfig struct {

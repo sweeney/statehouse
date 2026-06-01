@@ -31,7 +31,7 @@ import (
 var version = "dev"
 
 func main() {
-	configPath := flag.String("config", "/etc/house-state-engine/config.yaml", "path to YAML config")
+	configPath := flag.String("config", "/etc/statehouse/config.yaml", "path to YAML config")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -163,6 +163,7 @@ func main() {
 	api.Publisher = publisher
 	api.RemoteConfig = remoteCfgFetcher
 	api.IdentityURL = cfg.Identity.BaseURL
+	api.PublicURL = cfg.HTTP.PublicURL
 	engine.AddCanonicalSink(api)
 	engine.AddDerivedSink(api)
 

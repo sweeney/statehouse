@@ -1,4 +1,4 @@
-.PHONY: build test lint clean deploy
+.PHONY: build test lint lint-spec clean deploy
 
 BINARY := statehouse
 MAIN   := ./cmd/statehouse
@@ -11,6 +11,9 @@ test:
 
 lint:
 	go vet ./...
+
+lint-spec:
+	npx --yes @stoplight/spectral-cli@latest lint internal/httpapi/openapi.yaml
 
 clean:
 	rm -rf bin/
