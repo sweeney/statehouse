@@ -353,6 +353,37 @@ func TestAggregate_CoverageMayExceedOne(t *testing.T) {
 	}
 }
 
+// TestAggregate_MultipleMetersDeterministic asserts that when two
+// meter devices are present (e.g. a misconfigured second energy_meter),
+// the choice of gross is the lowest device id rather than whatever
+// happens to be first in the map iteration. A two-meter misconfig
+// should surface as a stable wrong number, not a flickering one.
+func TestAggregate_MultipleMetersDeterministic(t *testing.T) {
+	p1, p2 := 1000.0, 2000.0
+	devs := map[string]model.Device{
+		"zzz_meter": {
+			ID:           "zzz_meter",
+			Class:        device.ClassEnergyMeter,
+			Availability: model.AvailabilityOnline,
+			Latest:       model.Latest{PowerW: &p2, LastSeen: aggTestNow},
+		},
+		"aaa_meter": {
+			ID:           "aaa_meter",
+			Class:        device.ClassEnergyMeter,
+			Availability: model.AvailabilityOnline,
+			Latest:       model.Latest{PowerW: &p1, LastSeen: aggTestNow},
+		},
+	}
+	// Run repeatedly so any nondeterminism from map iteration order
+	// is caught.
+	for i := 0; i < 50; i++ {
+		agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+		if agg.GrossW != 1000 {
+			t.Fatalf("iter %d: GrossW=%v want 1000 (aaa_meter, lowest id)", i, agg.GrossW)
+		}
+	}
+}
+
 func TestAggregate_ZeroGross(t *testing.T) {
 	devs := map[string]model.Device{
 		"meter": mkMeter("meter", 0, aggTestNow),

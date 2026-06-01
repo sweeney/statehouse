@@ -405,6 +405,75 @@ func TestEngineElectricity_CanonicalValueMatchesSummary(t *testing.T) {
 	}
 }
 
+// TestEngineElectricity_NegativeGrossCoverageExposed asserts the
+// design contract: when the meter reports export (negative gross —
+// SMETS2 with solar PV), Coverage is computed raw rather than clamped.
+// The negative ratio is meaningless as a "fraction of consumption"
+// but the test pins that the engine doesn't clip the signal.
+func TestEngineElectricity_NegativeGrossCoverageExposed(t *testing.T) {
+	engine, store, _, clock := mkElectricityEngine(t)
+	ingestMeter(engine, clock.Now(), -500)
+	ingestPlug(engine, "0x00158d0000000009", "kitchen_kettle", clock.Now(), 200)
+	clock.Advance(1 * time.Second)
+	ingestMeter(engine, clock.Now(), -500)
+
+	e := store.House().Electricity
+	if e.Coverage != 200.0/-500.0 {
+		t.Fatalf("Coverage=%v want %v (raw, not clamped)", e.Coverage, 200.0/-500.0)
+	}
+	if e.UnmonitoredW != -500-200 {
+		t.Fatalf("UnmonitoredW=%v want -700 (raw)", e.UnmonitoredW)
+	}
+}
+
+// TestEngineElectricity_MonotonicityGuard_RejectsOlderTimestamp
+// verifies the guard in recomputeElectricity: a reading whose
+// timestamp is older than the last applied recompute is dropped
+// entirely (no integrator advance, no store update). Without this
+// guard, the energy.Integrator's dt<=0 branch advances lastAt
+// backwards, causing the next legitimate interval to double-count.
+func TestEngineElectricity_MonotonicityGuard_RejectsOlderTimestamp(t *testing.T) {
+	engine, store, _, clock := mkElectricityEngine(t)
+	ingestMeter(engine, clock.Now(), 1000)
+	beforeTotal := store.House().Electricity.GrossKWh
+	beforeComputedAt := store.House().Electricity.ComputedAt
+
+	// Older-than-current reading; should be skipped.
+	older := clock.Now().Add(-30 * time.Second)
+	ingestMeter(engine, older, 2000)
+
+	after := store.House().Electricity
+	if !after.ComputedAt.Equal(beforeComputedAt) {
+		t.Fatalf("ComputedAt regressed from %v to %v", beforeComputedAt, after.ComputedAt)
+	}
+	if after.GrossKWh != beforeTotal {
+		t.Fatalf("GrossKWh changed from %v to %v on older reading", beforeTotal, after.GrossKWh)
+	}
+	if after.GrossW != 1000 {
+		t.Fatalf("GrossW=%v; older reading must not overwrite live value", after.GrossW)
+	}
+}
+
+// TestEngineElectricity_MonotonicityGuard_AdvancesOnNewer is the
+// positive case: a reading newer than the last applied recompute is
+// integrated normally.
+func TestEngineElectricity_MonotonicityGuard_AdvancesOnNewer(t *testing.T) {
+	engine, store, _, clock := mkElectricityEngine(t)
+	ingestMeter(engine, clock.Now(), 1000)
+	beforeAt := store.House().Electricity.ComputedAt
+
+	clock.Advance(10 * time.Second)
+	ingestMeter(engine, clock.Now(), 1000)
+
+	after := store.House().Electricity
+	if !after.ComputedAt.After(beforeAt) {
+		t.Fatalf("ComputedAt did not advance: %v -> %v", beforeAt, after.ComputedAt)
+	}
+	if after.GrossKWh <= 0 {
+		t.Fatalf("GrossKWh=%v; expected positive after 10s interval", after.GrossKWh)
+	}
+}
+
 func TestEngineElectricity_HouseNotInSnapshotDevices(t *testing.T) {
 	engine, store, _, clock := mkElectricityEngine(t)
 	ingestMeter(engine, clock.Now(), 1000)

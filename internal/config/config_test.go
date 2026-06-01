@@ -499,6 +499,13 @@ energy:
     staleness_idle: 10m
     idle_below_w: 5
 `},
+		{"zero_staleness_idle", `
+energy:
+  electricity:
+    staleness_active: 60s
+    staleness_idle: 0s
+    idle_below_w: 5
+`},
 		{"negative_idle_threshold", `
 energy:
   electricity:

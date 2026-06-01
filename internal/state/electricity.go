@@ -109,14 +109,21 @@ func isFreshDevice(d model.Device, now time.Time, cfg config.ElectricityConfig) 
 // the engine layer does that, so the aggregator can be unit-tested as a
 // pure function.
 //
-// The first device of class ClassEnergyMeter with a non-nil PowerW
-// supplies GrossW. If no such device exists, GrossSeen is false and the
-// engine treats the result as "no data yet, do nothing."
+// Gross is supplied by the lowest-id device whose class is
+// ClassEnergyMeter or whose Identity.Scheme is "meter" (and which
+// carries a non-nil PowerW). Selecting by sorted id gives a
+// deterministic choice when multiple meter devices are present (rare
+// — typically a single-supply home — but a two-meter misconfig
+// surfaces as a stable wrong number rather than a flickering one).
+// If no such device exists, GrossSeen is false and the engine treats
+// the result as "no data yet, do nothing."
 func AggregateElectricity(now time.Time, devices map[string]model.Device, cfg config.ElectricityConfig) ElectricityAggregate {
 	var agg ElectricityAggregate
+	var meterID string
 	for _, d := range devices {
 		if isMeterDevice(d) {
-			if !agg.GrossSeen {
+			if meterID == "" || d.ID < meterID {
+				meterID = d.ID
 				agg.GrossW = *d.Latest.PowerW
 				agg.GrossSeen = true
 			}

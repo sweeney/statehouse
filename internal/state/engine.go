@@ -49,6 +49,7 @@ type Engine struct {
 	grossIntegrator       *energy.Integrator
 	monitoredIntegrator   *energy.Integrator
 	unmonitoredIntegrator *energy.Integrator
+	lastElecAt            time.Time
 }
 
 type engineSnap struct {

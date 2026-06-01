@@ -171,8 +171,12 @@ type ModeDimension struct {
 // the residual (unmonitored). Unmonitored and Coverage are exposed raw
 // — Coverage may exceed 1 and UnmonitoredW may be negative when the
 // device sum briefly overruns the meter (different sample cadences,
-// apparent-vs-active power on some plugs). Consumers decide whether to
-// clip cosmetically.
+// apparent-vs-active power on some plugs). Coverage is also undefined
+// for negative gross: SMETS2 meters with solar/battery report net
+// export as a negative GrossW, and monitored/negative produces a
+// negative ratio that loses its "fraction of consumption" semantics.
+// Consumers decide whether to render it; clipping would hide
+// misconfiguration.
 type ElectricitySummary struct {
 	GrossW           float64   `json:"gross_w"`
 	MonitoredW       float64   `json:"monitored_w"`

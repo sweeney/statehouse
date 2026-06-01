@@ -15,6 +15,24 @@ import (
 // Plug readings update the live House.Electricity field for the HTTP
 // snapshot but emit nothing, so the canonical stream stays locked to
 // meter cadence.
+//
+// Concurrency: IngestReading is a supported concurrent entry point
+// (the engine has no input-side serialisation; the concurrent test
+// proves the data path is race-free). A monotonicity guard discards
+// readings whose timestamp is older than the last applied electricity
+// recompute. Without it, two concerns arise from out-of-order arrivals:
+//
+//  1. setHouseElectricity could clobber a newer summary with an older
+//     one — House.Electricity.ComputedAt and *KWh would regress.
+//  2. The shared energy.Integrator skips accrual on dt<=0 but still
+//     advances its internal lastAt to the older timestamp, which
+//     causes the *next* legitimate interval to overlap the previous
+//     one and double-count a slice of energy.
+//
+// Skipping is the conservative choice: the device's Latest is still
+// updated upstream of recomputeElectricity, so the next on-time meter
+// tick will pick up the dropped reading's contribution in its
+// monitored sum.
 func (e *Engine) recomputeElectricity(now time.Time, triggeredByMeter bool, sourceTopic string) {
 	devices := e.store.Devices()
 	agg := AggregateElectricity(now, devices, e.cfg.Energy.Electricity)
@@ -23,6 +41,11 @@ func (e *Engine) recomputeElectricity(now time.Time, triggeredByMeter bool, sour
 	}
 
 	e.elecMu.Lock()
+	if !e.lastElecAt.IsZero() && !now.After(e.lastElecAt) {
+		e.elecMu.Unlock()
+		return
+	}
+	e.lastElecAt = now
 	e.grossIntegrator.Update(now, agg.GrossW)
 	e.monitoredIntegrator.Update(now, agg.MonitoredW)
 	e.unmonitoredIntegrator.Update(now, agg.UnmonitoredW)
@@ -37,12 +60,25 @@ func (e *Engine) recomputeElectricity(now time.Time, triggeredByMeter bool, sour
 		UnmonitoredKWh:   e.unmonitoredIntegrator.Total(),
 		ComputedAt:       now,
 	}
+	// Coverage is monitored / gross, exposed raw. It can exceed 1
+	// briefly (monitored outruns gross due to sample-cadence skew or
+	// apparent-vs-real power on some plugs). It can be negative when
+	// gross is negative — SMETS2 meters with solar/battery report
+	// net export as a negative power.value, in which case the ratio
+	// loses its "fraction of consumption" semantics. Downstream
+	// consumers decide whether to render it; clamping here would
+	// hide misconfiguration. Zero gross gives Coverage = 0 (the
+	// `!= 0` guard avoids NaN/Inf).
 	if agg.GrossW != 0 {
 		summary.Coverage = agg.MonitoredW / agg.GrossW
 	}
-	e.elecMu.Unlock()
-
+	// setHouseElectricity is inside elecMu so the store mirror
+	// reflects the same integrator snapshot the canonical events
+	// will carry; releasing the lock between the build and the
+	// store-write would allow a concurrent recompute to install a
+	// newer summary first and then have this one clobber it.
 	e.store.setHouseElectricity(summary)
+	e.elecMu.Unlock()
 
 	if triggeredByMeter {
 		e.emitElectricityCanonical(now, sourceTopic, summary)
