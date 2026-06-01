@@ -270,6 +270,17 @@ func (s *Store) withEntry(id string, fn func(*deviceEntry)) bool {
 	return true
 }
 
+// setHouseElectricity atomically replaces the electricity summary on
+// the house state. Unlike setHouse this does not run change detection
+// — the floats wiggle on every meter reading, so attempting to
+// dedupe would either spam EvtHouseStateChanged or require a
+// sensitivity threshold that doesn't belong in the store.
+func (s *Store) setHouseElectricity(e model.ElectricitySummary) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.house.Electricity = e
+}
+
 // setHouse atomically replaces the whole-house state. Returns true if
 // any dimension's state changed.
 func (s *Store) setHouse(h model.House) bool {
@@ -295,6 +306,7 @@ func (s *Store) setHouse(h model.House) bool {
 	} else {
 		h.Mode.LastChanged = s.house.Mode.LastChanged
 	}
+	h.Electricity = s.house.Electricity
 	s.house = h
 	return changed
 }

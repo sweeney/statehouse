@@ -174,8 +174,20 @@ type InfluxConfig struct {
 }
 
 type EnergyConfig struct {
-	DivergenceWarningPct float64       `yaml:"divergence_warning_pct"  json:"divergence_warning_pct"`
-	MaxIntegrationGap    time.Duration `yaml:"max_integration_gap"     json:"-"`
+	DivergenceWarningPct float64           `yaml:"divergence_warning_pct"  json:"divergence_warning_pct"`
+	MaxIntegrationGap    time.Duration     `yaml:"max_integration_gap"     json:"-"`
+	Electricity          ElectricityConfig `yaml:"electricity"             json:"electricity,omitempty"`
+}
+
+// ElectricityConfig tunes the whole-house electricity aggregator. The
+// idle/active split lets change-reporting plugs (Aqara-style: emit only
+// when state changes) survive long quiet periods at 0W without being
+// flagged stale, while devices reporting non-zero power are still
+// expected to refresh frequently.
+type ElectricityConfig struct {
+	StalenessActive time.Duration `yaml:"staleness_active" json:"-"`
+	StalenessIdle   time.Duration `yaml:"staleness_idle"   json:"-"`
+	IdleBelowW      float64       `yaml:"idle_below_w"     json:"idle_below_w,omitempty"`
 }
 
 type AvailabilityConfig struct {
@@ -292,6 +304,11 @@ func Default() Config {
 		Energy: EnergyConfig{
 			DivergenceWarningPct: 20,
 			MaxIntegrationGap:    30 * time.Minute,
+			Electricity: ElectricityConfig{
+				StalenessActive: 90 * time.Second,
+				StalenessIdle:   30 * time.Minute,
+				IdleBelowW:      5,
+			},
 		},
 		Availability: AvailabilityConfig{
 			OfflineDebounce: 30 * time.Second,
@@ -328,6 +345,15 @@ func Load(path string) (Config, error) {
 		if _, err := time.LoadLocation(cfg.House.Timezone); err != nil {
 			return cfg, fmt.Errorf("parse house.timezone %q: %w", cfg.House.Timezone, err)
 		}
+	}
+	if cfg.Energy.Electricity.StalenessActive <= 0 {
+		return cfg, fmt.Errorf("energy.electricity.staleness_active must be > 0; got %v", cfg.Energy.Electricity.StalenessActive)
+	}
+	if cfg.Energy.Electricity.StalenessIdle <= 0 {
+		return cfg, fmt.Errorf("energy.electricity.staleness_idle must be > 0; got %v", cfg.Energy.Electricity.StalenessIdle)
+	}
+	if cfg.Energy.Electricity.IdleBelowW < 0 {
+		return cfg, fmt.Errorf("energy.electricity.idle_below_w must be >= 0; got %v", cfg.Energy.Electricity.IdleBelowW)
 	}
 	if cfg.Adapters.Zigbee2MQTT.BaseTopic == "" {
 		cfg.Adapters.Zigbee2MQTT.BaseTopic = "zigbee2mqtt"

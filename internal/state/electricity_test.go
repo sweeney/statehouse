@@ -1,0 +1,368 @@
+package state
+
+import (
+	"testing"
+	"time"
+
+	"github.com/sweeney/statehouse/internal/config"
+	"github.com/sweeney/statehouse/internal/device"
+	"github.com/sweeney/statehouse/internal/model"
+)
+
+var aggTestCfg = config.ElectricityConfig{
+	StalenessActive: 90 * time.Second,
+	StalenessIdle:   30 * time.Minute,
+	IdleBelowW:      5,
+}
+
+var aggTestNow = time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+
+func mkPlug(id, class string, power float64, lastSeen time.Time, avail model.Availability) model.Device {
+	p := power
+	return model.Device{
+		ID:           id,
+		Class:        class,
+		Availability: avail,
+		Latest:       model.Latest{PowerW: &p, LastSeen: lastSeen},
+	}
+}
+
+func mkMeter(id string, power float64, lastSeen time.Time) model.Device {
+	p := power
+	return model.Device{
+		ID:           id,
+		Class:        device.ClassEnergyMeter,
+		Availability: model.AvailabilityOnline,
+		Latest:       model.Latest{PowerW: &p, LastSeen: lastSeen},
+	}
+}
+
+func TestAggregate_NoMeter_GrossUnseen(t *testing.T) {
+	devs := map[string]model.Device{
+		"plug": mkPlug("plug", device.ClassShortBurst, 100, aggTestNow, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if agg.GrossSeen {
+		t.Fatalf("GrossSeen=true with no meter")
+	}
+	if agg.GrossW != 0 {
+		t.Fatalf("GrossW=%v want 0", agg.GrossW)
+	}
+	if agg.MonitoredW != 100 {
+		t.Fatalf("MonitoredW=%v want 100 (sums regardless of meter)", agg.MonitoredW)
+	}
+	if agg.UnmonitoredW != 0 {
+		t.Fatalf("UnmonitoredW=%v want 0 (not computed without gross)", agg.UnmonitoredW)
+	}
+}
+
+func TestAggregate_EmptyMap(t *testing.T) {
+	agg := AggregateElectricity(aggTestNow, map[string]model.Device{}, aggTestCfg)
+	if agg.GrossSeen {
+		t.Fatalf("GrossSeen=true on empty map")
+	}
+}
+
+func TestAggregate_MeterOnly(t *testing.T) {
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1234.5, aggTestNow),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if !agg.GrossSeen {
+		t.Fatalf("GrossSeen=false with meter present")
+	}
+	if agg.GrossW != 1234.5 {
+		t.Fatalf("GrossW=%v want 1234.5", agg.GrossW)
+	}
+	if agg.MonitoredW != 0 {
+		t.Fatalf("MonitoredW=%v want 0", agg.MonitoredW)
+	}
+	if agg.UnmonitoredW != 1234.5 {
+		t.Fatalf("UnmonitoredW=%v want 1234.5", agg.UnmonitoredW)
+	}
+}
+
+func TestAggregate_SumsPowerClasses(t *testing.T) {
+	devs := map[string]model.Device{
+		"meter":  mkMeter("meter", 2000, aggTestNow),
+		"kettle": mkPlug("kettle", device.ClassShortBurst, 100, aggTestNow, model.AvailabilityOnline),
+		"dish":   mkPlug("dish", device.ClassCyclePower, 200, aggTestNow, model.AvailabilityOnline),
+		"fridge": mkPlug("fridge", device.ClassContinuous, 50, aggTestNow, model.AvailabilityOnline),
+		"tv":     mkPlug("tv", device.ClassMedia, 80, aggTestNow, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if agg.MonitoredW != 100+200+50+80 {
+		t.Fatalf("MonitoredW=%v want 430", agg.MonitoredW)
+	}
+	if agg.UnmonitoredW != 2000-430 {
+		t.Fatalf("UnmonitoredW=%v want 1570", agg.UnmonitoredW)
+	}
+}
+
+func TestAggregate_ExcludesPassiveAndBinary(t *testing.T) {
+	devs := map[string]model.Device{
+		"meter":   mkMeter("meter", 1000, aggTestNow),
+		"plug":    mkPlug("plug", device.ClassShortBurst, 100, aggTestNow, model.AvailabilityOnline),
+		"climate": mkPlug("climate", device.ClassEnvironmentalSensor, 999, aggTestNow, model.AvailabilityOnline),
+		"ups":     mkPlug("ups", device.ClassUPSSensor, 999, aggTestNow, model.AvailabilityOnline),
+		"contact": mkPlug("contact", device.ClassBinaryState, 999, aggTestNow, model.AvailabilityOnline),
+		"other":   mkPlug("other", device.ClassUnclassified, 999, aggTestNow, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if agg.MonitoredW != 100 {
+		t.Fatalf("MonitoredW=%v want 100 (only plug counted)", agg.MonitoredW)
+	}
+}
+
+func TestAggregate_ExcludesMeterFromMonitored(t *testing.T) {
+	devs := map[string]model.Device{
+		"m1":   mkMeter("m1", 1500, aggTestNow),
+		"plug": mkPlug("plug", device.ClassShortBurst, 100, aggTestNow, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if agg.GrossW != 1500 {
+		t.Fatalf("GrossW=%v want 1500", agg.GrossW)
+	}
+	if agg.MonitoredW != 100 {
+		t.Fatalf("MonitoredW=%v want 100 (meter must not be summed)", agg.MonitoredW)
+	}
+}
+
+func TestAggregate_NilPowerSkipped(t *testing.T) {
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug": {
+			ID:           "plug",
+			Class:        device.ClassShortBurst,
+			Availability: model.AvailabilityOnline,
+			Latest:       model.Latest{LastSeen: aggTestNow},
+		},
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if agg.MonitoredW != 0 {
+		t.Fatalf("MonitoredW=%v want 0 (plug had no PowerW)", agg.MonitoredW)
+	}
+	if len(agg.StaleIDs) != 0 {
+		t.Fatalf("StaleIDs=%v; nil-power plug must not be marked stale", agg.StaleIDs)
+	}
+}
+
+func TestAggregate_StaleByLastSeen_ActiveWindow(t *testing.T) {
+	old := aggTestNow.Add(-2 * time.Minute) // > 90s active window
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 100, old, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if agg.MonitoredW != 0 {
+		t.Fatalf("MonitoredW=%v want 0 (plug stale)", agg.MonitoredW)
+	}
+	if len(agg.StaleIDs) != 1 || agg.StaleIDs[0] != "plug" {
+		t.Fatalf("StaleIDs=%v want [plug]", agg.StaleIDs)
+	}
+}
+
+func TestAggregate_StaleNonIdleShortWindow(t *testing.T) {
+	old := aggTestNow.Add(-100 * time.Second)
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 60, old, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if len(agg.StaleIDs) != 1 {
+		t.Fatalf("non-idle reading must use active window: %+v", agg)
+	}
+}
+
+func TestAggregate_StaleIdleLongWindow(t *testing.T) {
+	old := aggTestNow.Add(-10 * time.Minute) // > 90s but < 30min
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 0, old, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if len(agg.StaleIDs) != 0 {
+		t.Fatalf("idle reading must use idle window: %+v", agg)
+	}
+	if agg.MonitoredW != 0 {
+		t.Fatalf("MonitoredW=%v want 0 (idle plug contributes 0)", agg.MonitoredW)
+	}
+}
+
+func TestAggregate_StaleIdleEventuallyStale(t *testing.T) {
+	old := aggTestNow.Add(-31 * time.Minute) // > 30min idle window
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 0, old, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if len(agg.StaleIDs) != 1 {
+		t.Fatalf("plug should be stale beyond idle window: %+v", agg)
+	}
+}
+
+func TestAggregate_StaleIdleBoundary(t *testing.T) {
+	old := aggTestNow.Add(-10 * time.Minute)
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 5, old, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if len(agg.StaleIDs) != 0 {
+		t.Fatalf("PowerW at idle threshold should be treated as idle: %+v", agg)
+	}
+	if agg.MonitoredW != 5 {
+		t.Fatalf("idle plug at threshold contributes its (small) reading: %v", agg.MonitoredW)
+	}
+}
+
+func TestAggregate_OfflineExcluded(t *testing.T) {
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 100, aggTestNow, model.AvailabilityOffline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if len(agg.StaleIDs) != 1 {
+		t.Fatalf("offline plug must be stale regardless of LastSeen: %+v", agg)
+	}
+	if agg.MonitoredW != 0 {
+		t.Fatalf("MonitoredW=%v want 0", agg.MonitoredW)
+	}
+}
+
+func TestAggregate_OfflinePendingDefersToStaleness_Fresh(t *testing.T) {
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 100, aggTestNow, model.AvailabilityOfflinePending),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if len(agg.StaleIDs) != 0 {
+		t.Fatalf("offline_pending with fresh LastSeen should count: %+v", agg)
+	}
+	if agg.MonitoredW != 100 {
+		t.Fatalf("MonitoredW=%v want 100", agg.MonitoredW)
+	}
+}
+
+func TestAggregate_OfflinePendingDefersToStaleness_Old(t *testing.T) {
+	old := aggTestNow.Add(-3 * time.Minute)
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 100, old, model.AvailabilityOfflinePending),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if len(agg.StaleIDs) != 1 {
+		t.Fatalf("offline_pending with old LastSeen should be stale: %+v", agg)
+	}
+}
+
+func TestAggregate_StaleIDsSorted(t *testing.T) {
+	old := aggTestNow.Add(-2 * time.Minute)
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"zzz":   mkPlug("zzz", device.ClassShortBurst, 100, old, model.AvailabilityOnline),
+		"aaa":   mkPlug("aaa", device.ClassShortBurst, 100, old, model.AvailabilityOnline),
+		"mmm":   mkPlug("mmm", device.ClassShortBurst, 100, old, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	want := []string{"aaa", "mmm", "zzz"}
+	if len(agg.StaleIDs) != 3 {
+		t.Fatalf("StaleIDs len=%v want 3", len(agg.StaleIDs))
+	}
+	for i, id := range want {
+		if agg.StaleIDs[i] != id {
+			t.Fatalf("StaleIDs[%d]=%q want %q (must be sorted)", i, agg.StaleIDs[i], id)
+		}
+	}
+}
+
+func TestAggregate_NegativeUnmonitored_NoClamp(t *testing.T) {
+	devs := map[string]model.Device{
+		"meter":  mkMeter("meter", 1200, aggTestNow),
+		"kettle": mkPlug("kettle", device.ClassShortBurst, 1000, aggTestNow, model.AvailabilityOnline),
+		"dish":   mkPlug("dish", device.ClassCyclePower, 500, aggTestNow, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if agg.UnmonitoredW != 1200-1500 {
+		t.Fatalf("UnmonitoredW=%v want -300 (not clamped)", agg.UnmonitoredW)
+	}
+}
+
+// TestAggregate_DetectsMeterByScheme verifies the scheme-based meter
+// detection fallback: an adapter-classified device with scheme="meter"
+// and Latest.PowerW set drives gross even when ClassEnergyMeter is not
+// configured via user YAML.
+func TestAggregate_DetectsMeterByScheme(t *testing.T) {
+	p := 1500.0
+	devs := map[string]model.Device{
+		"meter": {
+			ID:           "meter",
+			Class:        device.ClassUnclassified,
+			Identity:     model.DeviceIdentity{Scheme: "meter", Primary: "abc", Display: "abc"},
+			Availability: model.AvailabilityOnline,
+			Latest:       model.Latest{PowerW: &p, LastSeen: aggTestNow},
+		},
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if !agg.GrossSeen {
+		t.Fatalf("expected scheme=meter to drive gross even when class is unclassified")
+	}
+	if agg.GrossW != 1500 {
+		t.Fatalf("GrossW=%v want 1500", agg.GrossW)
+	}
+}
+
+// TestAggregate_SchemeMeterWithoutPowerExcluded asserts that a Glow TH
+// sensor (also scheme=meter but no PowerW) is not mistaken for an
+// electricity meter, so HumidityPct/TemperatureC-only payloads cannot
+// fabricate a zero-gross signal.
+func TestAggregate_SchemeMeterWithoutPowerExcluded(t *testing.T) {
+	temp := 21.5
+	devs := map[string]model.Device{
+		"th_sensor": {
+			ID:           "th_sensor",
+			Class:        device.ClassUnclassified,
+			Identity:     model.DeviceIdentity{Scheme: "meter", Primary: "th_serial", Display: "th_serial"},
+			Availability: model.AvailabilityOnline,
+			Latest:       model.Latest{TemperatureC: &temp, LastSeen: aggTestNow},
+		},
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if agg.GrossSeen {
+		t.Fatalf("scheme=meter without PowerW must not be treated as a meter")
+	}
+}
+
+// TestAggregate_CoverageMayExceedOne is the explicit contract check
+// that downstream consumers can rely on raw Coverage being passed
+// through, even when monitored briefly outruns gross. Coverage is
+// computed by the engine layer; here we assert UnmonitoredW reflects
+// the raw, non-clamped arithmetic that drives that downstream value.
+func TestAggregate_CoverageMayExceedOne(t *testing.T) {
+	devs := map[string]model.Device{
+		"meter":  mkMeter("meter", 1000, aggTestNow),
+		"plug_a": mkPlug("plug_a", device.ClassShortBurst, 700, aggTestNow, model.AvailabilityOnline),
+		"plug_b": mkPlug("plug_b", device.ClassShortBurst, 500, aggTestNow, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if agg.MonitoredW != 1200 {
+		t.Fatalf("MonitoredW=%v want 1200", agg.MonitoredW)
+	}
+	if agg.UnmonitoredW != -200 {
+		t.Fatalf("UnmonitoredW=%v want -200 (raw)", agg.UnmonitoredW)
+	}
+}
+
+func TestAggregate_ZeroGross(t *testing.T) {
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 0, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 0, aggTestNow, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, aggTestCfg)
+	if !agg.GrossSeen {
+		t.Fatalf("GrossSeen=false but meter ingested 0W")
+	}
+	if agg.UnmonitoredW != 0 {
+		t.Fatalf("UnmonitoredW=%v want 0", agg.UnmonitoredW)
+	}
+}

@@ -116,10 +116,28 @@ type HouseModeResponse struct {
 
 // HouseResponse is the DTO for the whole-house state.
 type HouseResponse struct {
-	Occupancy     HouseOccupancyResponse `json:"occupancy"`
-	Activity      HouseActivityResponse  `json:"activity"`
-	Mode          HouseModeResponse      `json:"mode"`
-	ActiveDevices []string               `json:"active_devices"`
+	Occupancy     HouseOccupancyResponse        `json:"occupancy"`
+	Activity      HouseActivityResponse         `json:"activity"`
+	Mode          HouseModeResponse             `json:"mode"`
+	ActiveDevices []string                      `json:"active_devices"`
+	Electricity   *HouseElectricityResponse     `json:"electricity,omitempty"`
+}
+
+// HouseElectricityResponse is the DTO for the whole-house electricity
+// summary. Omitted from HouseResponse when no meter reading has been
+// seen, so the absence of the block is the signal.
+type HouseElectricityResponse struct {
+	GrossW           float64    `json:"gross_w"`
+	MonitoredW       float64    `json:"monitored_w"`
+	UnmonitoredW     float64    `json:"unmonitored_w"`
+	Coverage         float64    `json:"coverage"`
+	StaleDeviceCount int        `json:"stale_device_count"`
+	StaleDevices     []string   `json:"stale_devices,omitempty"`
+	GrossKWh         float64    `json:"gross_kwh"`
+	MonitoredKWh     float64    `json:"monitored_kwh"`
+	UnmonitoredKWh   float64    `json:"unmonitored_kwh"`
+	ComputedAt       *time.Time `json:"computed_at"`
+	ComputedAgo      *int       `json:"computed_ago"`
 }
 
 // IdentityResponse is the protocol-agnostic identity of a device.
@@ -357,7 +375,7 @@ func buildHouseResponse(h model.House, now time.Time) HouseResponse {
 	if activeDevices == nil {
 		activeDevices = []string{}
 	}
-	return HouseResponse{
+	resp := HouseResponse{
 		Occupancy: HouseOccupancyResponse{
 			State:          h.Occupancy.State,
 			Confidence:     h.Occupancy.Confidence,
@@ -378,6 +396,22 @@ func buildHouseResponse(h model.House, now time.Time) HouseResponse {
 		},
 		ActiveDevices: activeDevices,
 	}
+	if !h.Electricity.ComputedAt.IsZero() {
+		resp.Electricity = &HouseElectricityResponse{
+			GrossW:           h.Electricity.GrossW,
+			MonitoredW:       h.Electricity.MonitoredW,
+			UnmonitoredW:     h.Electricity.UnmonitoredW,
+			Coverage:         h.Electricity.Coverage,
+			StaleDeviceCount: h.Electricity.StaleDeviceCount,
+			StaleDevices:     h.Electricity.StaleDevices,
+			GrossKWh:         h.Electricity.GrossKWh,
+			MonitoredKWh:     h.Electricity.MonitoredKWh,
+			UnmonitoredKWh:   h.Electricity.UnmonitoredKWh,
+			ComputedAt:       nilIfZero(h.Electricity.ComputedAt),
+			ComputedAgo:      agoInt(h.Electricity.ComputedAt, now),
+		}
+	}
+	return resp
 }
 
 // buildDeviceResponse converts a model.Device into a DeviceResponse.

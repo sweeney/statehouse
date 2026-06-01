@@ -104,6 +104,10 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 	if w == nil || !w.Enabled {
 		return
 	}
+	if ev.Capability == state.HouseElectricityCapability {
+		w.writeHouseElectricity(ev)
+		return
+	}
 	d, ok := w.Store.Get(ev.DeviceID)
 	if !ok {
 		return
@@ -236,6 +240,26 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		w.api.WritePoint(p)
 		atomic.AddUint64(&w.queued, 1)
 	}
+}
+
+// writeHouseElectricity translates one synthetic house_electricity
+// canonical event into an Influx point on the "house_electricity"
+// measurement. The eight attributes per meter tick share timestamp +
+// tags, so a query grouping by time recovers the row as a single
+// record without us having to buffer in this layer.
+func (w *Writer) writeHouseElectricity(ev model.CanonicalEvent) {
+	v, ok := ev.Value.(float64)
+	if !ok {
+		return
+	}
+	p := write.NewPoint(
+		"house_electricity",
+		map[string]string{"scope": "whole_house"},
+		map[string]any{ev.Attribute: v},
+		ev.Timestamp,
+	)
+	w.api.WritePoint(p)
+	atomic.AddUint64(&w.queued, 1)
 }
 
 // Stats returns queued/failure counts; useful for /healthz and /metrics.
