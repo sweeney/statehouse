@@ -53,6 +53,17 @@ influx:
 energy:
   divergence_warning_pct: 20
   max_integration_gap: 30m
+  electricity:
+    # staleness_active: how long a non-idle per-device power reading is
+    # trusted before it's dropped from the whole-house monitored sum.
+    staleness_active: 90s
+    # staleness_idle: how long a 0W reading is trusted. Change-reporting
+    # plugs (Aqara, IKEA) can legitimately go many minutes silent at
+    # idle; we don't want them flagged stale.
+    staleness_idle: 30m
+    # idle_below_w: a Latest.PowerW at or below this threshold uses the
+    # idle staleness window. Plugs reading above it use the active one.
+    idle_below_w: 5
 
 availability:
   offline_debounce: 30s
@@ -134,6 +145,16 @@ device_classes:
     name_hints: [electricitymeter, meter]
 
 devices:
+  # The Glow/SMETS2 meter is recognised by the meter adapter regardless
+  # of whether you list it here — its scheme is "meter" and the
+  # whole-house electricity aggregator picks it up. Listing it explicitly
+  # gives the device a nicer display name and a stable engine id.
+  house_meter:
+    scheme: meter
+    primary: "001122AABBCC"
+    class: energy_meter
+    display_name: House meter
+
   kitchen_dishwasher:
     ieee_address: "0x00158d0000000001"
     class: cycle_power_device

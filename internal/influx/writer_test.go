@@ -53,6 +53,61 @@ func newWriterTest(t *testing.T) (*Writer, *FakeWriteAPI, *state.Store) {
 	return w, api, store
 }
 
+func TestWriter_HouseElectricity_Mapped(t *testing.T) {
+	w, api, _ := newWriterTest(t)
+	ts := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
+	emits := []struct {
+		attr  string
+		value float64
+	}{
+		{"gross_w", 1500},
+		{"monitored_w", 800},
+		{"unmonitored_w", 700},
+		{"coverage", 0.5333},
+		{"gross_kwh", 1.5},
+		{"monitored_kwh", 0.8},
+		{"unmonitored_kwh", 0.7},
+		{"stale_device_count", 0},
+	}
+	for _, e := range emits {
+		w.OnCanonicalEvent(model.CanonicalEvent{
+			Timestamp:  ts,
+			DeviceID:   state.HouseDeviceID,
+			Capability: state.HouseElectricityCapability,
+			Attribute:  e.attr,
+			Value:      e.value,
+		})
+	}
+	pts := api.PointsForMeasurement("house_electricity")
+	if len(pts) != len(emits) {
+		t.Fatalf("expected %d house_electricity points, got %d", len(emits), len(pts))
+	}
+	for i, p := range pts {
+		fields := fieldMap(p)
+		if got, want := fields[emits[i].attr], emits[i].value; got != want {
+			t.Errorf("attr %q: got %v want %v", emits[i].attr, got, want)
+		}
+		tags := tagMap(p)
+		if tags["scope"] != "whole_house" {
+			t.Errorf("missing scope tag, got %v", tags)
+		}
+	}
+}
+
+func TestWriter_HouseElectricity_NoStoreLookup(t *testing.T) {
+	w, api, _ := newWriterTest(t)
+	w.OnCanonicalEvent(model.CanonicalEvent{
+		Timestamp:  time.Now(),
+		DeviceID:   state.HouseDeviceID,
+		Capability: state.HouseElectricityCapability,
+		Attribute:  "gross_w",
+		Value:      1000.0,
+	})
+	if len(api.PointsForMeasurement("house_electricity")) != 1 {
+		t.Fatalf("synthetic 'house' device id must not require a store registration")
+	}
+}
+
 func TestWriter_DisabledIsNoop(t *testing.T) {
 	api := NewFakeWriteAPI()
 	w := &Writer{Enabled: false, api: api, Store: state.NewStore()}

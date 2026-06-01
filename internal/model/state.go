@@ -166,6 +166,30 @@ type ModeDimension struct {
 	LastChanged time.Time `json:"last_changed"`
 }
 
+// ElectricitySummary is the whole-house electricity view: gross (from
+// the meter), the sum of per-device power readings (monitored), and
+// the residual (unmonitored). Unmonitored and Coverage are exposed raw
+// — Coverage may exceed 1 and UnmonitoredW may be negative when the
+// device sum briefly overruns the meter (different sample cadences,
+// apparent-vs-active power on some plugs). Coverage is also undefined
+// for negative gross: SMETS2 meters with solar/battery report net
+// export as a negative GrossW, and monitored/negative produces a
+// negative ratio that loses its "fraction of consumption" semantics.
+// Consumers decide whether to render it; clipping would hide
+// misconfiguration.
+type ElectricitySummary struct {
+	GrossW           float64   `json:"gross_w"`
+	MonitoredW       float64   `json:"monitored_w"`
+	UnmonitoredW     float64   `json:"unmonitored_w"`
+	Coverage         float64   `json:"coverage"`
+	StaleDeviceCount int       `json:"stale_device_count"`
+	StaleDevices     []string  `json:"stale_devices,omitempty"`
+	GrossKWh         float64   `json:"gross_kwh"`
+	MonitoredKWh     float64   `json:"monitored_kwh"`
+	UnmonitoredKWh   float64   `json:"unmonitored_kwh"`
+	ComputedAt       time.Time `json:"computed_at"`
+}
+
 // House summarises whole-house derived state across three independent
 // semantic dimensions: occupancy, activity, and mode.
 type House struct {
@@ -173,6 +197,7 @@ type House struct {
 	Activity      HouseActivityDimension `json:"activity"`
 	Mode          ModeDimension          `json:"mode"`
 	ActiveDevices []string               `json:"active_devices"`
+	Electricity   ElectricitySummary     `json:"electricity"`
 }
 
 // Snapshot is the full state-engine view at one instant.

@@ -14,6 +14,12 @@ import (
 	"github.com/sweeney/statehouse/internal/testutil"
 )
 
+// houseIdentity is the synthetic DeviceIdentity attached to canonical
+// events produced by the whole-house electricity aggregator. The
+// scheme is "house" and there is no protocol-stable primary, so the
+// event carries the synthetic id only.
+var houseIdentity = model.DeviceIdentity{Scheme: "house", Display: HouseDeviceID}
+
 // EventSink consumes derived events. Implementations: MQTT publisher,
 // JSONL log writer, Influx writer.
 type EventSink interface {
@@ -38,6 +44,12 @@ type Engine struct {
 	mu             sync.Mutex
 	derivedSinks   []EventSink
 	canonicalSinks []CanonicalSink
+
+	elecMu                sync.Mutex
+	grossIntegrator       *energy.Integrator
+	monitoredIntegrator   *energy.Integrator
+	unmonitoredIntegrator *energy.Integrator
+	lastElecAt            time.Time
 }
 
 type engineSnap struct {
@@ -53,11 +65,15 @@ func (e *Engine) snap() engineSnap {
 
 // NewEngine constructs an engine with the given store and config.
 func NewEngine(cfg config.Config, store *Store, clock testutil.Clock) *Engine {
+	gap := cfg.Energy.MaxIntegrationGap
 	return &Engine{
-		cfg:      cfg,
-		resolver: device.NewResolver(cfg),
-		store:    store,
-		clock:    clock,
+		cfg:                   cfg,
+		resolver:              device.NewResolver(cfg),
+		store:                 store,
+		clock:                 clock,
+		grossIntegrator:       energy.NewIntegrator(gap),
+		monitoredIntegrator:   energy.NewIntegrator(gap),
+		unmonitoredIntegrator: energy.NewIntegrator(gap),
 	}
 }
 
@@ -362,6 +378,11 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 	// Re-derive whole-house state on every activity transition.
 	if outcome.PrevActivity != outcome.NewActivity || outcome.CycleStarted || outcome.CycleFinished {
 		e.RecomputeHouse()
+	}
+
+	if reading.PowerW != nil {
+		isMeterTrigger := profile.Class == device.ClassEnergyMeter || identity.Scheme == meterScheme
+		e.recomputeElectricity(reading.Timestamp, isMeterTrigger, sourceTopic)
 	}
 }
 

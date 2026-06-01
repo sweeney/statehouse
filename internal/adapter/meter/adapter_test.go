@@ -56,6 +56,25 @@ func TestAdapter_Subscriptions(t *testing.T) {
 
 const sampleMeter = `{"electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","energy":{"export":{"cumulative":0.000,"units":"kWh"},"import":{"cumulative":6252.217,"day":32.715,"week":90.226,"month":300.821,"units":"kWh","mpan":"not available","supplier":"Example Energy","price":{"unitrate":0.15000,"standingcharge":0.25000}}},"power":{"value":1.011,"units":"kW"}}}`
 
+func TestAdapter_DrivesHouseElectricity(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	a.HandleMessage("energy/001122AABBCC/SENSOR/electricitymeter", []byte(sampleMeter), false)
+
+	e := store.House().Electricity
+	if e.ComputedAt.IsZero() {
+		t.Fatalf("ComputedAt zero after meter ingest")
+	}
+	if diff := e.GrossW - 1011.0; diff > 0.001 || diff < -0.001 {
+		t.Errorf("Electricity.GrossW=%v want ~1011", e.GrossW)
+	}
+	if e.MonitoredW != 0 {
+		t.Errorf("Electricity.MonitoredW=%v want 0 (no plugs)", e.MonitoredW)
+	}
+	if diff := e.UnmonitoredW - 1011.0; diff > 0.001 || diff < -0.001 {
+		t.Errorf("Electricity.UnmonitoredW=%v want ~1011", e.UnmonitoredW)
+	}
+}
+
 func TestAdapter_ParsesMeterPayload(t *testing.T) {
 	a, store, _ := mkAdapter(t)
 	a.HandleMessage("energy/001122AABBCC/SENSOR/electricitymeter", []byte(sampleMeter), false)

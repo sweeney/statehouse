@@ -437,3 +437,89 @@ devices:
 		t.Errorf("expected primary=explicit_primary, got %q", dev.Primary)
 	}
 }
+
+// TestLoadElectricityConfig verifies that the energy.electricity YAML
+// block populates cfg.Energy.Electricity, with Default() values
+// preserved when the YAML omits individual fields.
+func TestLoadElectricityConfig(t *testing.T) {
+	yaml := `
+energy:
+  electricity:
+    staleness_active: 45s
+    staleness_idle: 15m
+    idle_below_w: 3.5
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Energy.Electricity.StalenessActive != 45*time.Second {
+		t.Errorf("StalenessActive=%v want 45s", cfg.Energy.Electricity.StalenessActive)
+	}
+	if cfg.Energy.Electricity.StalenessIdle != 15*time.Minute {
+		t.Errorf("StalenessIdle=%v want 15m", cfg.Energy.Electricity.StalenessIdle)
+	}
+	if cfg.Energy.Electricity.IdleBelowW != 3.5 {
+		t.Errorf("IdleBelowW=%v want 3.5", cfg.Energy.Electricity.IdleBelowW)
+	}
+}
+
+// TestLoadElectricityConfigDefaults verifies that when YAML omits the
+// energy.electricity block entirely, Default() values are preserved.
+func TestLoadElectricityConfigDefaults(t *testing.T) {
+	path := writeTempYAML(t, `mqtt: { broker: x }`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Energy.Electricity.StalenessActive != 90*time.Second {
+		t.Errorf("StalenessActive=%v want default 90s", cfg.Energy.Electricity.StalenessActive)
+	}
+	if cfg.Energy.Electricity.StalenessIdle != 30*time.Minute {
+		t.Errorf("StalenessIdle=%v want default 30m", cfg.Energy.Electricity.StalenessIdle)
+	}
+	if cfg.Energy.Electricity.IdleBelowW != 5 {
+		t.Errorf("IdleBelowW=%v want default 5", cfg.Energy.Electricity.IdleBelowW)
+	}
+}
+
+// TestLoadRejectsInvalidElectricityConfig verifies that obviously-bad
+// values for the electricity staleness windows are rejected at startup
+// rather than silently flagging every device as stale.
+func TestLoadRejectsInvalidElectricityConfig(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{"zero_staleness_active", `
+energy:
+  electricity:
+    staleness_active: 0s
+    staleness_idle: 10m
+    idle_below_w: 5
+`},
+		{"zero_staleness_idle", `
+energy:
+  electricity:
+    staleness_active: 60s
+    staleness_idle: 0s
+    idle_below_w: 5
+`},
+		{"negative_idle_threshold", `
+energy:
+  electricity:
+    staleness_active: 60s
+    staleness_idle: 10m
+    idle_below_w: -1
+`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeTempYAML(t, tc.yaml)
+			if _, err := Load(path); err == nil {
+				t.Fatalf("expected Load to reject %s", tc.name)
+			}
+		})
+	}
+}
