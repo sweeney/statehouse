@@ -98,6 +98,8 @@ func (f *FakeClient) IsConnected() bool {
 	return f.Connected
 }
 
+func (f *FakeClient) Reconnects() uint64 { return 0 }
+
 // Deliver invokes every subscribed handler whose topic filter matches
 // the given topic. Wildcards "+" (single segment) and "#" (multi
 // segment, tail-only) are supported — same MQTT semantics as a real
@@ -198,9 +200,10 @@ type FaultClient struct {
 	FaultErr   error
 }
 
-func (f *FaultClient) Connect() error    { return f.Inner.Connect() }
-func (f *FaultClient) Disconnect()       { f.Inner.Disconnect() }
-func (f *FaultClient) IsConnected() bool { return f.Inner.IsConnected() }
+func (f *FaultClient) Connect() error     { return f.Inner.Connect() }
+func (f *FaultClient) Disconnect()        { f.Inner.Disconnect() }
+func (f *FaultClient) IsConnected() bool  { return f.Inner.IsConnected() }
+func (f *FaultClient) Reconnects() uint64 { return f.Inner.Reconnects() }
 func (f *FaultClient) Subscribe(topic string, qos byte, h Handler) error {
 	return f.Inner.Subscribe(topic, qos, h)
 }

@@ -228,9 +228,10 @@ func newBlockingClient() *blockingClient {
 	return &blockingClient{gate: make(chan struct{})}
 }
 
-func (b *blockingClient) Connect() error    { return nil }
-func (b *blockingClient) Disconnect()       {}
-func (b *blockingClient) IsConnected() bool { return true }
+func (b *blockingClient) Connect() error     { return nil }
+func (b *blockingClient) Disconnect()        {}
+func (b *blockingClient) IsConnected() bool  { return true }
+func (b *blockingClient) Reconnects() uint64 { return 0 }
 func (b *blockingClient) Subscribe(string, byte, Handler) error {
 	return nil
 }

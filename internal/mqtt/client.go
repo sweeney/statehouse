@@ -3,6 +3,7 @@ package mqtt
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	paho "github.com/eclipse/paho.mqtt.golang"
@@ -20,6 +21,10 @@ type Client interface {
 	Subscribe(topic string, qos byte, handler Handler) error
 	Publish(topic string, qos byte, retained bool, payload []byte) error
 	IsConnected() bool
+	// Reconnects returns the number of times the client has reconnected
+	// to the broker after the initial connect. Useful for spotting flaky
+	// broker connectivity without tailing logs.
+	Reconnects() uint64
 }
 
 // Config describes how to connect to the MQTT broker.
@@ -40,11 +45,13 @@ type subscription struct {
 
 // pahoClient implements Client backed by github.com/eclipse/paho.mqtt.golang.
 type pahoClient struct {
-	cfg    Config
-	mu     sync.Mutex
-	c      paho.Client
-	subsMu sync.Mutex
-	subs   []subscription
+	cfg        Config
+	mu         sync.Mutex
+	c          paho.Client
+	subsMu     sync.Mutex
+	subs       []subscription
+	connected  uint32 // atomic: set to 1 after the first successful connect
+	reconnects uint64 // atomic: incremented on every connect after the first
 }
 
 // New creates a Client that connects to the given broker.
@@ -55,6 +62,9 @@ func New(cfg Config) Client {
 func (p *pahoClient) Connect() error {
 	opts := buildClientOptions(p.cfg)
 	opts.SetOnConnectHandler(func(c paho.Client) {
+		if !atomic.CompareAndSwapUint32(&p.connected, 0, 1) {
+			atomic.AddUint64(&p.reconnects, 1)
+		}
 		p.resubscribe(c)
 	})
 	c := paho.NewClient(opts)
@@ -163,4 +173,8 @@ func (p *pahoClient) IsConnected() bool {
 	c := p.c
 	p.mu.Unlock()
 	return c != nil && c.IsConnected()
+}
+
+func (p *pahoClient) Reconnects() uint64 {
+	return atomic.LoadUint64(&p.reconnects)
 }

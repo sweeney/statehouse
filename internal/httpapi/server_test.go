@@ -12,9 +12,20 @@ import (
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
 	"github.com/sweeney/statehouse/internal/model"
+	mqttpkg "github.com/sweeney/statehouse/internal/mqtt"
 	"github.com/sweeney/statehouse/internal/state"
 	"github.com/sweeney/statehouse/internal/testutil"
 )
+
+// fakeClient is a minimal mqtt.Client for use in metrics tests.
+type fakeClient struct{ reconnects uint64 }
+
+func (f *fakeClient) Connect() error                                      { return nil }
+func (f *fakeClient) Disconnect()                                         {}
+func (f *fakeClient) Subscribe(_ string, _ byte, _ mqttpkg.Handler) error { return nil }
+func (f *fakeClient) Publish(_ string, _ byte, _ bool, _ []byte) error    { return nil }
+func (f *fakeClient) IsConnected() bool                                   { return true }
+func (f *fakeClient) Reconnects() uint64                                  { return f.reconnects }
 
 func setup(t *testing.T) (*Server, *state.Engine) {
 	t.Helper()
@@ -935,5 +946,82 @@ func TestHandleConfigDevices_ContentType(t *testing.T) {
 	ct := w.Header().Get("Content-Type")
 	if !strings.HasPrefix(ct, "application/json") {
 		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+}
+
+func TestHandleMetrics_HeapStats(t *testing.T) {
+	srv, _ := setup(t)
+	mux := newMux(srv)
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for _, field := range []string{"heap_alloc_bytes", "heap_sys_bytes", "gc_cycles_total", "last_gc_pause_ms"} {
+		if _, ok := m[field]; !ok {
+			t.Errorf("missing field %q in /metrics", field)
+		}
+	}
+	if v, _ := m["heap_alloc_bytes"].(float64); v <= 0 {
+		t.Errorf("heap_alloc_bytes should be > 0, got %v", v)
+	}
+	if v, _ := m["heap_sys_bytes"].(float64); v <= 0 {
+		t.Errorf("heap_sys_bytes should be > 0, got %v", v)
+	}
+}
+
+func TestHandleMetrics_RecentLogStats(t *testing.T) {
+	cfg := config.Default()
+	store := state.NewStore()
+	log, _ := history.Open("", 1, 1, 16)
+	srv := New(":0", store, log, nil, nil, nil, cfg.DeviceClasses)
+	mux := newMux(srv)
+
+	// Append events directly — Stats() reports what's in the log regardless
+	// of how it got there.
+	for i := 0; i < 3; i++ {
+		_ = log.Append("derived", map[string]any{"type": "test_event"})
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := m["recent_log_events"]; !ok {
+		t.Error("missing field recent_log_events")
+	}
+	if _, ok := m["recent_log_size_bytes"]; !ok {
+		t.Error("missing field recent_log_size_bytes")
+	}
+	// Discovery emits one event; the in-memory log must reflect it.
+	if v, _ := m["recent_log_events"].(float64); v < 1 {
+		t.Errorf("recent_log_events should be >= 1, got %v", v)
+	}
+}
+
+func TestHandleMetrics_MQTTReconnects(t *testing.T) {
+	srv, _ := setup(t)
+	srv.MQTT = &fakeClient{reconnects: 3}
+	mux := newMux(srv)
+
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"mqtt_reconnects_total":3`) {
+		t.Errorf("expected mqtt_reconnects_total:3, got %s", w.Body.String())
 	}
 }

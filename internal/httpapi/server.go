@@ -231,25 +231,44 @@ func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	type metrics struct {
-		StartedAgo       int    `json:"started_ago"`
-		DeviceCount      int    `json:"device_count"`
-		CanonicalEvents  uint64 `json:"canonical_events_total"`
-		DerivedEvents    uint64 `json:"derived_events_total"`
-		InfluxQueued     uint64 `json:"influx_writes_queued,omitempty"`
-		InfluxFailure    uint64 `json:"influx_writes_failure,omitempty"`
-		PublisherDropped uint64 `json:"mqtt_publishes_dropped_total"`
+		StartedAgo       int     `json:"started_ago"`
+		DeviceCount      int     `json:"device_count"`
+		CanonicalEvents  uint64  `json:"canonical_events_total"`
+		DerivedEvents    uint64  `json:"derived_events_total"`
+		InfluxQueued     uint64  `json:"influx_writes_queued,omitempty"`
+		InfluxFailure    uint64  `json:"influx_writes_failure,omitempty"`
+		PublisherDropped uint64  `json:"mqtt_publishes_dropped_total"`
+		MQTTReconnects   uint64  `json:"mqtt_reconnects_total"`
+		HeapAllocBytes   uint64  `json:"heap_alloc_bytes"`
+		HeapSysBytes     uint64  `json:"heap_sys_bytes"`
+		GCCycles         uint32  `json:"gc_cycles_total"`
+		LastGCPauseMS    float64 `json:"last_gc_pause_ms"`
+		RecentLogEvents  int     `json:"recent_log_events"`
+		RecentLogBytes   int64   `json:"recent_log_size_bytes"`
 	}
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
 	m := metrics{
 		StartedAgo:      int((time.Since(s.started) + 500*time.Millisecond) / time.Second),
 		DeviceCount:     len(s.Store.Devices()),
 		CanonicalEvents: atomic.LoadUint64(&s.canonicalCount),
 		DerivedEvents:   atomic.LoadUint64(&s.derivedCount),
+		HeapAllocBytes:  ms.HeapAlloc,
+		HeapSysBytes:    ms.HeapSys,
+		GCCycles:        ms.NumGC,
+		LastGCPauseMS:   float64(ms.PauseNs[(ms.NumGC+255)%256]) / 1e6,
 	}
 	if s.Influx != nil && s.Influx.Enabled {
 		m.InfluxQueued, m.InfluxFailure = s.Influx.Stats()
 	}
 	if s.Publisher != nil {
 		m.PublisherDropped = s.Publisher.Dropped()
+	}
+	if s.MQTT != nil {
+		m.MQTTReconnects = s.MQTT.Reconnects()
+	}
+	if s.Log != nil {
+		m.RecentLogEvents, m.RecentLogBytes = s.Log.Stats()
 	}
 	writeJSON(w, http.StatusOK, m)
 }

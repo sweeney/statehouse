@@ -109,6 +109,14 @@ func (l *Log) Recent(limit int) []Entry {
 	return out
 }
 
+// Stats returns the number of events held in the in-memory window and
+// the total bytes written to the on-disk log file (0 when path-less).
+func (l *Log) Stats() (events int, bytesWritten int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.memory.Len(), l.bytesWritten
+}
+
 // Close releases the underlying file.
 func (l *Log) Close() error {
 	l.mu.Lock()
