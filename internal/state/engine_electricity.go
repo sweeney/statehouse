@@ -35,7 +35,13 @@ import (
 // monitored sum.
 func (e *Engine) recomputeElectricity(now time.Time, triggeredByMeter bool, sourceTopic string) {
 	devices := e.store.Devices()
-	agg := AggregateElectricity(now, devices, e.cfg.Energy.Electricity)
+	stalenessFor := func(class string) *int {
+		if c, ok := e.cfg.DeviceClasses[class]; ok {
+			return c.StalenessSeconds
+		}
+		return nil
+	}
+	agg := AggregateElectricity(now, devices, stalenessFor)
 	if !agg.GrossSeen {
 		return
 	}

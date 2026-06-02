@@ -4,7 +4,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/device"
 	"github.com/sweeney/statehouse/internal/model"
 )
@@ -71,37 +70,20 @@ type ElectricityAggregate struct {
 	StaleIDs     []string
 }
 
-// stalenessFor returns the staleness window applicable to a device
-// given its last PowerW reading. Devices whose last reading was at or
-// below the idle threshold get the long window — change-reporting
-// plugs (Aqara, IKEA) can legitimately go many minutes without an
-// update while their appliance is off. Devices reading non-zero power
-// must refresh frequently or they're considered stale.
-func stalenessFor(cfg config.ElectricityConfig, lastPowerW float64) time.Duration {
-	if lastPowerW <= cfg.IdleBelowW {
-		return cfg.StalenessIdle
-	}
-	return cfg.StalenessActive
-}
-
 // isFreshDevice decides whether a power-reporting device's Latest is
 // recent enough to participate in the monitored sum. Offline devices
 // are always excluded; OfflinePending and Online defer to the
-// time-based window (so a brief offline hint within the debounce
-// doesn't blank the metric).
-func isFreshDevice(d model.Device, now time.Time, cfg config.ElectricityConfig) bool {
+// class-based staleness threshold (so a brief offline hint within the
+// debounce doesn't blank the metric).
+func isFreshDevice(d model.Device, now time.Time, stalenessFor func(class string) *int) bool {
 	if d.Availability == model.AvailabilityOffline {
 		return false
 	}
 	if d.Latest.LastSeen.IsZero() {
 		return false
 	}
-	var lastW float64
-	if d.Latest.PowerW != nil {
-		lastW = *d.Latest.PowerW
-	}
-	window := stalenessFor(cfg, lastW)
-	return now.Sub(d.Latest.LastSeen) <= window
+	threshold := device.StalenessSecondsForClass(d.Class, stalenessFor(d.Class))
+	return now.Sub(d.Latest.LastSeen).Seconds() <= threshold
 }
 
 // AggregateElectricity walks the device map and produces the whole-house
@@ -117,7 +99,7 @@ func isFreshDevice(d model.Device, now time.Time, cfg config.ElectricityConfig) 
 // surfaces as a stable wrong number rather than a flickering one).
 // If no such device exists, GrossSeen is false and the engine treats
 // the result as "no data yet, do nothing."
-func AggregateElectricity(now time.Time, devices map[string]model.Device, cfg config.ElectricityConfig) ElectricityAggregate {
+func AggregateElectricity(now time.Time, devices map[string]model.Device, stalenessFor func(class string) *int) ElectricityAggregate {
 	var agg ElectricityAggregate
 	var meterID string
 	for _, d := range devices {
@@ -132,7 +114,7 @@ func AggregateElectricity(now time.Time, devices map[string]model.Device, cfg co
 		if !isPowerMonitored(d.Class) || d.Latest.PowerW == nil {
 			continue
 		}
-		if !isFreshDevice(d, now, cfg) {
+		if !isFreshDevice(d, now, stalenessFor) {
 			agg.StaleIDs = append(agg.StaleIDs, d.ID)
 			continue
 		}

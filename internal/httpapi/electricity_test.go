@@ -59,11 +59,6 @@ func setupWithMeter(t *testing.T) (*Server, *state.Engine) {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Energy.MaxIntegrationGap = 30 * time.Minute
-	cfg.Energy.Electricity = config.ElectricityConfig{
-		StalenessActive: 60 * time.Second,
-		StalenessIdle:   10 * time.Minute,
-		IdleBelowW:      5,
-	}
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
 		"energy_meter": {},
 	}

@@ -21,23 +21,6 @@ var activeActivityStates = map[model.DeviceActivityState]bool{
 	model.ActivityActiveCycle:      true,
 }
 
-// stalenessSecondsForClass returns the staleness threshold (in seconds) for a
-// given device class. When the DeviceClassConfig has a non-nil StalenessSeconds
-// field, that wins.
-func stalenessSecondsForClass(class string, staleness *int) float64 {
-	if staleness != nil {
-		return float64(*staleness)
-	}
-	switch class {
-	case device.ClassShortBurst, device.ClassCyclePower, device.ClassContinuous, device.ClassMedia:
-		return 900
-	case device.ClassBinaryState:
-		return 3600
-	default:
-		return 3600
-	}
-}
-
 // cycleTypeForClass returns the cycle type label for a given device class.
 func cycleTypeForClass(class string) string {
 	switch class {
@@ -492,7 +475,7 @@ func buildLatestResponse(l model.Latest, class string, now time.Time, stalenessS
 	stale := false
 	if !l.LastSeen.IsZero() {
 		r.LastSeenAgo = agoInt(l.LastSeen, now)
-		threshold := stalenessSecondsForClass(class, stalenessSeconds)
+		threshold := device.StalenessSecondsForClass(class, stalenessSeconds)
 		if now.Sub(l.LastSeen).Seconds() >= threshold {
 			stale = true
 		}

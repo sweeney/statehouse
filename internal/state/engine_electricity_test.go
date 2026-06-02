@@ -34,11 +34,6 @@ func mkElectricityEngine(t *testing.T) (*Engine, *Store, *collector, *testutil.F
 	cfg := config.Default()
 	cfg.Energy.DivergenceWarningPct = 20
 	cfg.Energy.MaxIntegrationGap = 30 * time.Minute
-	cfg.Energy.Electricity = config.ElectricityConfig{
-		StalenessActive: 60 * time.Second,
-		StalenessIdle:   10 * time.Minute,
-		IdleBelowW:      5,
-	}
 	cfg.Availability.OfflineDebounce = 30 * time.Second
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
 		"cycle_power_device": {
@@ -245,7 +240,7 @@ func TestEngineElectricity_StaleDevicesInSummary(t *testing.T) {
 	ingestPlug(engine, "0x00158d0000000009", "kitchen_kettle", clock.Now(), 200)
 	ingestPlug(engine, "0x00158d0000000001", "kitchen_dishwasher", clock.Now(), 300)
 
-	clock.Advance(90 * time.Second)
+	clock.Advance(901 * time.Second)
 	ingestMeter(engine, clock.Now(), 1000)
 
 	s := store.House().Electricity
@@ -493,11 +488,6 @@ func TestEngineElectricity_HousePowerNotInStore(t *testing.T) {
 func TestEngineElectricity_ConcurrentIngest(t *testing.T) {
 	cfg := config.Default()
 	cfg.Energy.MaxIntegrationGap = 30 * time.Minute
-	cfg.Energy.Electricity = config.ElectricityConfig{
-		StalenessActive: 60 * time.Second,
-		StalenessIdle:   10 * time.Minute,
-		IdleBelowW:      5,
-	}
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
 		"short_burst_power_device": {
 			DefaultThresholds: config.Thresholds{

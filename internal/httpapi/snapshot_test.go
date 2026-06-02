@@ -16,18 +16,18 @@ import (
 // in DeviceClassConfig overrides the class default in stalenessSecondsForClass
 // and propagates through buildDeviceResponse.
 func TestStalenessConfigOverride(t *testing.T) {
-	// Part 1: direct unit-test of stalenessSecondsForClass.
+	// Part 1: direct unit-test of device.StalenessSecondsForClass.
 	const class = "short_burst_power_device"
 
-	got := stalenessSecondsForClass(class, nil)
+	got := device.StalenessSecondsForClass(class, nil)
 	if got != 900 {
-		t.Errorf("stalenessSecondsForClass(%q, nil) = %v, want 900", class, got)
+		t.Errorf("device.StalenessSecondsForClass(%q, nil) = %v, want 900", class, got)
 	}
 
 	sixty := 60
-	got = stalenessSecondsForClass(class, &sixty)
+	got = device.StalenessSecondsForClass(class, &sixty)
 	if got != 60 {
-		t.Errorf("stalenessSecondsForClass(%q, &60) = %v, want 60", class, got)
+		t.Errorf("device.StalenessSecondsForClass(%q, &60) = %v, want 60", class, got)
 	}
 
 	// Part 2: end-to-end through buildDeviceResponse.
