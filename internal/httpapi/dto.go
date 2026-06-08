@@ -143,6 +143,7 @@ type DeviceResponse struct {
 	Availability model.Availability `json:"availability"`
 	Activity     ActivityResponse   `json:"activity"`
 	Latest       LatestResponse     `json:"latest"`
+	Lifetime     *LifetimeResponse  `json:"lifetime,omitempty"`
 	Cycle        *CycleResponse     `json:"cycle,omitempty"`
 	Unclassified bool               `json:"unclassified,omitempty"`
 	Warnings     []string           `json:"warnings"`
@@ -188,6 +189,17 @@ type LatestResponse struct {
 	LastSeen    *time.Time `json:"last_seen"`
 	LastSeenAgo *int       `json:"last_seen_ago"`
 	Stale       bool       `json:"stale"`
+}
+
+// LifetimeResponse is the DTO for a device's all-time aggregates. Each
+// field is present only if the device has reported that measurement at
+// least once.
+type LifetimeResponse struct {
+	MaxPower       *model.Extremum `json:"max_power_w,omitempty"`
+	MinTemperature *model.Extremum `json:"min_temperature_c,omitempty"`
+	MaxTemperature *model.Extremum `json:"max_temperature_c,omitempty"`
+	MinHumidity    *model.Extremum `json:"min_humidity_pct,omitempty"`
+	MaxHumidity    *model.Extremum `json:"max_humidity_pct,omitempty"`
 }
 
 // DivergenceResponse describes the energy divergence status for a cycle.
@@ -432,6 +444,7 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int, i
 		Availability: d.Availability,
 		Activity:     buildActivityResponse(d.Activity, now),
 		Latest:       latest,
+		Lifetime:     buildLifetimeResponse(d.Lifetime),
 		Cycle:        buildCycleResponse(d.Cycle, d.Class),
 		Unclassified: d.Unclassified,
 		Warnings:     warnings,
@@ -445,6 +458,21 @@ func buildActivityResponse(a model.Activity, now time.Time) ActivityResponse {
 		LastChanged:    nilIfZero(a.LastChanged),
 		LastChangedAgo: agoInt(a.LastChanged, now),
 		Confidence:     a.Confidence,
+	}
+}
+
+// buildLifetimeResponse converts a *model.Lifetime into a *LifetimeResponse,
+// or nil when the device has no lifetime aggregates yet.
+func buildLifetimeResponse(l *model.Lifetime) *LifetimeResponse {
+	if l == nil {
+		return nil
+	}
+	return &LifetimeResponse{
+		MaxPower:       l.MaxPower,
+		MinTemperature: l.MinTemperature,
+		MaxTemperature: l.MaxTemperature,
+		MinHumidity:    l.MinHumidity,
+		MaxHumidity:    l.MaxHumidity,
 	}
 }
 

@@ -77,6 +77,43 @@ type Latest struct {
 	LastSeen time.Time `json:"last_seen"`
 }
 
+// Extremum records a single all-time min or max for one measurement,
+// along with the timestamp at which it was observed.
+type Extremum struct {
+	Value float64   `json:"value"`
+	At    time.Time `json:"at"`
+}
+
+// Lifetime holds all-time aggregates for a device, accumulated in memory
+// since process start (not persisted). Distinct from Latest, which is
+// only the most recent snapshot. Each field is nil until the relevant
+// measurement is first seen, so a device only carries the extremes it
+// actually reports — a power plug accumulates MaxPower, a climate sensor
+// accumulates the temperature/humidity extremes, and so on.
+type Lifetime struct {
+	MaxPower       *Extremum `json:"max_power_w,omitempty"`
+	MinTemperature *Extremum `json:"min_temperature_c,omitempty"`
+	MaxTemperature *Extremum `json:"max_temperature_c,omitempty"`
+	MinHumidity    *Extremum `json:"min_humidity_pct,omitempty"`
+	MaxHumidity    *Extremum `json:"max_humidity_pct,omitempty"`
+}
+
+// ObserveMax ratchets e up to v (recording t) when v exceeds the current
+// extreme, seeding it on first observation.
+func ObserveMax(e **Extremum, v float64, t time.Time) {
+	if *e == nil || v > (*e).Value {
+		*e = &Extremum{Value: v, At: t}
+	}
+}
+
+// ObserveMin ratchets e down to v (recording t) when v is below the
+// current extreme, seeding it on first observation.
+func ObserveMin(e **Extremum, v float64, t time.Time) {
+	if *e == nil || v < (*e).Value {
+		*e = &Extremum{Value: v, At: t}
+	}
+}
+
 // CycleEnergy summarises the two parallel energy estimates for a
 // session/cycle. Both values are tracked in parallel; SelectedKWh
 // reflects the strategy choice for this device class.
@@ -110,6 +147,7 @@ type Device struct {
 	Availability Availability   `json:"availability"`
 	Activity     Activity       `json:"activity"`
 	Latest       Latest         `json:"latest"`
+	Lifetime     *Lifetime      `json:"lifetime,omitempty"`
 	Cycle        *Cycle         `json:"cycle,omitempty"`
 	Unclassified bool           `json:"unclassified,omitempty"`
 }

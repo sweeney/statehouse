@@ -209,6 +209,26 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		// Push latest measurements onto the public record.
 		l := &ent.Device.Latest
 		l.LastSeen = reading.Timestamp
+		// Accumulate all-time extremes for the measurements this device
+		// reports. Allocated lazily so devices that never send a tracked
+		// field carry no lifetime block at all.
+		if reading.PowerW != nil || reading.TemperatureC != nil || reading.HumidityPct != nil {
+			if ent.Device.Lifetime == nil {
+				ent.Device.Lifetime = &model.Lifetime{}
+			}
+			lt := ent.Device.Lifetime
+			if reading.PowerW != nil {
+				model.ObserveMax(&lt.MaxPower, *reading.PowerW, reading.Timestamp)
+			}
+			if reading.TemperatureC != nil {
+				model.ObserveMin(&lt.MinTemperature, *reading.TemperatureC, reading.Timestamp)
+				model.ObserveMax(&lt.MaxTemperature, *reading.TemperatureC, reading.Timestamp)
+			}
+			if reading.HumidityPct != nil {
+				model.ObserveMin(&lt.MinHumidity, *reading.HumidityPct, reading.Timestamp)
+				model.ObserveMax(&lt.MaxHumidity, *reading.HumidityPct, reading.Timestamp)
+			}
+		}
 		if reading.PowerW != nil {
 			v := *reading.PowerW
 			l.PowerW = &v
