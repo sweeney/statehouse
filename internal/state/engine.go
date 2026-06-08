@@ -210,13 +210,18 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		l := &ent.Device.Latest
 		l.LastSeen = reading.Timestamp
 		// Accumulate all-time extremes for the measurements this device
-		// reports. Allocated lazily so devices that never send a tracked
+		// reports. Copy-on-write (like Cycle below): readers get a shallow
+		// Device copy that shares this *Lifetime pointer and dereference it
+		// after the lock is released, so we must never mutate the pointee in
+		// place. Swap in a fresh struct instead. The *Extremum pointees are
+		// themselves immutable (Observe* always allocates), so a shallow copy
+		// is sufficient. Allocated lazily so devices that never send a tracked
 		// field carry no lifetime block at all.
 		if reading.PowerW != nil || reading.TemperatureC != nil || reading.HumidityPct != nil {
-			if ent.Device.Lifetime == nil {
-				ent.Device.Lifetime = &model.Lifetime{}
+			lt := &model.Lifetime{}
+			if ent.Device.Lifetime != nil {
+				*lt = *ent.Device.Lifetime
 			}
-			lt := ent.Device.Lifetime
 			if reading.PowerW != nil {
 				model.ObserveMax(&lt.MaxPower, *reading.PowerW, reading.Timestamp)
 			}
@@ -228,6 +233,7 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 				model.ObserveMin(&lt.MinHumidity, *reading.HumidityPct, reading.Timestamp)
 				model.ObserveMax(&lt.MaxHumidity, *reading.HumidityPct, reading.Timestamp)
 			}
+			ent.Device.Lifetime = lt
 		}
 		if reading.PowerW != nil {
 			v := *reading.PowerW

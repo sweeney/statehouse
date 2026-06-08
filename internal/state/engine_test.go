@@ -1,6 +1,7 @@
 package state
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -246,6 +247,38 @@ func TestEngine_LifetimeExtremes(t *testing.T) {
 	if d.Lifetime.MinHumidity.Value != 40.0 || d.Lifetime.MaxHumidity.Value != 55.0 {
 		t.Fatalf("expected humidity range 40–55, got min=%+v max=%+v", d.Lifetime.MinHumidity, d.Lifetime.MaxHumidity)
 	}
+}
+
+func TestEngine_LifetimeNoRace(t *testing.T) {
+	// The HTTP layer reads a device's Lifetime after the store lock is
+	// released (Store.Get hands out a shallow copy that shares the *Lifetime
+	// pointer). Concurrent ingest must not mutate that pointee in place, or
+	// -race flags a read/write data race. This exercises that path.
+	engine, store, _, clock := mkEngine()
+	id := zid("0x00158d0000000009", "kitchen_kettle")
+	topic := "zigbee2mqtt/kitchen_kettle"
+	t0 := clock.Now()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { // writer — mirrors MQTT ingest
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			engine.IngestReading(id, topic,
+				model.Reading{Timestamp: t0.Add(time.Duration(i) * time.Millisecond), PowerW: ptr(float64(i))})
+		}
+	}()
+	go func() { // reader — mirrors what an HTTP handler does post-lock
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			if d, ok := store.Get("kitchen_kettle"); ok && d.Lifetime != nil {
+				if e := d.Lifetime.MaxPower; e != nil {
+					_ = e.Value
+				}
+			}
+		}
+	}()
+	wg.Wait()
 }
 
 func TestEngine_StaleCounter(t *testing.T) {

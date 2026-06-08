@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Availability tracks whether the engine is currently in contact with
 // the device. It is separate from activity; a device can be online but
@@ -99,16 +102,27 @@ type Lifetime struct {
 }
 
 // ObserveMax ratchets e up to v (recording t) when v exceeds the current
-// extreme, seeding it on first observation.
+// extreme, seeding it on first observation. The comparison is strict, so on
+// ties the earliest observation is retained. Non-finite values (NaN, ±Inf)
+// are ignored: a NaN seed would pin the extremum forever and break JSON
+// marshalling of the whole device response.
 func ObserveMax(e **Extremum, v float64, t time.Time) {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return
+	}
 	if *e == nil || v > (*e).Value {
 		*e = &Extremum{Value: v, At: t}
 	}
 }
 
-// ObserveMin ratchets e down to v (recording t) when v is below the
-// current extreme, seeding it on first observation.
+// ObserveMin ratchets e down to v (recording t) when v is below the current
+// extreme, seeding it on first observation. The comparison is strict, so on
+// ties the earliest observation is retained. Non-finite values (NaN, ±Inf)
+// are ignored, for the same reasons as ObserveMax.
 func ObserveMin(e **Extremum, v float64, t time.Time) {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return
+	}
 	if *e == nil || v < (*e).Value {
 		*e = &Extremum{Value: v, At: t}
 	}

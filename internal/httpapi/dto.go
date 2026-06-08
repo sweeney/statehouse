@@ -191,15 +191,22 @@ type LatestResponse struct {
 	Stale       bool       `json:"stale"`
 }
 
+// ExtremumResponse is the DTO for a single all-time extreme value and the
+// time it was observed.
+type ExtremumResponse struct {
+	Value float64   `json:"value"`
+	At    time.Time `json:"at"`
+}
+
 // LifetimeResponse is the DTO for a device's all-time aggregates. Each
 // field is present only if the device has reported that measurement at
 // least once.
 type LifetimeResponse struct {
-	MaxPower       *model.Extremum `json:"max_power_w,omitempty"`
-	MinTemperature *model.Extremum `json:"min_temperature_c,omitempty"`
-	MaxTemperature *model.Extremum `json:"max_temperature_c,omitempty"`
-	MinHumidity    *model.Extremum `json:"min_humidity_pct,omitempty"`
-	MaxHumidity    *model.Extremum `json:"max_humidity_pct,omitempty"`
+	MaxPower       *ExtremumResponse `json:"max_power_w,omitempty"`
+	MinTemperature *ExtremumResponse `json:"min_temperature_c,omitempty"`
+	MaxTemperature *ExtremumResponse `json:"max_temperature_c,omitempty"`
+	MinHumidity    *ExtremumResponse `json:"min_humidity_pct,omitempty"`
+	MaxHumidity    *ExtremumResponse `json:"max_humidity_pct,omitempty"`
 }
 
 // DivergenceResponse describes the energy divergence status for a cycle.
@@ -461,6 +468,17 @@ func buildActivityResponse(a model.Activity, now time.Time) ActivityResponse {
 	}
 }
 
+// extremumResponse converts a *model.Extremum into a DTO-local value copy, or
+// nil. Copying by value keeps the wire format decoupled from the model and
+// avoids handing a live model pointer to the response layer (which reads it
+// after the store lock is released).
+func extremumResponse(e *model.Extremum) *ExtremumResponse {
+	if e == nil {
+		return nil
+	}
+	return &ExtremumResponse{Value: e.Value, At: e.At}
+}
+
 // buildLifetimeResponse converts a *model.Lifetime into a *LifetimeResponse,
 // or nil when the device has no lifetime aggregates yet.
 func buildLifetimeResponse(l *model.Lifetime) *LifetimeResponse {
@@ -468,11 +486,11 @@ func buildLifetimeResponse(l *model.Lifetime) *LifetimeResponse {
 		return nil
 	}
 	return &LifetimeResponse{
-		MaxPower:       l.MaxPower,
-		MinTemperature: l.MinTemperature,
-		MaxTemperature: l.MaxTemperature,
-		MinHumidity:    l.MinHumidity,
-		MaxHumidity:    l.MaxHumidity,
+		MaxPower:       extremumResponse(l.MaxPower),
+		MinTemperature: extremumResponse(l.MinTemperature),
+		MaxTemperature: extremumResponse(l.MaxTemperature),
+		MinHumidity:    extremumResponse(l.MinHumidity),
+		MaxHumidity:    extremumResponse(l.MaxHumidity),
 	}
 }
 
