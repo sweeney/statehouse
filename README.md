@@ -177,6 +177,13 @@ edit the remote config service — not the local YAML.
 - If counter-reported and integrated energy disagree by more than
   `energy.divergence_warning_pct` (default 20%), an
   `energy_divergence_warning` derived event is emitted.
+- Each device accumulates all-time extremes in memory, exposed as the
+  `lifetime` block on the device API responses: peak power draw, plus
+  min/max temperature and humidity, each with the timestamp it occurred.
+  A device only carries the extremes for measurements it actually reports
+  (a plug gets `max_power_w`; a climate sensor gets the temperature and
+  humidity extremes). These are not persisted — they reset on restart —
+  and are intended for UI use such as a current-vs-peak power dial.
 - Offline availability is debounced (default 30s) so Z2M restart
   flicker does not produce alarms.
 - Device identity is the IEEE address; friendly-name renames keep the

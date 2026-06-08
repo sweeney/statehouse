@@ -1,6 +1,7 @@
 package state
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -199,6 +200,85 @@ func TestEngine_NoDivergenceForIntegrationPrimary(t *testing.T) {
 	if _, ok := col.findDerived(model.EvtEnergyDivergenceWarning); ok {
 		t.Fatal("must NOT emit divergence warning for integration-primary device")
 	}
+}
+
+func TestEngine_LifetimeExtremes(t *testing.T) {
+	engine, store, _, clock := mkEngine()
+	t0 := clock.Now()
+	id := zid("0x00158d0000000009", "kitchen_kettle")
+	topic := "zigbee2mqtt/kitchen_kettle"
+
+	// No lifetime block before any tracked measurement arrives.
+	engine.IngestReading(id, topic, model.Reading{Timestamp: t0, VoltageV: ptr(240.0)})
+	if d, _ := store.Get("kitchen_kettle"); d.Lifetime != nil {
+		t.Fatalf("expected no lifetime block before any tracked measurement, got %+v", d.Lifetime)
+	}
+
+	// Power ratchets up to the peak and holds when it later drops.
+	peakAt := t0.Add(2 * time.Second)
+	engine.IngestReading(id, topic, model.Reading{Timestamp: t0.Add(1 * time.Second), PowerW: ptr(1200.0)})
+	engine.IngestReading(id, topic, model.Reading{Timestamp: peakAt, PowerW: ptr(2400.0)})
+	engine.IngestReading(id, topic, model.Reading{Timestamp: t0.Add(3 * time.Second), PowerW: ptr(800.0)})
+
+	d, _ := store.Get("kitchen_kettle")
+	if d.Lifetime == nil || d.Lifetime.MaxPower == nil {
+		t.Fatalf("expected max power tracked, got %+v", d.Lifetime)
+	}
+	if d.Lifetime.MaxPower.Value != 2400.0 {
+		t.Fatalf("expected max power 2400, got %v", d.Lifetime.MaxPower.Value)
+	}
+	if !d.Lifetime.MaxPower.At.Equal(peakAt) {
+		t.Fatalf("expected max power at %v, got %v", peakAt, d.Lifetime.MaxPower.At)
+	}
+
+	// Temperature and humidity track both ends across readings.
+	coldAt := t0.Add(4 * time.Second)
+	hotAt := t0.Add(5 * time.Second)
+	engine.IngestReading(id, topic, model.Reading{Timestamp: coldAt, TemperatureC: ptr(18.0), HumidityPct: ptr(55.0)})
+	engine.IngestReading(id, topic, model.Reading{Timestamp: hotAt, TemperatureC: ptr(22.0), HumidityPct: ptr(40.0)})
+
+	d, _ = store.Get("kitchen_kettle")
+	if d.Lifetime.MinTemperature.Value != 18.0 || !d.Lifetime.MinTemperature.At.Equal(coldAt) {
+		t.Fatalf("expected min temp 18 at %v, got %+v", coldAt, d.Lifetime.MinTemperature)
+	}
+	if d.Lifetime.MaxTemperature.Value != 22.0 || !d.Lifetime.MaxTemperature.At.Equal(hotAt) {
+		t.Fatalf("expected max temp 22 at %v, got %+v", hotAt, d.Lifetime.MaxTemperature)
+	}
+	if d.Lifetime.MinHumidity.Value != 40.0 || d.Lifetime.MaxHumidity.Value != 55.0 {
+		t.Fatalf("expected humidity range 40–55, got min=%+v max=%+v", d.Lifetime.MinHumidity, d.Lifetime.MaxHumidity)
+	}
+}
+
+func TestEngine_LifetimeNoRace(t *testing.T) {
+	// The HTTP layer reads a device's Lifetime after the store lock is
+	// released (Store.Get hands out a shallow copy that shares the *Lifetime
+	// pointer). Concurrent ingest must not mutate that pointee in place, or
+	// -race flags a read/write data race. This exercises that path.
+	engine, store, _, clock := mkEngine()
+	id := zid("0x00158d0000000009", "kitchen_kettle")
+	topic := "zigbee2mqtt/kitchen_kettle"
+	t0 := clock.Now()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { // writer — mirrors MQTT ingest
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			engine.IngestReading(id, topic,
+				model.Reading{Timestamp: t0.Add(time.Duration(i) * time.Millisecond), PowerW: ptr(float64(i))})
+		}
+	}()
+	go func() { // reader — mirrors what an HTTP handler does post-lock
+		defer wg.Done()
+		for i := 0; i < 2000; i++ {
+			if d, ok := store.Get("kitchen_kettle"); ok && d.Lifetime != nil {
+				if e := d.Lifetime.MaxPower; e != nil {
+					_ = e.Value
+				}
+			}
+		}
+	}()
+	wg.Wait()
 }
 
 func TestEngine_StaleCounter(t *testing.T) {

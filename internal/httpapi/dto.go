@@ -143,6 +143,7 @@ type DeviceResponse struct {
 	Availability model.Availability `json:"availability"`
 	Activity     ActivityResponse   `json:"activity"`
 	Latest       LatestResponse     `json:"latest"`
+	Lifetime     *LifetimeResponse  `json:"lifetime,omitempty"`
 	Cycle        *CycleResponse     `json:"cycle,omitempty"`
 	Unclassified bool               `json:"unclassified,omitempty"`
 	Warnings     []string           `json:"warnings"`
@@ -188,6 +189,24 @@ type LatestResponse struct {
 	LastSeen    *time.Time `json:"last_seen"`
 	LastSeenAgo *int       `json:"last_seen_ago"`
 	Stale       bool       `json:"stale"`
+}
+
+// ExtremumResponse is the DTO for a single all-time extreme value and the
+// time it was observed.
+type ExtremumResponse struct {
+	Value float64   `json:"value"`
+	At    time.Time `json:"at"`
+}
+
+// LifetimeResponse is the DTO for a device's all-time aggregates. Each
+// field is present only if the device has reported that measurement at
+// least once.
+type LifetimeResponse struct {
+	MaxPower       *ExtremumResponse `json:"max_power_w,omitempty"`
+	MinTemperature *ExtremumResponse `json:"min_temperature_c,omitempty"`
+	MaxTemperature *ExtremumResponse `json:"max_temperature_c,omitempty"`
+	MinHumidity    *ExtremumResponse `json:"min_humidity_pct,omitempty"`
+	MaxHumidity    *ExtremumResponse `json:"max_humidity_pct,omitempty"`
 }
 
 // DivergenceResponse describes the energy divergence status for a cycle.
@@ -432,6 +451,7 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int, i
 		Availability: d.Availability,
 		Activity:     buildActivityResponse(d.Activity, now),
 		Latest:       latest,
+		Lifetime:     buildLifetimeResponse(d.Lifetime),
 		Cycle:        buildCycleResponse(d.Cycle, d.Class),
 		Unclassified: d.Unclassified,
 		Warnings:     warnings,
@@ -445,6 +465,32 @@ func buildActivityResponse(a model.Activity, now time.Time) ActivityResponse {
 		LastChanged:    nilIfZero(a.LastChanged),
 		LastChangedAgo: agoInt(a.LastChanged, now),
 		Confidence:     a.Confidence,
+	}
+}
+
+// extremumResponse converts a *model.Extremum into a DTO-local value copy, or
+// nil. Copying by value keeps the wire format decoupled from the model and
+// avoids handing a live model pointer to the response layer (which reads it
+// after the store lock is released).
+func extremumResponse(e *model.Extremum) *ExtremumResponse {
+	if e == nil {
+		return nil
+	}
+	return &ExtremumResponse{Value: e.Value, At: e.At}
+}
+
+// buildLifetimeResponse converts a *model.Lifetime into a *LifetimeResponse,
+// or nil when the device has no lifetime aggregates yet.
+func buildLifetimeResponse(l *model.Lifetime) *LifetimeResponse {
+	if l == nil {
+		return nil
+	}
+	return &LifetimeResponse{
+		MaxPower:       extremumResponse(l.MaxPower),
+		MinTemperature: extremumResponse(l.MinTemperature),
+		MaxTemperature: extremumResponse(l.MaxTemperature),
+		MinHumidity:    extremumResponse(l.MinHumidity),
+		MaxHumidity:    extremumResponse(l.MaxHumidity),
 	}
 }
 

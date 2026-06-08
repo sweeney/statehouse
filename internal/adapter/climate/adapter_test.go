@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sweeney/statehouse/internal/config"
+	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 	"github.com/sweeney/statehouse/internal/testutil"
 )
@@ -311,11 +312,33 @@ func TestAdapter_FixtureReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture: %v", err)
 	}
+	// Independently accumulate the expected temperature/humidity extremes by
+	// sampling Latest after each message — a separate pass over the same data
+	// the engine sees, so we cross-check Lifetime without re-parsing payloads
+	// or hardcoding fixture values.
+	var wantMinT, wantMaxT, wantMinH, wantMaxH *float64
+	observe := func(seen, lo, hi *float64) (*float64, *float64) {
+		if seen == nil {
+			return lo, hi
+		}
+		v := *seen
+		if lo == nil || v < *lo {
+			lo = &v
+		}
+		if hi == nil || v > *hi {
+			hi = &v
+		}
+		return lo, hi
+	}
 	for _, e := range events {
 		if !e.Timestamp.IsZero() {
 			clock.Set(e.Timestamp)
 		}
 		a.HandleMessage(e.Topic, e.PayloadBytes(), false)
+		if dev, ok := store.Get("home"); ok {
+			wantMinT, wantMaxT = observe(dev.Latest.TemperatureC, wantMinT, wantMaxT)
+			wantMinH, wantMaxH = observe(dev.Latest.HumidityPct, wantMinH, wantMaxH)
+		}
 	}
 	dev, ok := store.Get("home")
 	if !ok {
@@ -326,5 +349,36 @@ func TestAdapter_FixtureReplay(t *testing.T) {
 	}
 	if dev.Latest.PressureHPa == nil {
 		t.Error("expected PressureHPa to be set after fixture replay")
+	}
+	// Lifetime extremes must match the independently computed min/max, and the
+	// recorded timestamps must fall within the replayed window.
+	if dev.Lifetime == nil {
+		t.Fatal("expected lifetime block after fixture replay")
+	}
+	checkExtremum(t, "min_temperature_c", dev.Lifetime.MinTemperature, wantMinT)
+	checkExtremum(t, "max_temperature_c", dev.Lifetime.MaxTemperature, wantMaxT)
+	checkExtremum(t, "min_humidity_pct", dev.Lifetime.MinHumidity, wantMinH)
+	checkExtremum(t, "max_humidity_pct", dev.Lifetime.MaxHumidity, wantMaxH)
+}
+
+// checkExtremum asserts a lifetime extremum was recorded with the expected
+// value (and a non-zero timestamp) when one was expected, or is absent when
+// the measurement never appeared.
+func checkExtremum(t *testing.T, name string, got *model.Extremum, want *float64) {
+	t.Helper()
+	if want == nil {
+		if got != nil {
+			t.Errorf("%s: expected no extremum, got %+v", name, got)
+		}
+		return
+	}
+	if got == nil {
+		t.Fatalf("%s: expected extremum %v, got nil", name, *want)
+	}
+	if got.Value != *want {
+		t.Errorf("%s: expected value %v, got %v", name, *want, got.Value)
+	}
+	if got.At.IsZero() {
+		t.Errorf("%s: expected a recorded timestamp, got zero", name)
 	}
 }

@@ -469,6 +469,47 @@ components:
           type: boolean
           description: True when last_seen exceeds the class staleness threshold.
 
+    Extremum:
+      type: object
+      required: [value, at]
+      properties:
+        value:
+          type: number
+          format: double
+          description: The extreme measurement value.
+        at:
+          type: string
+          format: date-time
+          description: Timestamp at which the extreme was observed.
+
+    LifetimeResponse:
+      type: object
+      description: >-
+        All-time per-device aggregates accumulated in memory since process
+        start (not persisted). Each field is present only once the device has
+        reported that measurement at least once.
+      properties:
+        max_power_w:
+          allOf:
+            - $ref: "#/components/schemas/Extremum"
+          description: Highest instantaneous power draw observed, in watts.
+        min_temperature_c:
+          allOf:
+            - $ref: "#/components/schemas/Extremum"
+          description: Lowest temperature observed, in degrees Celsius.
+        max_temperature_c:
+          allOf:
+            - $ref: "#/components/schemas/Extremum"
+          description: Highest temperature observed, in degrees Celsius.
+        min_humidity_pct:
+          allOf:
+            - $ref: "#/components/schemas/Extremum"
+          description: Lowest relative humidity observed, as a percentage.
+        max_humidity_pct:
+          allOf:
+            - $ref: "#/components/schemas/Extremum"
+          description: Highest relative humidity observed, as a percentage.
+
     DivergenceResponse:
       type: object
       required: [status]
@@ -562,6 +603,10 @@ components:
           $ref: "#/components/schemas/ActivityResponse"
         latest:
           $ref: "#/components/schemas/LatestResponse"
+        lifetime:
+          allOf:
+            - $ref: "#/components/schemas/LifetimeResponse"
+          description: All-time aggregates. Present once the device reports a tracked measurement.
         cycle:
           allOf:
             - $ref: "#/components/schemas/CycleResponse"

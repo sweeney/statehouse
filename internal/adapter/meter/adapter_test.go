@@ -357,11 +357,20 @@ func TestAdapter_FixtureReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture: %v", err)
 	}
+	// Independently track the peak power seen by sampling Latest after each
+	// message, to cross-check Lifetime.MaxPower without hardcoding the fixture's
+	// peak value.
+	var wantMaxP *float64
 	for _, e := range events {
 		if !e.Timestamp.IsZero() {
 			clock.Set(e.Timestamp)
 		}
 		a.HandleMessage(e.Topic, e.PayloadBytes(), false)
+		if dev, ok := store.Get("001122AABBCC"); ok && dev.Latest.PowerW != nil {
+			if v := *dev.Latest.PowerW; wantMaxP == nil || v > *wantMaxP {
+				wantMaxP = &v
+			}
+		}
 	}
 	dev, ok := store.Get("001122AABBCC")
 	if !ok {
@@ -372,5 +381,18 @@ func TestAdapter_FixtureReplay(t *testing.T) {
 	}
 	if dev.Latest.PowerW == nil {
 		t.Error("expected PowerW to be set after fixture replay")
+	}
+	// Lifetime peak power must match the independently computed maximum.
+	if wantMaxP == nil {
+		t.Fatal("expected fixture to contain at least one power reading")
+	}
+	if dev.Lifetime == nil || dev.Lifetime.MaxPower == nil {
+		t.Fatalf("expected lifetime max power after fixture replay, got %+v", dev.Lifetime)
+	}
+	if dev.Lifetime.MaxPower.Value != *wantMaxP {
+		t.Errorf("max power: expected %v, got %v", *wantMaxP, dev.Lifetime.MaxPower.Value)
+	}
+	if dev.Lifetime.MaxPower.At.IsZero() {
+		t.Error("max power: expected a recorded timestamp, got zero")
 	}
 }
