@@ -1,0 +1,9 @@
+{"ts":"2026-06-01T08:00:00Z","topic":"zigbee2mqtt/bridge/devices","payload":[{"ieee_address":"0x00158d0001234567","friendly_name":"basement_freezer","type":"EndDevice"}]}
+{"ts":"2026-06-01T08:00:01Z","topic":"zigbee2mqtt/basement_freezer","payload":{"power":2.1,"linkquality":87}}
+{"ts":"2026-06-01T08:00:05Z","topic":"zigbee2mqtt/basement_freezer","payload":{"power":2.0,"linkquality":87}}
+{"ts":"2026-06-01T08:00:10Z","topic":"zigbee2mqtt/basement_freezer","payload":{"power":80.3,"linkquality":86}}
+{"ts":"2026-06-01T08:00:21Z","topic":"zigbee2mqtt/basement_freezer","payload":{"power":65.4,"linkquality":86}}
+{"ts":"2026-06-01T08:05:00Z","topic":"zigbee2mqtt/basement_freezer","payload":{"power":62.8,"linkquality":85}}
+{"ts":"2026-06-01T08:10:00Z","topic":"zigbee2mqtt/basement_freezer","payload":{"power":10.7,"linkquality":87}}
+{"ts":"2026-06-01T08:10:31Z","topic":"zigbee2mqtt/basement_freezer","payload":{"power":10.6,"linkquality":87}}
+{"ts":"2026-06-01T08:11:00Z","topic":"zigbee2mqtt/basement_freezer","payload":{"power":10.5,"linkquality":87}}

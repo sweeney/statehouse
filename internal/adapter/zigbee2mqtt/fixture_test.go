@@ -37,6 +37,17 @@ func fixtureCfg() config.Config {
 			},
 			EnergyStrategy: "integration",
 		},
+		"continuous_power_device": {
+			NameHints: []string{"freezer", "fridge"},
+			DefaultThresholds: config.Thresholds{
+				IdleBelowW:           testutil.PtrF64(5),
+				CompressorAboveW:     testutil.PtrF64(25),
+				ActiveAboveW:         testutil.PtrF64(25),
+				ActiveSustainedFor:   testutil.PtrDur(10 * time.Second),
+				InactiveSustainedFor: testutil.PtrDur(30 * time.Second),
+			},
+			EnergyStrategy: "integration",
+		},
 	}
 	return cfg
 }
@@ -415,6 +426,44 @@ func TestAdapter_FriendlyNamePhantomUpgradedOnBridgeDevices(t *testing.T) {
 		if d.Identity.Display != fn {
 			t.Errorf("Display: got %q, want %q", d.Identity.Display, fn)
 		}
+	}
+}
+
+// TestFixture_FridgeCompressorCycleCloses verifies that a continuous_power_device
+// closes its compressor cycle when power drops to standby (~10W) rather than
+// staying stuck in active_cycle because the standby draw exceeds idle_below_w (5W).
+func TestFixture_FridgeCompressorCycleCloses(t *testing.T) {
+	cfg := fixtureCfg()
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	cap := &capture{}
+	engine.AddDerivedSink(cap)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	replay(t, fixturePath("fridge_compressor_cycle.jsonl"), clock, a)
+
+	var sawStart, sawFinish bool
+	for _, ev := range cap.derived {
+		if ev.Type == model.EvtContinuousCycleStarted {
+			sawStart = true
+		}
+		if ev.Type == model.EvtContinuousCycleFinished {
+			sawFinish = true
+		}
+	}
+	if !sawStart {
+		t.Fatalf("expected continuous_device_active_cycle_started, got %v", summary(cap.derived))
+	}
+	if !sawFinish {
+		t.Fatalf("expected continuous_device_active_cycle_finished — compressor cycle never closed (standby draw > idle_below_w threshold?), got %v", summary(cap.derived))
+	}
+	d, ok := store.Get("basement_freezer")
+	if !ok {
+		t.Fatalf("expected device 'basement_freezer' in store")
+	}
+	if d.Activity.State != model.ActivityNormalIdle {
+		t.Fatalf("expected normal_idle after cycle closes, got %q", d.Activity.State)
 	}
 }
 

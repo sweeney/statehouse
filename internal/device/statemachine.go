@@ -245,12 +245,11 @@ func (r *Runtime) stepContinuous(at time.Time, p float64, out *Outcome) {
 	if !highSet {
 		highTh, _ = derefIfSet(r.Thresholds.ActiveAboveW)
 	}
-	lowTh := derefF64(r.Thresholds.IdleBelowW, 0)
 	inactiveSustainedFor := derefDur(r.Thresholds.InactiveSustainedFor, 0)
 	activeSustainedFor := derefDur(r.Thresholds.ActiveSustainedFor, 0)
 	switch r.activity {
 	case model.ActivityActiveCycle:
-		if p <= lowTh {
+		if p < highTh {
 			if r.candidate == nil || !r.candidate.belowPrevLo {
 				r.candidate = &candidateSample{at: at, powerW: p, belowPrevLo: true}
 				if inactiveSustainedFor <= 0 {
