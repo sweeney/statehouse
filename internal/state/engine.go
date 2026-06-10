@@ -50,6 +50,13 @@ type Engine struct {
 	monitoredIntegrator   *energy.Integrator
 	unmonitoredIntegrator *energy.Integrator
 	lastElecAt            time.Time
+	startedAt             time.Time // session start; Since for SessionEnergy
+	// Latest authoritative meter period totals, carried across recomputes
+	// so plug-triggered recomputes don't drop them. Nil until a meter
+	// reading supplies them.
+	meterTodayKWh *float64
+	meterWeekKWh  *float64
+	meterMonthKWh *float64
 }
 
 type engineSnap struct {
@@ -74,6 +81,7 @@ func NewEngine(cfg config.Config, store *Store, clock testutil.Clock) *Engine {
 		grossIntegrator:       energy.NewIntegrator(gap),
 		monitoredIntegrator:   energy.NewIntegrator(gap),
 		unmonitoredIntegrator: energy.NewIntegrator(gap),
+		startedAt:             clock.Now(),
 	}
 }
 
@@ -408,7 +416,7 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 
 	if reading.PowerW != nil {
 		isMeterTrigger := profile.Class == device.ClassEnergyMeter || identity.Scheme == meterScheme
-		e.recomputeElectricity(reading.Timestamp, isMeterTrigger, sourceTopic)
+		e.recomputeElectricity(reading.Timestamp, isMeterTrigger, sourceTopic, reading)
 	}
 }
 

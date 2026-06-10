@@ -35,7 +35,9 @@ func TestBuildHouseResponse_ElectricityPresent(t *testing.T) {
 		Electricity: model.ElectricitySummary{
 			GrossW: 1500, MonitoredW: 800, UnmonitoredW: 700,
 			Coverage: 0.5333,
-			GrossKWh: 2.5, MonitoredKWh: 1.3, UnmonitoredKWh: 1.2,
+			Session: model.SessionEnergy{
+				GrossKWh: 2.5, MonitoredKWh: 1.3, UnmonitoredKWh: 1.2,
+			},
 			StaleDeviceCount: 1, StaleDevices: []string{"plug_a"},
 			ComputedAt: computedAt,
 		},
@@ -44,13 +46,13 @@ func TestBuildHouseResponse_ElectricityPresent(t *testing.T) {
 	if resp.Electricity == nil {
 		t.Fatalf("Electricity should be present")
 	}
-	if resp.Electricity.GrossW != 1500 {
-		t.Errorf("GrossW=%v", resp.Electricity.GrossW)
+	if resp.Electricity.Snapshot.GrossW != 1500 {
+		t.Errorf("GrossW=%v", resp.Electricity.Snapshot.GrossW)
 	}
-	if resp.Electricity.ComputedAgo == nil || *resp.Electricity.ComputedAgo != 25 {
-		t.Errorf("ComputedAgo=%v want 25", resp.Electricity.ComputedAgo)
+	if resp.Electricity.Snapshot.ComputedAgo == nil || *resp.Electricity.Snapshot.ComputedAgo != 25 {
+		t.Errorf("ComputedAgo=%v want 25", resp.Electricity.Snapshot.ComputedAgo)
 	}
-	if resp.Electricity.ComputedAt == nil || !resp.Electricity.ComputedAt.Equal(computedAt) {
+	if resp.Electricity.Snapshot.ComputedAt == nil || !resp.Electricity.Snapshot.ComputedAt.Equal(computedAt) {
 		t.Errorf("ComputedAt mismatch")
 	}
 }
@@ -100,18 +102,18 @@ func TestHandleHouse_ElectricityEndToEnd(t *testing.T) {
 	if hr.Electricity == nil {
 		t.Fatalf("electricity block missing from /state/house: %s", w.Body.String())
 	}
-	if hr.Electricity.GrossW != gross {
-		t.Errorf("GrossW=%v want %v", hr.Electricity.GrossW, gross)
+	if hr.Electricity.Snapshot.GrossW != gross {
+		t.Errorf("GrossW=%v want %v", hr.Electricity.Snapshot.GrossW, gross)
 	}
 	// Use a deterministic assertion: ComputedAgo must be set and
 	// non-negative. Asserting a specific value would race the handler's
 	// clock and is not what this test is actually verifying.
-	if hr.Electricity.ComputedAgo == nil {
+	if hr.Electricity.Snapshot.ComputedAgo == nil {
 		t.Errorf("ComputedAgo missing from response")
-	} else if *hr.Electricity.ComputedAgo < 0 {
-		t.Errorf("ComputedAgo=%d must not be negative", *hr.Electricity.ComputedAgo)
+	} else if *hr.Electricity.Snapshot.ComputedAgo < 0 {
+		t.Errorf("ComputedAgo=%d must not be negative", *hr.Electricity.Snapshot.ComputedAgo)
 	}
-	if hr.Electricity.ComputedAt == nil {
+	if hr.Electricity.Snapshot.ComputedAt == nil {
 		t.Errorf("ComputedAt missing from response")
 	}
 }

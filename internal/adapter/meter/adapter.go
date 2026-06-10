@@ -60,17 +60,20 @@ type meterPayload struct {
 		Timestamp string `json:"timestamp"`
 		Energy    struct {
 			Import struct {
-				Cumulative *float64 `json:"cumulative"`
+				Cumulative flexFloat `json:"cumulative"`
+				Day        flexFloat `json:"day"`
+				Week       flexFloat `json:"week"`
+				Month      flexFloat `json:"month"`
 			} `json:"import"`
 		} `json:"energy"`
 		Power struct {
-			Value *float64 `json:"value"` // kW
+			Value flexFloat `json:"value"` // kW
 		} `json:"power"`
 	} `json:"electricitymeter"`
 }
 
 type glowSensorMeasurement struct {
-	Value *float64 `json:"value"`
+	Value flexFloat `json:"value"`
 }
 
 type glowSensorEntry struct {
@@ -117,14 +120,19 @@ func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
 	}
 
 	r := model.Reading{Timestamp: ts}
-	if v := p.ElectricityMeter.Energy.Import.Cumulative; v != nil {
+	imp := p.ElectricityMeter.Energy.Import
+	if v := imp.Cumulative.v; v != nil {
 		if validate.FiniteInRange(*v, 0, 1e9) {
 			r.EnergyKWh = v
 		} else if a.logger != nil {
 			a.logger.Warn("adapter: rejected out-of-range field", "field", "energy_kwh", "value", *v, "topic", topic)
 		}
 	}
-	if v := p.ElectricityMeter.Power.Value; v != nil {
+	// Period counters reset by the meter itself; smaller than cumulative.
+	a.meterPeriod(topic, "today_kwh", imp.Day.v, &r.MeterTodayKWh)
+	a.meterPeriod(topic, "week_kwh", imp.Week.v, &r.MeterWeekKWh)
+	a.meterPeriod(topic, "month_kwh", imp.Month.v, &r.MeterMonthKWh)
+	if v := p.ElectricityMeter.Power.Value.v; v != nil {
 		pw := *v * 1000
 		if validate.FiniteInRange(pw, -50_000, 200_000) {
 			r.PowerW = &pw
@@ -136,6 +144,20 @@ func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
 	id := model.DeviceIdentity{Scheme: SchemeName, Primary: serial, Display: serial}
 	a.engine.EnsureDiscovered(id, topic)
 	a.engine.IngestReading(id, topic, r)
+}
+
+// meterPeriod range-validates a meter period counter (day/week/month)
+// and, if sound, stores it via dst. Period totals are bounded well
+// below the lifetime cumulative; reuse the same finite guard.
+func (a *Adapter) meterPeriod(topic, field string, v *float64, dst **float64) {
+	if v == nil {
+		return
+	}
+	if validate.FiniteInRange(*v, 0, 1e9) {
+		*dst = v
+	} else if a.logger != nil {
+		a.logger.Warn("adapter: rejected out-of-range field", "field", field, "value", *v, "topic", topic)
+	}
 }
 
 func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial string) {
@@ -160,33 +182,37 @@ func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial st
 	}
 
 	r := model.Reading{Timestamp: ts}
-	if entry.Temperature.Value != nil {
-		if validate.FiniteInRange(*entry.Temperature.Value, -50, 80) {
-			r.TemperatureC = entry.Temperature.Value
+	if v := entry.Temperature.Value.v; v != nil {
+		if validate.FiniteInRange(*v, -50, 80) {
+			r.TemperatureC = v
 		} else if a.logger != nil {
-			a.logger.Warn("adapter: rejected out-of-range field", "field", "temperature_c", "value", *entry.Temperature.Value, "topic", topic)
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "temperature_c", "value", *v, "topic", topic)
 		}
 	}
-	if entry.Humidity.Value != nil {
-		if validate.FiniteInRange(*entry.Humidity.Value, 0, 100) {
-			r.HumidityPct = entry.Humidity.Value
+	if v := entry.Humidity.Value.v; v != nil {
+		if validate.FiniteInRange(*v, 0, 100) {
+			r.HumidityPct = v
 		} else if a.logger != nil {
-			a.logger.Warn("adapter: rejected out-of-range field", "field", "humidity_pct", "value", *entry.Humidity.Value, "topic", topic)
+			a.logger.Warn("adapter: rejected out-of-range field", "field", "humidity_pct", "value", *v, "topic", topic)
 		}
 	}
-	if entry.Battery != nil && entry.Battery.Value != nil {
-		if validate.FiniteInRange(*entry.Battery.Value, 0, 100) {
-			r.Battery = entry.Battery.Value
-		} else if a.logger != nil {
-			a.logger.Warn("adapter: rejected out-of-range field", "field", "battery_pct", "value", *entry.Battery.Value, "topic", topic)
+	if entry.Battery != nil {
+		if v := entry.Battery.Value.v; v != nil {
+			if validate.FiniteInRange(*v, 0, 100) {
+				r.Battery = v
+			} else if a.logger != nil {
+				a.logger.Warn("adapter: rejected out-of-range field", "field", "battery_pct", "value", *v, "topic", topic)
+			}
 		}
 	}
-	if entry.RSSI != nil && entry.RSSI.Value != nil {
-		if validate.FiniteInRange(*entry.RSSI.Value, -150, 0) {
-			v := int(*entry.RSSI.Value)
-			r.RSSI = &v
-		} else if a.logger != nil {
-			a.logger.Warn("adapter: rejected out-of-range field", "field", "rssi_dbm", "value", *entry.RSSI.Value, "topic", topic)
+	if entry.RSSI != nil {
+		if v := entry.RSSI.Value.v; v != nil {
+			if validate.FiniteInRange(*v, -150, 0) {
+				iv := int(*v)
+				r.RSSI = &iv
+			} else if a.logger != nil {
+				a.logger.Warn("adapter: rejected out-of-range field", "field", "rssi_dbm", "value", *v, "topic", topic)
+			}
 		}
 	}
 

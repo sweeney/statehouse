@@ -95,17 +95,36 @@ func TestAggregate_SumsPowerClasses(t *testing.T) {
 }
 
 func TestAggregate_ExcludesPassiveAndBinary(t *testing.T) {
+	// Environmental sensors, binary-state, and unclassified devices never
+	// contribute power even if a stray PowerW is present. (UPS is power-
+	// bearing and intentionally counted — see TestAggregate_IncludesUPS.)
 	devs := map[string]model.Device{
 		"meter":   mkMeter("meter", 1000, aggTestNow),
 		"plug":    mkPlug("plug", device.ClassShortBurst, 100, aggTestNow, model.AvailabilityOnline),
 		"climate": mkPlug("climate", device.ClassEnvironmentalSensor, 999, aggTestNow, model.AvailabilityOnline),
-		"ups":     mkPlug("ups", device.ClassUPSSensor, 999, aggTestNow, model.AvailabilityOnline),
 		"contact": mkPlug("contact", device.ClassBinaryState, 999, aggTestNow, model.AvailabilityOnline),
 		"other":   mkPlug("other", device.ClassUnclassified, 999, aggTestNow, model.AvailabilityOnline),
 	}
 	agg := AggregateElectricity(aggTestNow, devs, noOverride)
 	if agg.MonitoredW != 100 {
 		t.Fatalf("MonitoredW=%v want 100 (only plug counted)", agg.MonitoredW)
+	}
+}
+
+func TestAggregate_IncludesUPS(t *testing.T) {
+	// A UPS reports its output load (LoadWatts) as PowerW — real, otherwise
+	// unmonitored draw — so it contributes to the monitored sum.
+	devs := map[string]model.Device{
+		"meter": mkMeter("meter", 1000, aggTestNow),
+		"plug":  mkPlug("plug", device.ClassShortBurst, 100, aggTestNow, model.AvailabilityOnline),
+		"ups":   mkPlug("ups", device.ClassUPSSensor, 60, aggTestNow, model.AvailabilityOnline),
+	}
+	agg := AggregateElectricity(aggTestNow, devs, noOverride)
+	if agg.MonitoredW != 160 {
+		t.Fatalf("MonitoredW=%v want 160 (plug 100 + ups 60)", agg.MonitoredW)
+	}
+	if agg.UnmonitoredW != 1000-160 {
+		t.Fatalf("UnmonitoredW=%v want 840", agg.UnmonitoredW)
 	}
 }
 

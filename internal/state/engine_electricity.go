@@ -33,7 +33,7 @@ import (
 // updated upstream of recomputeElectricity, so the next on-time meter
 // tick will pick up the dropped reading's contribution in its
 // monitored sum.
-func (e *Engine) recomputeElectricity(now time.Time, triggeredByMeter bool, sourceTopic string) {
+func (e *Engine) recomputeElectricity(now time.Time, triggeredByMeter bool, sourceTopic string, reading model.Reading) {
 	devices := e.store.Devices()
 	stalenessFor := func(class string) *int {
 		if c, ok := e.cfg.DeviceClasses[class]; ok {
@@ -55,16 +55,36 @@ func (e *Engine) recomputeElectricity(now time.Time, triggeredByMeter bool, sour
 	e.grossIntegrator.Update(now, agg.GrossW)
 	e.monitoredIntegrator.Update(now, agg.MonitoredW)
 	e.unmonitoredIntegrator.Update(now, agg.UnmonitoredW)
+	// Refresh the authoritative meter period totals when this recompute
+	// was driven by a meter reading that carried them. Plug-triggered
+	// recomputes leave the previously-seen values in place.
+	if triggeredByMeter {
+		if reading.MeterTodayKWh != nil {
+			e.meterTodayKWh = reading.MeterTodayKWh
+		}
+		if reading.MeterWeekKWh != nil {
+			e.meterWeekKWh = reading.MeterWeekKWh
+		}
+		if reading.MeterMonthKWh != nil {
+			e.meterMonthKWh = reading.MeterMonthKWh
+		}
+	}
 	summary := model.ElectricitySummary{
 		GrossW:           agg.GrossW,
 		MonitoredW:       agg.MonitoredW,
 		UnmonitoredW:     agg.UnmonitoredW,
 		StaleDeviceCount: len(agg.StaleIDs),
 		StaleDevices:     agg.StaleIDs,
-		GrossKWh:         e.grossIntegrator.Total(),
-		MonitoredKWh:     e.monitoredIntegrator.Total(),
-		UnmonitoredKWh:   e.unmonitoredIntegrator.Total(),
-		ComputedAt:       now,
+		TodayKWh:         e.meterTodayKWh,
+		WeekKWh:          e.meterWeekKWh,
+		MonthKWh:         e.meterMonthKWh,
+		Session: model.SessionEnergy{
+			Since:          e.startedAt,
+			GrossKWh:       e.grossIntegrator.Total(),
+			MonitoredKWh:   e.monitoredIntegrator.Total(),
+			UnmonitoredKWh: e.unmonitoredIntegrator.Total(),
+		},
+		ComputedAt: now,
 	}
 	// Coverage is monitored / gross, exposed raw. It can exceed 1
 	// briefly (monitored outruns gross due to sample-cadence skew or
@@ -130,8 +150,20 @@ func (e *Engine) emitElectricityCanonical(now time.Time, sourceTopic string, s m
 	emit("monitored_w", s.MonitoredW, "W")
 	emit("unmonitored_w", s.UnmonitoredW, "W")
 	emit("coverage", s.Coverage, "")
-	emit("gross_kwh", s.GrossKWh, "kWh")
-	emit("monitored_kwh", s.MonitoredKWh, "kWh")
-	emit("unmonitored_kwh", s.UnmonitoredKWh, "kWh")
+	// Authoritative meter period totals (only once the meter has reported).
+	if s.TodayKWh != nil {
+		emit("today_kwh", *s.TodayKWh, "kWh")
+	}
+	if s.WeekKWh != nil {
+		emit("week_kwh", *s.WeekKWh, "kWh")
+	}
+	if s.MonthKWh != nil {
+		emit("month_kwh", *s.MonthKWh, "kWh")
+	}
+	// Service-lifetime integration — prefixed so it is never mistaken for
+	// a true house total in the time series.
+	emit("session_gross_kwh", s.Session.GrossKWh, "kWh")
+	emit("session_monitored_kwh", s.Session.MonitoredKWh, "kWh")
+	emit("session_unmonitored_kwh", s.Session.UnmonitoredKWh, "kWh")
 	emit("stale_device_count", float64(s.StaleDeviceCount), "")
 }

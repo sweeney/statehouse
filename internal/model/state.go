@@ -230,16 +230,35 @@ type ModeDimension struct {
 // Consumers decide whether to render it; clipping would hide
 // misconfiguration.
 type ElectricitySummary struct {
-	GrossW           float64   `json:"gross_w"`
-	MonitoredW       float64   `json:"monitored_w"`
-	UnmonitoredW     float64   `json:"unmonitored_w"`
-	Coverage         float64   `json:"coverage"`
-	StaleDeviceCount int       `json:"stale_device_count"`
-	StaleDevices     []string  `json:"stale_devices,omitempty"`
-	GrossKWh         float64   `json:"gross_kwh"`
-	MonitoredKWh     float64   `json:"monitored_kwh"`
-	UnmonitoredKWh   float64   `json:"unmonitored_kwh"`
-	ComputedAt       time.Time `json:"computed_at"`
+	GrossW           float64  `json:"gross_w"`
+	MonitoredW       float64  `json:"monitored_w"`
+	UnmonitoredW     float64  `json:"unmonitored_w"`
+	Coverage         float64  `json:"coverage"`
+	StaleDeviceCount int      `json:"stale_device_count"`
+	StaleDevices     []string `json:"stale_devices,omitempty"`
+
+	// Authoritative meter period totals, reset by the meter at local
+	// midnight / week / month. Nil until a meter reading is seen.
+	TodayKWh *float64 `json:"today_kwh,omitempty"`
+	WeekKWh  *float64 `json:"week_kwh,omitempty"`
+	MonthKWh *float64 `json:"month_kwh,omitempty"`
+
+	// Session is the service-lifetime integration of power readings. It
+	// resets whenever the service restarts, so it is a function of
+	// uptime — not a true house total.
+	Session SessionEnergy `json:"session"`
+
+	ComputedAt time.Time `json:"computed_at"`
+}
+
+// SessionEnergy holds the power-integral energy totals accumulated since
+// the service started. Since marks the start of the integration window
+// (service start); the totals reset to zero on restart.
+type SessionEnergy struct {
+	Since          time.Time `json:"since"`
+	GrossKWh       float64   `json:"gross_kwh"`
+	MonitoredKWh   float64   `json:"monitored_kwh"`
+	UnmonitoredKWh float64   `json:"unmonitored_kwh"`
 }
 
 // House summarises whole-house derived state across three independent

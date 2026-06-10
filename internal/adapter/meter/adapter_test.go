@@ -14,6 +14,55 @@ import (
 	"github.com/sweeney/statehouse/internal/testutil"
 )
 
+// TestAdapter_FieldTypeDriftDegradesGracefully asserts that if the meter
+// firmware changes one field's JSON type (here: a period counter becomes
+// a non-numeric string), the rest of the message — cumulative + power —
+// still ingests. The adapter must degrade per-field, not drop the whole
+// reading.
+func TestAdapter_FieldTypeDriftDegradesGracefully(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	// day is a non-numeric string; cumulative + power are valid numbers.
+	payload := `{"electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","energy":{"import":{"cumulative":6252.217,"day":"n/a","week":90.226,"month":300.821}},"power":{"value":1.011}}}`
+	a.HandleMessage("energy/001122AABBCC/SENSOR/electricitymeter", []byte(payload), false)
+
+	dev, ok := store.Get("001122AABBCC")
+	if !ok {
+		t.Fatal("meter device not found: whole message dropped on one bad field")
+	}
+	if dev.Latest.EnergyKWh == nil || *dev.Latest.EnergyKWh != 6252.217 {
+		t.Errorf("EnergyKWh=%v want 6252.217 (cumulative must survive bad day field)", dev.Latest.EnergyKWh)
+	}
+	if dev.Latest.PowerW == nil {
+		t.Error("PowerW nil: power must survive a bad day field")
+	}
+	e := store.House().Electricity
+	if e.TodayKWh != nil {
+		t.Errorf("TodayKWh=%v want nil (unparseable), but week/month should still apply", e.TodayKWh)
+	}
+	if e.WeekKWh == nil || *e.WeekKWh != 90.226 {
+		t.Errorf("WeekKWh=%v want 90.226 (other periods unaffected)", e.WeekKWh)
+	}
+}
+
+// TestAdapter_NumericStringsTolerated asserts the realistic drift where a
+// firmware update starts quoting numbers ("8.013") is parsed, not lost.
+func TestAdapter_NumericStringsTolerated(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","energy":{"import":{"cumulative":"6252.217","day":"8.013"}},"power":{"value":"1.011"}}}`
+	a.HandleMessage("energy/001122AABBCC/SENSOR/electricitymeter", []byte(payload), false)
+
+	dev, ok := store.Get("001122AABBCC")
+	if !ok {
+		t.Fatal("meter device not found")
+	}
+	if dev.Latest.EnergyKWh == nil || *dev.Latest.EnergyKWh != 6252.217 {
+		t.Errorf("EnergyKWh=%v want 6252.217 from quoted number", dev.Latest.EnergyKWh)
+	}
+	if e := store.House().Electricity; e.TodayKWh == nil || *e.TodayKWh != 8.013 {
+		t.Errorf("TodayKWh=%v want 8.013 from quoted number", e.TodayKWh)
+	}
+}
+
 func sensorCfg() config.Config {
 	cfg := config.Default()
 	cfg.DeviceClasses = map[string]config.DeviceClassConfig{
@@ -72,6 +121,16 @@ func TestAdapter_DrivesHouseElectricity(t *testing.T) {
 	}
 	if diff := e.UnmonitoredW - 1011.0; diff > 0.001 || diff < -0.001 {
 		t.Errorf("Electricity.UnmonitoredW=%v want ~1011", e.UnmonitoredW)
+	}
+	// Authoritative meter period totals from import.day/week/month.
+	if e.TodayKWh == nil || *e.TodayKWh != 32.715 {
+		t.Errorf("Electricity.TodayKWh=%v want 32.715", e.TodayKWh)
+	}
+	if e.WeekKWh == nil || *e.WeekKWh != 90.226 {
+		t.Errorf("Electricity.WeekKWh=%v want 90.226", e.WeekKWh)
+	}
+	if e.MonthKWh == nil || *e.MonthKWh != 300.821 {
+		t.Errorf("Electricity.MonthKWh=%v want 300.821", e.MonthKWh)
 	}
 }
 
@@ -348,6 +407,108 @@ func TestAdapter_OutOfRangeGlowSensorWarnLogged(t *testing.T) {
 	// Valid humidity field must not produce a warning.
 	if strings.Contains(logged, "humidity_pct") {
 		t.Errorf("valid humidity_pct should not produce a warning, got: %s", logged)
+	}
+}
+
+// TestAdapter_RealFixtureReplay replays a redacted capture of real meter
+// traffic (serial/supplier/price scrubbed) and asserts the period counters
+// and cumulative parse and progress as captured — including a duplicate
+// timestamp the meter genuinely re-published. Assertions are on parsed
+// field values, so they do not depend on wall-clock timing.
+func TestAdapter_RealFixtureReplay(t *testing.T) {
+	a, store, clock := mkAdapter(t)
+	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "meter_readings_real.jsonl"))
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	if len(events) != 5 {
+		t.Fatalf("expected 5 fixture events, got %d", len(events))
+	}
+	// today_kwh as captured, in order (note the repeated 8.010 from the
+	// duplicate-timestamp message).
+	wantToday := []float64{8.007, 8.008, 8.010, 8.010, 8.013}
+	for i, e := range events {
+		if !e.Timestamp.IsZero() {
+			clock.Set(e.Timestamp)
+		}
+		a.HandleMessage(e.Topic, e.PayloadBytes(), false)
+		got := store.House().Electricity.TodayKWh
+		if got == nil || *got != wantToday[i] {
+			t.Fatalf("after msg %d: TodayKWh=%v want %v (message dropped or misparsed)", i, got, wantToday[i])
+		}
+	}
+
+	e := store.House().Electricity
+	if e.TodayKWh == nil || *e.TodayKWh != 8.013 {
+		t.Errorf("final TodayKWh=%v want 8.013", e.TodayKWh)
+	}
+	if e.WeekKWh == nil || *e.WeekKWh != 48.837 {
+		t.Errorf("final WeekKWh=%v want 48.837", e.WeekKWh)
+	}
+	if e.MonthKWh == nil || *e.MonthKWh != 252.054 {
+		t.Errorf("final MonthKWh=%v want 252.054", e.MonthKWh)
+	}
+	dev, ok := store.Get("A1B2C3D4E5F6")
+	if !ok {
+		t.Fatal("meter device not found after real fixture replay")
+	}
+	if dev.Latest.EnergyKWh == nil || *dev.Latest.EnergyKWh != 6931.574 {
+		t.Errorf("final cumulative EnergyKWh=%v want 6931.574", dev.Latest.EnergyKWh)
+	}
+	// power.value 0.668 kW → 668 W
+	if dev.Latest.PowerW == nil || *dev.Latest.PowerW < 667 || *dev.Latest.PowerW > 669 {
+		t.Errorf("final PowerW=%v want ~668", dev.Latest.PowerW)
+	}
+}
+
+// TestAdapter_UnknownFieldsIgnored locks forward-compatibility: a firmware
+// update that adds new keys (here a nested "tariff" object and a top-level
+// "version") must not disturb parsing of the known fields.
+func TestAdapter_UnknownFieldsIgnored(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	payload := `{"version":"2.0","electricitymeter":{"timestamp":"2026-05-13T21:57:19Z","newthing":{"x":1},"energy":{"import":{"cumulative":6252.217,"day":8.013,"tariff":{"name":"flex"}}},"power":{"value":1.011,"units":"kW"}}}`
+	a.HandleMessage("energy/001122AABBCC/SENSOR/electricitymeter", []byte(payload), false)
+
+	dev, ok := store.Get("001122AABBCC")
+	if !ok {
+		t.Fatal("meter device not found with unknown extra fields present")
+	}
+	if dev.Latest.EnergyKWh == nil || *dev.Latest.EnergyKWh != 6252.217 {
+		t.Errorf("EnergyKWh=%v want 6252.217", dev.Latest.EnergyKWh)
+	}
+	if e := store.House().Electricity; e.TodayKWh == nil || *e.TodayKWh != 8.013 {
+		t.Errorf("TodayKWh=%v want 8.013", e.TodayKWh)
+	}
+}
+
+// TestAdapter_MalformedJSONNoPanic asserts a range of broken/unexpected
+// payloads are dropped without panicking and without registering bad data.
+func TestAdapter_MalformedJSONNoPanic(t *testing.T) {
+	cases := []string{
+		``,                                     // empty
+		`{`,                                    // truncated
+		`[1,2,3]`,                              // wrong top-level type
+		`"just a string"`,                      // scalar
+		`null`,                                 // null doc
+		`{"electricitymeter":"not an object"}`, // wrong nested type
+		`{"electricitymeter":{"energy":{"import":[1,2]}}}`,             // import is array
+		`{"electricitymeter":{"power":{"value":{"nested":true}}}}`,     // value is object
+		`{"electricitymeter":{"energy":{"import":{"cumulative":[]}}}}`, // cumulative is array
+	}
+	for _, c := range cases {
+		a, store, _ := mkAdapter(t) // fresh per case
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("panic on payload %q: %v", c, r)
+				}
+			}()
+			a.HandleMessage("energy/001122AABBCC/SENSOR/electricitymeter", []byte(c), false)
+		}()
+		// No usable electricity data should have been recorded.
+		if !store.House().Electricity.ComputedAt.IsZero() {
+			t.Errorf("payload %q produced an electricity recompute; want none", c)
+		}
 	}
 }
 

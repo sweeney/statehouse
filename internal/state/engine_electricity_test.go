@@ -134,7 +134,8 @@ func TestEngineElectricity_MeterTickEmitsCanonicalSet(t *testing.T) {
 
 	wantAttrs := []string{
 		"gross_w", "monitored_w", "unmonitored_w", "coverage",
-		"gross_kwh", "monitored_kwh", "unmonitored_kwh", "stale_device_count",
+		"session_gross_kwh", "session_monitored_kwh", "session_unmonitored_kwh",
+		"stale_device_count",
 	}
 	for _, a := range wantAttrs {
 		if countHouseCanonical(col, a) != 1 {
@@ -150,6 +151,81 @@ func TestEngineElectricity_MeterTickEmitsCanonicalSet(t *testing.T) {
 				t.Errorf("timestamp=%v want %v", ev.Timestamp, clock.Now())
 			}
 		}
+	}
+}
+
+// ingestMeterPeriods sends a meter reading carrying the authoritative
+// day/week/month period totals alongside instantaneous power.
+func ingestMeterPeriods(e *Engine, at time.Time, powerW, day, week, month float64) {
+	p, d, w, m := powerW, day, week, month
+	e.IngestReading(meterID(), "energy/abcd1234/SENSOR/electricitymeter",
+		model.Reading{Timestamp: at, PowerW: &p,
+			MeterTodayKWh: &d, MeterWeekKWh: &w, MeterMonthKWh: &m})
+}
+
+func TestEngineElectricity_MeterPeriodsSurfacedAndPersist(t *testing.T) {
+	engine, store, col, clock := mkElectricityEngine(t)
+
+	ingestMeterPeriods(engine, clock.Now(), 1000, 6.83, 47.65, 250.87)
+
+	e := store.House().Electricity
+	if e.TodayKWh == nil || *e.TodayKWh != 6.83 {
+		t.Fatalf("TodayKWh=%v want 6.83", e.TodayKWh)
+	}
+	if e.WeekKWh == nil || *e.WeekKWh != 47.65 {
+		t.Fatalf("WeekKWh=%v want 47.65", e.WeekKWh)
+	}
+	if e.MonthKWh == nil || *e.MonthKWh != 250.87 {
+		t.Fatalf("MonthKWh=%v want 250.87", e.MonthKWh)
+	}
+	// Session.Since is the engine start, not zero.
+	if e.Session.Since.IsZero() {
+		t.Fatalf("Session.Since is zero; want engine start time")
+	}
+	// The authoritative period totals are emitted to the canonical stream.
+	for _, attr := range []string{"today_kwh", "week_kwh", "month_kwh"} {
+		if countHouseCanonical(col, attr) != 1 {
+			t.Errorf("attr %q: got %d emits want 1", attr, countHouseCanonical(col, attr))
+		}
+	}
+
+	// A later plug-triggered recompute must NOT drop the meter totals:
+	// they persist until the meter reports again.
+	clock.Advance(10 * time.Second)
+	ingestPlug(engine, "0x00158d0000000009", "kitchen_kettle", clock.Now(), 100)
+	e = store.House().Electricity
+	if e.TodayKWh == nil || *e.TodayKWh != 6.83 {
+		t.Fatalf("TodayKWh dropped after plug recompute: %v", e.TodayKWh)
+	}
+}
+
+func TestEngineElectricity_NoMeterPeriodsWhenAbsent(t *testing.T) {
+	engine, store, _, clock := mkElectricityEngine(t)
+	ingestMeter(engine, clock.Now(), 1000) // no period counters
+	e := store.House().Electricity
+	if e.TodayKWh != nil || e.WeekKWh != nil || e.MonthKWh != nil {
+		t.Fatalf("period totals set without meter reporting them: %+v", e)
+	}
+}
+
+// TestEngineElectricity_StateBoundedOverManyTicks guards the leak-relevant
+// invariant for the meter path: ingesting many readings replaces state in
+// place rather than accumulating it. The device set stays at one meter and
+// the summary reflects only the latest period totals.
+func TestEngineElectricity_StateBoundedOverManyTicks(t *testing.T) {
+	engine, store, _, clock := mkElectricityEngine(t)
+	var lastToday float64
+	for i := 0; i < 500; i++ {
+		lastToday = 1.0 + float64(i)*0.001
+		ingestMeterPeriods(engine, clock.Now(), 1000, lastToday, 10, 100)
+		clock.Advance(10 * time.Second)
+	}
+	if n := len(store.Devices()); n != 1 {
+		t.Fatalf("device count=%d after 500 meter ticks; want 1 (state must not accumulate)", n)
+	}
+	e := store.House().Electricity
+	if e.TodayKWh == nil || *e.TodayKWh != lastToday {
+		t.Fatalf("TodayKWh=%v want latest %v (summary must hold only the latest, not grow)", e.TodayKWh, lastToday)
 	}
 }
 
@@ -284,7 +360,7 @@ func TestEngineElectricity_RepeatedTimestampNoDoubleCount(t *testing.T) {
 	ts := clock.Now()
 	ingestMeter(engine, ts, 1000)
 	ingestMeter(engine, ts, 1000) // same timestamp; integrator skips dt<=0
-	if k := store.House().Electricity.GrossKWh; k != 0 {
+	if k := store.House().Electricity.Session.GrossKWh; k != 0 {
 		t.Fatalf("GrossKWh=%v want 0 (no interval to accrue)", k)
 	}
 }
@@ -302,10 +378,10 @@ func TestEngineElectricity_AdditivityInvariant(t *testing.T) {
 	ingestMeter(engine, clock.Now(), 1500)
 
 	e := store.House().Electricity
-	diff := math.Abs(e.GrossKWh - (e.MonitoredKWh + e.UnmonitoredKWh))
+	diff := math.Abs(e.Session.GrossKWh - (e.Session.MonitoredKWh + e.Session.UnmonitoredKWh))
 	if diff > 1e-9 {
 		t.Fatalf("gross != monitored + unmonitored: gross=%v mon=%v un=%v diff=%v",
-			e.GrossKWh, e.MonitoredKWh, e.UnmonitoredKWh, diff)
+			e.Session.GrossKWh, e.Session.MonitoredKWh, e.Session.UnmonitoredKWh, diff)
 	}
 }
 
@@ -316,7 +392,7 @@ func TestEngineElectricity_TrapezoidalSanity(t *testing.T) {
 		ingestMeter(engine, clock.Now(), 1000)
 		clock.Advance(10 * time.Second)
 	}
-	got := store.House().Electricity.GrossKWh
+	got := store.House().Electricity.Session.GrossKWh
 	if math.Abs(got-1.0) > 1e-9 {
 		t.Fatalf("GrossKWh=%v want 1.0 (1000W * 1h)", got)
 	}
@@ -325,7 +401,7 @@ func TestEngineElectricity_TrapezoidalSanity(t *testing.T) {
 func TestEngineElectricity_FirstReadingNoKWh(t *testing.T) {
 	engine, store, _, clock := mkElectricityEngine(t)
 	ingestMeter(engine, clock.Now(), 1000)
-	if k := store.House().Electricity.GrossKWh; k != 0 {
+	if k := store.House().Electricity.Session.GrossKWh; k != 0 {
 		t.Fatalf("GrossKWh=%v want 0 on first reading", k)
 	}
 }
@@ -339,7 +415,7 @@ func TestEngineElectricity_GapClampSkipsAllThree(t *testing.T) {
 
 	ingestMeter(engine, clock.Now(), 1000)
 	e := store.House().Electricity
-	if e.GrossKWh != 0 || e.MonitoredKWh != 0 || e.UnmonitoredKWh != 0 {
+	if e.Session.GrossKWh != 0 || e.Session.MonitoredKWh != 0 || e.Session.UnmonitoredKWh != 0 {
 		t.Fatalf("expected all integrators clamped across gap; got %+v", e)
 	}
 }
@@ -430,7 +506,7 @@ func TestEngineElectricity_NegativeGrossCoverageExposed(t *testing.T) {
 func TestEngineElectricity_MonotonicityGuard_RejectsOlderTimestamp(t *testing.T) {
 	engine, store, _, clock := mkElectricityEngine(t)
 	ingestMeter(engine, clock.Now(), 1000)
-	beforeTotal := store.House().Electricity.GrossKWh
+	beforeTotal := store.House().Electricity.Session.GrossKWh
 	beforeComputedAt := store.House().Electricity.ComputedAt
 
 	// Older-than-current reading; should be skipped.
@@ -441,8 +517,8 @@ func TestEngineElectricity_MonotonicityGuard_RejectsOlderTimestamp(t *testing.T)
 	if !after.ComputedAt.Equal(beforeComputedAt) {
 		t.Fatalf("ComputedAt regressed from %v to %v", beforeComputedAt, after.ComputedAt)
 	}
-	if after.GrossKWh != beforeTotal {
-		t.Fatalf("GrossKWh changed from %v to %v on older reading", beforeTotal, after.GrossKWh)
+	if after.Session.GrossKWh != beforeTotal {
+		t.Fatalf("GrossKWh changed from %v to %v on older reading", beforeTotal, after.Session.GrossKWh)
 	}
 	if after.GrossW != 1000 {
 		t.Fatalf("GrossW=%v; older reading must not overwrite live value", after.GrossW)
@@ -464,8 +540,8 @@ func TestEngineElectricity_MonotonicityGuard_AdvancesOnNewer(t *testing.T) {
 	if !after.ComputedAt.After(beforeAt) {
 		t.Fatalf("ComputedAt did not advance: %v -> %v", beforeAt, after.ComputedAt)
 	}
-	if after.GrossKWh <= 0 {
-		t.Fatalf("GrossKWh=%v; expected positive after 10s interval", after.GrossKWh)
+	if after.Session.GrossKWh <= 0 {
+		t.Fatalf("GrossKWh=%v; expected positive after 10s interval", after.Session.GrossKWh)
 	}
 }
 
@@ -529,8 +605,8 @@ func TestEngineElectricity_ConcurrentIngest(t *testing.T) {
 	wg.Wait()
 
 	s := store.House().Electricity
-	if s.GrossKWh < 0 {
-		t.Fatalf("GrossKWh negative: %v", s.GrossKWh)
+	if s.Session.GrossKWh < 0 {
+		t.Fatalf("GrossKWh negative: %v", s.Session.GrossKWh)
 	}
 	if s.ComputedAt.IsZero() {
 		t.Fatalf("ComputedAt not set after concurrent ingest")

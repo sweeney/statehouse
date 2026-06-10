@@ -64,9 +64,12 @@ func TestWriter_HouseElectricity_Mapped(t *testing.T) {
 		{"monitored_w", 800},
 		{"unmonitored_w", 700},
 		{"coverage", 0.5333},
-		{"gross_kwh", 1.5},
-		{"monitored_kwh", 0.8},
-		{"unmonitored_kwh", 0.7},
+		{"today_kwh", 6.83},
+		{"week_kwh", 47.65},
+		{"month_kwh", 250.87},
+		{"session_gross_kwh", 1.5},
+		{"session_monitored_kwh", 0.8},
+		{"session_unmonitored_kwh", 0.7},
 		{"stale_device_count", 0},
 	}
 	for _, e := range emits {

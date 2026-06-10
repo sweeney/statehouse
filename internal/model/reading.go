@@ -16,6 +16,13 @@ type Reading struct {
 	CurrentA  *float64
 	EnergyKWh *float64 // monotonic import counter kWh
 
+	// Meter period counters (smart meter only). These are authoritative
+	// totals the meter resets itself at local midnight / week / month —
+	// not service-derived. Nil for any device that is not the meter.
+	MeterTodayKWh *float64
+	MeterWeekKWh  *float64
+	MeterMonthKWh *float64
+
 	// Environment (climate / weather station)
 	TemperatureC   *float64
 	HumidityPct    *float64

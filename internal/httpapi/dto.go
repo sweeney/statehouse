@@ -108,19 +108,48 @@ type HouseResponse struct {
 
 // HouseElectricityResponse is the DTO for the whole-house electricity
 // summary. Omitted from HouseResponse when no meter reading has been
-// seen, so the absence of the block is the signal.
+// seen, so the absence of the block is the signal. It groups three
+// distinct concerns: the live snapshot, the meter's own period totals,
+// and the service-lifetime session integration.
 type HouseElectricityResponse struct {
+	// Snapshot is the live aggregate as of computed_at.
+	Snapshot ElectricitySnapshotResponse `json:"snapshot"`
+	// Periods are the meter's authoritative day/week/month totals.
+	// Omitted entirely until a meter reading supplies them.
+	Periods *ElectricityPeriodsResponse `json:"periods,omitempty"`
+	// Session is the service-lifetime power integration; resets on restart.
+	Session SessionEnergyResponse `json:"session"`
+}
+
+// ElectricitySnapshotResponse is the instantaneous whole-house aggregate.
+type ElectricitySnapshotResponse struct {
 	GrossW           float64    `json:"gross_w"`
 	MonitoredW       float64    `json:"monitored_w"`
 	UnmonitoredW     float64    `json:"unmonitored_w"`
 	Coverage         float64    `json:"coverage"`
 	StaleDeviceCount int        `json:"stale_device_count"`
 	StaleDevices     []string   `json:"stale_devices,omitempty"`
-	GrossKWh         float64    `json:"gross_kwh"`
-	MonitoredKWh     float64    `json:"monitored_kwh"`
-	UnmonitoredKWh   float64    `json:"unmonitored_kwh"`
 	ComputedAt       *time.Time `json:"computed_at"`
 	ComputedAgo      *int       `json:"computed_ago"`
+}
+
+// ElectricityPeriodsResponse holds the meter's authoritative period totals,
+// reset by the meter itself at local midnight / week / month.
+type ElectricityPeriodsResponse struct {
+	TodayKWh *float64 `json:"today_kwh,omitempty"`
+	WeekKWh  *float64 `json:"week_kwh,omitempty"`
+	MonthKWh *float64 `json:"month_kwh,omitempty"`
+}
+
+// SessionEnergyResponse is the service-lifetime energy block. Started marks
+// when integration began (service start); the totals are a function of
+// uptime, not a true house total, and reset to zero on restart.
+type SessionEnergyResponse struct {
+	Started        *time.Time `json:"started"`
+	StartedAgo     *int       `json:"started_ago"`
+	GrossKWh       float64    `json:"gross_kwh"`
+	MonitoredKWh   float64    `json:"monitored_kwh"`
+	UnmonitoredKWh float64    `json:"unmonitored_kwh"`
 }
 
 // IdentityResponse is the protocol-agnostic identity of a device.
@@ -400,17 +429,31 @@ func buildHouseResponse(h model.House, now time.Time) HouseResponse {
 	}
 	if !h.Electricity.ComputedAt.IsZero() {
 		resp.Electricity = &HouseElectricityResponse{
-			GrossW:           h.Electricity.GrossW,
-			MonitoredW:       h.Electricity.MonitoredW,
-			UnmonitoredW:     h.Electricity.UnmonitoredW,
-			Coverage:         h.Electricity.Coverage,
-			StaleDeviceCount: h.Electricity.StaleDeviceCount,
-			StaleDevices:     h.Electricity.StaleDevices,
-			GrossKWh:         h.Electricity.GrossKWh,
-			MonitoredKWh:     h.Electricity.MonitoredKWh,
-			UnmonitoredKWh:   h.Electricity.UnmonitoredKWh,
-			ComputedAt:       nilIfZero(h.Electricity.ComputedAt),
-			ComputedAgo:      agoInt(h.Electricity.ComputedAt, now),
+			Snapshot: ElectricitySnapshotResponse{
+				GrossW:           h.Electricity.GrossW,
+				MonitoredW:       h.Electricity.MonitoredW,
+				UnmonitoredW:     h.Electricity.UnmonitoredW,
+				Coverage:         h.Electricity.Coverage,
+				StaleDeviceCount: h.Electricity.StaleDeviceCount,
+				StaleDevices:     h.Electricity.StaleDevices,
+				ComputedAt:       nilIfZero(h.Electricity.ComputedAt),
+				ComputedAgo:      agoInt(h.Electricity.ComputedAt, now),
+			},
+			Session: SessionEnergyResponse{
+				Started:        nilIfZero(h.Electricity.Session.Since),
+				StartedAgo:     agoInt(h.Electricity.Session.Since, now),
+				GrossKWh:       h.Electricity.Session.GrossKWh,
+				MonitoredKWh:   h.Electricity.Session.MonitoredKWh,
+				UnmonitoredKWh: h.Electricity.Session.UnmonitoredKWh,
+			},
+		}
+		// Periods are present only once the meter has reported them.
+		if h.Electricity.TodayKWh != nil || h.Electricity.WeekKWh != nil || h.Electricity.MonthKWh != nil {
+			resp.Electricity.Periods = &ElectricityPeriodsResponse{
+				TodayKWh: h.Electricity.TodayKWh,
+				WeekKWh:  h.Electricity.WeekKWh,
+				MonthKWh: h.Electricity.MonthKWh,
+			}
 		}
 	}
 	return resp

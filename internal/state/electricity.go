@@ -47,13 +47,19 @@ func isMeterDevice(d model.Device) bool {
 }
 
 // isPowerMonitored reports whether a device's class contributes its
-// PowerW to the monitored sum. Passive sensors and binary-state devices
-// don't carry power readings; the meter itself supplies gross, not
-// monitored, and is excluded.
+// PowerW to the monitored sum. The four power-plug classes contribute
+// their measured draw. A UPS is included too: it reports its output
+// load (LoadWatts) as PowerW, which is real consumption — typically the
+// network/computing gear behind it, none of which is otherwise on a
+// monitored plug, so counting it improves coverage rather than
+// double-counting. Environmental and binary-state devices carry no
+// meaningful power; the meter itself supplies gross, not monitored, and
+// is excluded upstream by isMeterDevice.
 func isPowerMonitored(class string) bool {
 	switch class {
 	case device.ClassShortBurst, device.ClassCyclePower,
-		device.ClassContinuous, device.ClassMedia:
+		device.ClassContinuous, device.ClassMedia,
+		device.ClassUPSSensor:
 		return true
 	}
 	return false
