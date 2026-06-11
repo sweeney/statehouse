@@ -55,6 +55,15 @@ Emitted for any environmental reading. Only fields present in the event are writ
 | `on_battery` | bool |
 | `low_battery` | bool |
 
+### `device_alarm`
+
+Emitted for safety alarms (smoke/heat detectors, class `fire_alarm`). Latched binary signals; written on each report that carries the field. A missing field is never written as `false` (partial per-cluster payloads are common).
+
+| Field | Type |
+|---|---|
+| `smoke` | bool |
+| `tamper` | bool |
+
 ### `device_radio`
 
 | Field | Type |

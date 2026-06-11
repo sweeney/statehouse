@@ -23,6 +23,43 @@ func TestParseDevicePayload_MissingFieldsAreNil(t *testing.T) {
 	}
 }
 
+// TestParseDevicePayload_AlarmFields verifies a HEIMAN smoke-detector
+// payload decodes alarm_1 → Smoke and tamper → Tamper (real shape from
+// docs/firealarm_office-sensor-report.md §5.4).
+func TestParseDevicePayload_AlarmFields(t *testing.T) {
+	r, err := ParseDevicePayload([]byte(`{"alarm_1":true,"alarm_2":false,"battery":100,"battery_low":false,"linkquality":160,"tamper":false,"temperature":23.57}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if r.Smoke == nil || !*r.Smoke {
+		t.Fatalf("expected Smoke=true from alarm_1, got %v", r.Smoke)
+	}
+	if r.Tamper == nil || *r.Tamper {
+		t.Fatalf("expected Tamper=false present, got %v", r.Tamper)
+	}
+	if !r.HasAnyMeasurement() {
+		t.Fatalf("alarm reading must count as a measurement")
+	}
+}
+
+// TestParseDevicePayload_PartialPayloadAbsentIsNotCleared pins the
+// safety-critical "absent ≠ cleared" guarantee: these detectors emit
+// partial per-cluster payloads (battery/temperature only, no alarm_*).
+// A missing alarm_1 must stay nil so the engine never reads a routine
+// battery report as "smoke cleared". Real shape from §7.1.
+func TestParseDevicePayload_PartialPayloadAbsentIsNotCleared(t *testing.T) {
+	r, err := ParseDevicePayload([]byte(`{"battery":100,"linkquality":120,"temperature":21.3}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if r.Smoke != nil {
+		t.Fatalf("absent alarm_1 must stay nil (not false), got %v", *r.Smoke)
+	}
+	if r.Tamper != nil {
+		t.Fatalf("absent tamper must stay nil, got %v", *r.Tamper)
+	}
+}
+
 func TestParseDevicePayload_ZeroIsDistinct(t *testing.T) {
 	r, err := ParseDevicePayload([]byte(`{"power":0,"energy":0}`))
 	if err != nil {

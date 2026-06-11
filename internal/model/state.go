@@ -72,6 +72,10 @@ type Latest struct {
 	OnBattery          *bool    `json:"on_battery,omitempty"`
 	LowBattery         *bool    `json:"low_battery,omitempty"`
 
+	// Safety alarm (smoke/heat detectors)
+	Smoke  *bool `json:"smoke,omitempty"`
+	Tamper *bool `json:"tamper,omitempty"`
+
 	// Device health
 	BatteryPct  *float64 `json:"battery_pct,omitempty"`
 	LinkQuality *int     `json:"linkquality,omitempty"`

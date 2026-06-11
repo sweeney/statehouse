@@ -37,15 +37,28 @@ const (
 	// ClassEnergyMeter covers whole-home electricity meters and IHD
 	// devices. Measurement-only: reports cumulative kWh, import/export,
 	// and instantaneous power. No cycles, no occupancy contribution.
-	ClassEnergyMeter  = "energy_meter"
+	ClassEnergyMeter = "energy_meter"
+	// ClassFireAlarm covers Zigbee smoke/heat detectors (e.g. HEIMAN
+	// HS1SA-E-PLUS). It is a thin alias of ClassEnvironmentalSensor:
+	// measurement-only passive behaviour (no cycles, no activity machine,
+	// no occupancy contribution, default staleness) so the onboard
+	// temperature/battery flow cleanly and the change-driven 30–45 min
+	// idle gaps are never flagged stale. It exists as its own class only
+	// to tag safety alarms distinctly from TH sensors; the alarm signal
+	// itself rides on the device payload, not on class behaviour. A fire
+	// alarm must NOT be a binary_state_device — that would feed occupancy
+	// and apply debounce semantics that fight the latched re-broadcast.
+	ClassFireAlarm    = "fire_alarm"
 	ClassUnclassified = "unclassified"
 )
 
 // IsPassiveSensor reports whether class is a measurement-only sensor
 // class that has no active/idle state machine — currently
-// ClassEnvironmentalSensor, ClassUPSSensor, and ClassEnergyMeter.
+// ClassEnvironmentalSensor, ClassUPSSensor, ClassEnergyMeter, and
+// ClassFireAlarm.
 func IsPassiveSensor(class string) bool {
-	return class == ClassEnvironmentalSensor || class == ClassUPSSensor || class == ClassEnergyMeter
+	return class == ClassEnvironmentalSensor || class == ClassUPSSensor ||
+		class == ClassEnergyMeter || class == ClassFireAlarm
 }
 
 // Resolution describes which config path classified this device.

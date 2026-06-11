@@ -210,6 +210,10 @@ type LatestResponse struct {
 	OnBattery          *bool    `json:"on_battery,omitempty"`
 	LowBattery         *bool    `json:"low_battery,omitempty"`
 
+	// Safety alarm (smoke/heat detectors)
+	Smoke  *bool `json:"smoke,omitempty"`
+	Tamper *bool `json:"tamper,omitempty"`
+
 	// Device health
 	BatteryPct  *float64 `json:"battery_pct,omitempty"`
 	LinkQuality *int     `json:"linkquality,omitempty"`
@@ -555,6 +559,8 @@ func buildLatestResponse(l model.Latest, class string, now time.Time, stalenessS
 		BatteryRuntimeMins: l.BatteryRuntimeMins,
 		OnBattery:          l.OnBattery,
 		LowBattery:         l.LowBattery,
+		Smoke:              l.Smoke,
+		Tamper:             l.Tamper,
 		BatteryPct:         l.BatteryPct,
 		LinkQuality:        l.LinkQuality,
 		RSSI:               l.RSSI,

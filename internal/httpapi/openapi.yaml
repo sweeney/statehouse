@@ -446,6 +446,12 @@ components:
         low_battery:
           type: boolean
           description: UPS battery is low.
+        smoke:
+          type: boolean
+          description: Smoke/heat detector primary alarm is active (latched while detecting).
+        tamper:
+          type: boolean
+          description: Smoke/heat detector tamper switch is tripped.
         battery_pct:
           type: number
           format: double

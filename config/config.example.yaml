@@ -144,6 +144,16 @@ device_classes:
   energy_meter:
     name_hints: [electricitymeter, meter]
 
+  # Zigbee smoke/heat detectors (HEIMAN HS1SA-E-PLUS etc.). A thin alias
+  # of environmental_sensor: measurement-only passive behaviour so the
+  # onboard temperature/battery flow into Influx and the change-driven
+  # idle gaps (30-45+ min between reports) are never flagged stale. Its
+  # own class only so safety alarms tag distinctly from TH sensors. Do
+  # not classify these as binary_state_device — that would feed occupancy
+  # and debounce the latched alarm re-broadcast.
+  fire_alarm:
+    name_hints: [firealarm]
+
 devices:
   # The Glow/SMETS2 meter is recognised by the meter adapter regardless
   # of whether you list it here — its scheme is "meter" and the

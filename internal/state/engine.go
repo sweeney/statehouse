@@ -299,6 +299,14 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			v := *reading.LowBattery
 			l.LowBattery = &v
 		}
+		if reading.Smoke != nil {
+			v := *reading.Smoke
+			l.Smoke = &v
+		}
+		if reading.Tamper != nil {
+			v := *reading.Tamper
+			l.Tamper = &v
+		}
 		if reading.Battery != nil {
 			v := *reading.Battery
 			l.BatteryPct = &v
@@ -801,6 +809,12 @@ func (e *Engine) emitCanonicalForReading(id string, identity model.DeviceIdentit
 	}
 	if r.LowBattery != nil {
 		emit("ups", "low_battery", *r.LowBattery, "")
+	}
+	if r.Smoke != nil {
+		emit("alarm", "smoke", *r.Smoke, "")
+	}
+	if r.Tamper != nil {
+		emit("alarm", "tamper", *r.Tamper, "")
 	}
 	if r.RSSI != nil {
 		emit("radio", "rssi_dbm", *r.RSSI, "dBm")

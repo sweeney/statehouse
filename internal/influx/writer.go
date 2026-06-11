@@ -181,6 +181,14 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 		if v, ok := ev.Value.(bool); ok {
 			p = write.NewPoint("device_ups", tags, map[string]any{"low_battery": v}, ev.Timestamp)
 		}
+	case "smoke":
+		if v, ok := ev.Value.(bool); ok {
+			p = write.NewPoint("device_alarm", tags, map[string]any{"smoke": v}, ev.Timestamp)
+		}
+	case "tamper":
+		if v, ok := ev.Value.(bool); ok {
+			p = write.NewPoint("device_alarm", tags, map[string]any{"tamper": v}, ev.Timestamp)
+		}
 	case "rssi_dbm":
 		if v, ok := ev.Value.(int); ok {
 			p = write.NewPoint("device_radio", tags, map[string]any{"rssi_dbm": v}, ev.Timestamp)

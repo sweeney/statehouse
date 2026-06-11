@@ -59,6 +59,34 @@ type capture struct {
 func (c *capture) OnDerivedEvent(ev model.DerivedEvent)    { c.derived = append(c.derived, ev) }
 func (c *capture) OnCanonicalEvent(_ model.CanonicalEvent) {}
 
+// canonicalCapture records the events emitted on the canonical path
+// (what the Influx writer consumes).
+type canonicalCapture struct {
+	events []model.CanonicalEvent
+}
+
+func (c *canonicalCapture) OnCanonicalEvent(ev model.CanonicalEvent) {
+	c.events = append(c.events, ev)
+}
+
+func (c *canonicalCapture) sawAttr(attr string) bool {
+	for _, e := range c.events {
+		if e.Attribute == attr {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *canonicalCapture) sawValue(attr string, val any) bool {
+	for _, e := range c.events {
+		if e.Attribute == attr && e.Value == val {
+			return true
+		}
+	}
+	return false
+}
+
 // replay feeds a JSONL fixture through the Z2M Adapter the same way
 // paho would in production. The fake clock is advanced to each
 // message's timestamp so debounce/hysteresis fire deterministically.
@@ -78,6 +106,74 @@ func replay(t *testing.T, path string, clock *testutil.FakeClock, a *Adapter) {
 
 func fixturePath(name string) string {
 	return filepath.Join("..", "..", "testdata", "fixtures", name)
+}
+
+// TestFixture_FireAlarmClassifiesPassive replays a real capture of the
+// office HEIMAN smoke detector's alarm lifecycle (idle → alarm_1 true →
+// cleared, payloads lifted verbatim from docs/firealarm_office-sensor-report.md
+// §5). It pins the thin fire_alarm alias: the unit classifies by name
+// hint, behaves as a passive sensor (activity "reporting", no cycle or
+// burst events), its onboard temperature/battery flow through to Latest
+// and the canonical (Influx) path, and the alarm_1 fire signal surfaces
+// as the "smoke" canonical attribute and settles cleared at end of life.
+func TestFixture_FireAlarmClassifiesPassive(t *testing.T) {
+	cfg := fixtureCfg()
+	cfg.DeviceClasses["fire_alarm"] = config.DeviceClassConfig{
+		NameHints: []string{"firealarm"},
+	}
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 6, 11, 9, 44, 0, 0, time.UTC))
+	engine := state.NewEngine(cfg, store, clock)
+	cap := &capture{}
+	canon := &canonicalCapture{}
+	engine.AddDerivedSink(cap)
+	engine.AddCanonicalSink(canon)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	replay(t, fixturePath("firealarm_office_alarm.jsonl"), clock, a)
+
+	d, ok := store.Get("firealarm_office")
+	if !ok {
+		t.Fatalf("expected device 'firealarm_office' in store")
+	}
+	if d.Class != "fire_alarm" {
+		t.Fatalf("expected class fire_alarm (name-hint), got %q", d.Class)
+	}
+	if d.Identity.Primary != "0xb0e8e8fffe66d945" {
+		t.Errorf("expected IEEE primary, got %q", d.Identity.Primary)
+	}
+	// Passive sensor: settles at reporting, never runs an activity machine.
+	if d.Activity.State != model.ActivityReporting {
+		t.Errorf("expected activity reporting, got %q", d.Activity.State)
+	}
+	if d.Cycle != nil {
+		t.Errorf("passive sensor must not open a cycle, got %+v", d.Cycle)
+	}
+	for _, ev := range cap.derived {
+		switch ev.Type {
+		case model.EvtCycleStarted, model.EvtCycleFinished, model.EvtShortBurstDetected:
+			t.Errorf("passive sensor must not emit %s", ev.Type)
+		}
+	}
+	// Temperature reaches Latest and the canonical (Influx) path.
+	if d.Latest.TemperatureC == nil || *d.Latest.TemperatureC != 23.57 {
+		t.Errorf("expected latest temperature 23.57, got %v", d.Latest.TemperatureC)
+	}
+	if !canon.sawAttr("temperature_c") {
+		t.Errorf("expected a temperature_c canonical event for the Influx path")
+	}
+	// The fire signal surfaces as the "smoke" canonical attribute (Influx
+	// device_alarm), and the capture both raised and cleared alarm_1.
+	if !canon.sawAttr("smoke") {
+		t.Errorf("expected a smoke canonical event from alarm_1")
+	}
+	if !canon.sawValue("smoke", true) {
+		t.Errorf("expected smoke=true canonical event during the alarm")
+	}
+	// Last word from the capture is the all-clear, so Latest.Smoke=false.
+	if d.Latest.Smoke == nil || *d.Latest.Smoke {
+		t.Errorf("expected latest smoke=false after clear, got %v", d.Latest.Smoke)
+	}
 }
 
 func TestFixture_DishwasherCycleProducesCycleEvents(t *testing.T) {

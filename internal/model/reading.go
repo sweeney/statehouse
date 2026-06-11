@@ -38,6 +38,15 @@ type Reading struct {
 	OnBattery          *bool    // true when running on battery
 	LowBattery         *bool    // true when battery is critically low
 
+	// Safety alarm (smoke/heat detectors). These are latched binary
+	// signals, not activity — a fire alarm is a passive sensor class, so
+	// they flow as measurements rather than driving the activity machine.
+	// Absence (nil) means "not reported in this payload", NOT "cleared":
+	// these devices emit partial per-cluster payloads, so a battery-only
+	// message must never be read as smoke=false.
+	Smoke  *bool // true when the primary smoke/heat alarm is active
+	Tamper *bool // true when the tamper switch is tripped
+
 	// Device health (ancillary — not counted in HasAnyMeasurement)
 	LinkQuality *int
 	Battery     *float64 // battery charge percent
@@ -54,5 +63,6 @@ func (r Reading) HasAnyMeasurement() bool {
 		r.PressureHPa != nil || r.WindSpeedMS != nil ||
 		r.WindDirDeg != nil || r.RainfallMM != nil ||
 		r.IlluminanceLux != nil || r.UVIndex != nil ||
-		r.BatteryRuntimeMins != nil || r.OnBattery != nil || r.LowBattery != nil
+		r.BatteryRuntimeMins != nil || r.OnBattery != nil || r.LowBattery != nil ||
+		r.Smoke != nil || r.Tamper != nil
 }

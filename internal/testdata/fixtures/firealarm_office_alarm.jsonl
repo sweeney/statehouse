@@ -1,0 +1,10 @@
+{"ts":"2026-06-11T09:44:40.000Z","topic":"zigbee2mqtt/bridge/devices","payload":[{"friendly_name":"firealarm_office","ieee_address":"0xb0e8e8fffe66d945","type":"EndDevice"}]}
+{"ts":"2026-06-11T09:44:41.000Z","topic":"zigbee2mqtt/firealarm_office/availability","payload":{"state":"online"}}
+{"ts":"2026-06-11T09:44:45.889Z","topic":"zigbee2mqtt/firealarm_office","payload":{"alarm_1":false,"alarm_2":false,"battery":100,"battery_low":false,"last_seen":1781171085889,"linkquality":152,"tamper":false,"temperature":22.43}}
+{"ts":"2026-06-11T09:48:10.659Z","topic":"zigbee2mqtt/firealarm_office","payload":{"alarm_1":false,"alarm_2":false,"battery":100,"battery_low":false,"last_seen":1781171290659,"linkquality":148,"tamper":false,"temperature":23.57}}
+{"ts":"2026-06-11T09:51:11.893Z","topic":"zigbee2mqtt/firealarm_office","payload":{"alarm_1":true,"alarm_2":false,"battery":100,"battery_low":false,"last_seen":1781171471893,"linkquality":160,"tamper":false,"temperature":23.57}}
+{"ts":"2026-06-11T09:51:11.902Z","topic":"zigbee2mqtt/firealarm_office","payload":{"alarm_1":true,"alarm_2":false,"battery":100,"battery_low":false,"last_seen":1781171471902,"linkquality":156,"tamper":false,"temperature":23.57}}
+{"ts":"2026-06-11T09:51:18.007Z","topic":"zigbee2mqtt/firealarm_office","payload":{"alarm_1":true,"alarm_2":false,"battery":100,"battery_low":false,"last_seen":1781171478007,"linkquality":160,"tamper":false,"temperature":23.57}}
+{"ts":"2026-06-11T09:51:31.397Z","topic":"zigbee2mqtt/firealarm_office","payload":{"alarm_1":true,"alarm_2":false,"battery":100,"battery_low":false,"last_seen":1781171491397,"linkquality":156,"tamper":false,"temperature":23.57}}
+{"ts":"2026-06-11T09:53:13.378Z","topic":"zigbee2mqtt/firealarm_office","payload":{"alarm_1":true,"alarm_2":false,"battery":100,"battery_low":false,"last_seen":1781171593378,"linkquality":156,"tamper":false,"temperature":23.57}}
+{"ts":"2026-06-11T09:55:39.626Z","topic":"zigbee2mqtt/firealarm_office","payload":{"alarm_1":false,"alarm_2":false,"battery":100,"battery_low":false,"last_seen":1781171739626,"linkquality":160,"tamper":false,"temperature":23.57}}

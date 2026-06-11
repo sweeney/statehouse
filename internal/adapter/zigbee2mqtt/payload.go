@@ -31,6 +31,10 @@ type rawDevicePayload struct {
 	Battery     *float64 `json:"battery"`
 	Occupancy   *bool    `json:"occupancy"`
 	Contact     *bool    `json:"contact"`
+	// Smoke/heat detectors (HEIMAN HS1SA-E-PLUS etc.): alarm_1 is the
+	// primary smoke/heat alarm; tamper is the case-tamper switch.
+	Alarm1 *bool `json:"alarm_1"`
+	Tamper *bool `json:"tamper"`
 	// last_seen is deliberately omitted — devices send it as either a
 	// unix-millisecond integer or a string depending on Z2M config, and
 	// we derive timing from the engine clock rather than the payload.
@@ -57,6 +61,8 @@ func ParseDevicePayload(b []byte) (model.Reading, error) {
 	r.HumidityPct = raw.Humidity
 	r.LinkQuality = raw.LinkQuality
 	r.Battery = raw.Battery
+	r.Smoke = raw.Alarm1
+	r.Tamper = raw.Tamper
 	return r, nil
 }
 

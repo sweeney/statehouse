@@ -40,6 +40,19 @@ func TestClassifyByHints_LongerHintWins(t *testing.T) {
 	}
 }
 
+// TestFireAlarmIsPassiveSensor verifies the fire_alarm class is treated
+// as a measurement-only passive sensor — the thin-alias contract that
+// keeps it off the activity/occupancy/staleness machinery and aligned
+// with environmental_sensor. binary_state_device must stay non-passive.
+func TestFireAlarmIsPassiveSensor(t *testing.T) {
+	if !IsPassiveSensor(ClassFireAlarm) {
+		t.Fatalf("fire_alarm must be a passive sensor")
+	}
+	if IsPassiveSensor(ClassBinaryState) {
+		t.Fatalf("binary_state_device must not be passive (it feeds occupancy)")
+	}
+}
+
 // TestResolve_PerDeviceEnergyStrategyOverride verifies that a device
 // with an explicit energy_strategy field wins over its class default.
 // This exists for devices whose hardware counters tick at too coarse a
