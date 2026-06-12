@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sweeney/identity/common/auth"
 	"github.com/sweeney/statehouse/internal/adapter"
 	"github.com/sweeney/statehouse/internal/adapter/boiler"
 	"github.com/sweeney/statehouse/internal/adapter/climate"
@@ -20,7 +21,6 @@ import (
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
 	"github.com/sweeney/statehouse/internal/httpapi"
-	"github.com/sweeney/statehouse/internal/identity"
 	"github.com/sweeney/statehouse/internal/influx"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/mqtt"
@@ -53,7 +53,7 @@ func main() {
 		logger.Info("applying remote config", "url", cfg.RemoteConfig.BaseURL)
 		remoteCfgFetcher = &config.Fetcher{
 			BaseURL: cfg.RemoteConfig.BaseURL,
-			Tokens: &identity.TokenSource{
+			Tokens: &auth.TokenSource{
 				BaseURL:      cfg.Identity.BaseURL,
 				ClientID:     cfg.Identity.ClientID,
 				ClientSecret: cfg.Identity.ClientSecret,
