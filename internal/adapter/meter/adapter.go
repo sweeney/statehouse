@@ -111,7 +111,10 @@ func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
 		return
 	}
 
-	now := time.Now().UTC()
+	// now comes from the engine, never the wall clock: it both sanitises the
+	// publisher timestamp and stamps the reading, so it has to share a time
+	// base with the engine state derived from it.
+	now := a.engine.Now()
 	ts := now
 	if raw := p.ElectricityMeter.Timestamp; raw != "" {
 		if t, err := time.Parse(time.RFC3339, raw); err == nil {
@@ -173,7 +176,10 @@ func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial st
 		return
 	}
 
-	now := time.Now().UTC()
+	// now comes from the engine, never the wall clock: it both sanitises the
+	// publisher timestamp and stamps the reading, so it has to share a time
+	// base with the engine state derived from it.
+	now := a.engine.Now()
 	ts := now
 	if entry.Timestamp != "" {
 		if t, err := time.Parse(time.RFC3339, entry.Timestamp); err == nil {
