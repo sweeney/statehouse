@@ -85,6 +85,17 @@ func NewEngine(cfg config.Config, store *Store, clock testutil.Clock) *Engine {
 	}
 }
 
+// Now returns the engine's current time.
+//
+// Adapters must use this rather than time.Now() for anything that ends up
+// in engine state: reading timestamps, timestamp sanitisation windows and
+// signal TTLs. The engine derives staleness, cycle boundaries and the
+// house-state windows from those values, so an adapter reading a different
+// clock silently mixes two time bases. In production both resolve to the
+// wall clock and this is a no-op; under a fixture replay or any test clock
+// it is the difference between coherent state and nonsense.
+func (e *Engine) Now() time.Time { return e.clock.Now() }
+
 // AddDerivedSink registers a sink for derived events. Sinks are
 // invoked synchronously in registration order.
 func (e *Engine) AddDerivedSink(s EventSink) {
