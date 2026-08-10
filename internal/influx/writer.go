@@ -126,9 +126,6 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 		"class":     d.Class,
 	}
 	w.tagSite(tags)
-	if d.Location != "" {
-		tags["location"] = d.Location
-	}
 	var p *write.Point
 	switch ev.Attribute {
 	case "power_w":

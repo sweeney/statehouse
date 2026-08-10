@@ -142,8 +142,13 @@ func TestWriter_PowerSampleGoesToDevicePower(t *testing.T) {
 		t.Errorf("timestamp mismatch: got %v want %v", p.Time(), ts)
 	}
 	tags := tagMap(p)
-	if tags["device_id"] != "kitchen_dishwasher" || tags["class"] != device.ClassCyclePower || tags["location"] != "kitchen" {
+	// The location tag is deliberately gone: room is resolved at read time from the
+	// floorplan, so stored points carry identity and class only.
+	if tags["device_id"] != "kitchen_dishwasher" || tags["class"] != device.ClassCyclePower {
 		t.Errorf("tags wrong: %+v", tags)
+	}
+	if _, ok := tags["location"]; ok {
+		t.Errorf("location tag is still written: %+v", tags)
 	}
 	fields := fieldMap(p)
 	if fields["power_w"] != 1840.2 {
@@ -178,8 +183,11 @@ func TestWriter_BatterySampleGoesToDeviceBattery(t *testing.T) {
 	}
 	p := got[0]
 	tags := tagMap(p)
-	if tags["device_id"] != "bedroom_climate" || tags["class"] != device.ClassEnvironmentalSensor || tags["location"] != "bedroom" {
+	if tags["device_id"] != "bedroom_climate" || tags["class"] != device.ClassEnvironmentalSensor {
 		t.Errorf("battery tags wrong: %+v", tags)
+	}
+	if _, ok := tags["location"]; ok {
+		t.Errorf("location tag is still written: %+v", tags)
 	}
 	if fieldMap(p)["battery_pct"] != 87.0 {
 		t.Errorf("battery fields wrong: %+v", fieldMap(p))

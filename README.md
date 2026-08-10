@@ -29,6 +29,11 @@ keeps `device_id` unambiguous once a second property reports into the same bucke
 a second site already exists in the `sites` namespace, so this is not hypothetical. It
 is `site` and not `location` because `location` is already in the data meaning a room.
 
+Points no longer carry a `location` tag. It was write-only — both read services
+decoded it into a field neither ever read, and rooms resolve at read time from the
+floorplan instead. Old points keep their stale tag and are simply unread, so there is
+no backfill to get wrong and a room rename never touches stored data.
+
 Points written before this tag existed carry no `site` at all. A consumer filtering on
 `site == "home"` would silently exclude all of that history, so consumers treat an
 absent tag as the primary site rather than filtering it away.
