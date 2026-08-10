@@ -167,6 +167,8 @@ type DeviceResponse struct {
 	ID           string             `json:"id"`
 	DisplayName  string             `json:"display_name,omitempty"`
 	Class        string             `json:"class"`
+	Room         string             `json:"room,omitempty"`
+	Covers       string             `json:"covers,omitempty"`
 	Location     string             `json:"location,omitempty"`
 	Identity     *IdentityResponse  `json:"identity,omitempty"`
 	Availability model.Availability `json:"availability"`
@@ -493,7 +495,9 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int, i
 		ID:           d.ID,
 		DisplayName:  d.DisplayName,
 		Class:        d.Class,
-		Location:     d.Location,
+		Room:         d.Place(),
+		Covers:       d.Covers,
+		Location:     d.Place(),
 		Identity:     identity,
 		Availability: d.Availability,
 		Activity:     buildActivityResponse(d.Activity, now),

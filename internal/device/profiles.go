@@ -72,9 +72,12 @@ const (
 
 // Profile is the resolved per-device configuration used at runtime.
 type Profile struct {
-	ID           string
-	Class        string
-	DisplayName  string
+	ID          string
+	Class       string
+	DisplayName string
+	// Room is the floorplan room id; Location is its deprecated free-text form.
+	Room         string
+	Covers       string
 	Location     string
 	Thresholds   config.Thresholds
 	Strategy     energy.Strategy
@@ -232,6 +235,8 @@ func profileFromOverride(d config.DeviceConfig, classes map[string]config.Device
 	p := Profile{
 		Class:       d.Class,
 		DisplayName: d.DisplayName,
+		Room:        d.Room,
+		Covers:      d.Covers,
 		Location:    d.Location,
 	}
 	if cls, ok := classes[d.Class]; ok {

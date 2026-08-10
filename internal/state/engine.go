@@ -122,6 +122,8 @@ func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic str
 		ID:           id,
 		DisplayName:  prof.DisplayName,
 		Class:        prof.Class,
+		Room:         prof.Room,
+		Covers:       prof.Covers,
 		Location:     prof.Location,
 		Identity:     identity,
 		Availability: model.AvailabilityUnknown,

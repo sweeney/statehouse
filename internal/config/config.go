@@ -265,8 +265,16 @@ type DeviceConfig struct {
 
 	Class       string      `yaml:"class"            json:"class,omitempty"`
 	DisplayName string      `yaml:"display_name"     json:"display_name,omitempty"`
-	Location    string      `yaml:"location"         json:"location,omitempty"`
 	Thresholds  *Thresholds `yaml:"thresholds"       json:"thresholds,omitempty"`
+
+	// Room is the floorplan room id this device sits in.
+	Room string `yaml:"room" json:"room,omitempty"`
+	// Covers is what its readings describe when that is not its own room: "house",
+	// or another room id. Absent means it covers the room it sits in.
+	Covers string `yaml:"covers" json:"covers,omitempty"`
+	// Location is the deprecated free-text place. Still decoded because the devices
+	// namespace and its consumers migrate on separate schedules.
+	Location string `yaml:"location" json:"location,omitempty"`
 
 	// EnergyStrategy overrides the class-level energy_strategy for this
 	// specific device. Use "integration" when the device's counter ticks
@@ -382,4 +390,13 @@ func trimTrailingNewline(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
+}
+
+// Place returns the room this device sits in: its Room when the devices namespace has
+// been republished, otherwise its deprecated Location.
+func (d DeviceConfig) Place() string {
+	if d.Room != "" {
+		return d.Room
+	}
+	return d.Location
 }

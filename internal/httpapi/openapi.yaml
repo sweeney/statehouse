@@ -596,9 +596,21 @@ components:
         class:
           type: string
           description: Device class (e.g. "short_burst_power_device", "continuous").
+        room:
+          type: string
+          description: >
+            Floorplan room id this device sits in, e.g. "groundfloor.kitchen".
+        covers:
+          type: string
+          description: >
+            What this device's readings describe when that is not its own room:
+            "house", or another room id. Absent means it covers the room it is in.
         location:
           type: string
-          description: Room or zone label from config.
+          deprecated: true
+          description: >
+            DEPRECATED alias for room, carrying the same value. Removed once the
+            devices namespace is published and consumers have migrated.
         identity:
           allOf:
             - $ref: "#/components/schemas/IdentityResponse"

@@ -157,9 +157,16 @@ type Cycle struct {
 
 // Device is the canonical, downstream-facing view of one device.
 type Device struct {
-	ID           string         `json:"id"`
-	DisplayName  string         `json:"display_name,omitempty"`
-	Class        string         `json:"class"`
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name,omitempty"`
+	Class       string `json:"class"`
+	// Room is the floorplan room id this device sits in, e.g. "groundfloor.kitchen".
+	Room string `json:"room,omitempty"`
+	// Covers is what the device's readings describe when that is not its own room:
+	// "house", or another room id. Absent means it covers the room it sits in.
+	Covers string `json:"covers,omitempty"`
+	// Location is the deprecated free-text place, still carried while a devices
+	// namespace that has not been republished supplies it.
 	Location     string         `json:"location,omitempty"`
 	Identity     DeviceIdentity `json:"identity"`
 	Availability Availability   `json:"availability"`
@@ -280,4 +287,14 @@ type Snapshot struct {
 	GeneratedAt time.Time         `json:"generated_at"`
 	House       House             `json:"house"`
 	Devices     map[string]Device `json:"devices"`
+}
+
+// Place returns the room this device sits in: its Room when the devices namespace has
+// been republished, otherwise its deprecated Location. Every reader goes through this
+// one function so the two spellings cannot drift apart.
+func (d Device) Place() string {
+	if d.Room != "" {
+		return d.Room
+	}
+	return d.Location
 }
