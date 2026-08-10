@@ -126,8 +126,11 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 		"class":     d.Class,
 	}
 	w.tagSite(tags)
-	if d.Location != "" {
-		tags["location"] = d.Location
+	// Place() so a republished namespace supplying only `room` keeps tagging.
+	// Losing the tag silently would pre-empt step-11-drop-location-tag, and an
+	// Influx series that loses a tag cannot be repaired afterwards.
+	if loc := d.Place(); loc != "" {
+		tags["location"] = loc
 	}
 	var p *write.Point
 	switch ev.Attribute {
@@ -223,8 +226,10 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 			return
 		}
 		tags := map[string]string{"device_id": ev.DeviceID, "class": ev.DeviceClass}
-		if d, ok := w.Store.Get(ev.DeviceID); ok && d.Location != "" {
-			tags["location"] = d.Location
+		if d, ok := w.Store.Get(ev.DeviceID); ok {
+			if loc := d.Place(); loc != "" {
+				tags["location"] = loc
+			}
 		}
 		p := write.NewPoint("appliance_cycle", tags, fields, ev.Timestamp)
 		w.api.WritePoint(p)

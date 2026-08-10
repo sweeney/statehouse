@@ -653,7 +653,7 @@ func buildDeviceProfileResponse(p device.Profile) DeviceProfileResponse {
 		EnergyStrategy: string(p.Strategy),
 		Resolution:     profileResolution(p),
 		DisplayName:    p.DisplayName,
-		Location:       p.Location,
+		Location:       p.Place(),
 		Thresholds:     buildThresholdsResponse(p.Thresholds),
 	}
 }

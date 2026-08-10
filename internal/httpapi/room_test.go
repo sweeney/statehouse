@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sweeney/statehouse/internal/device"
+	"github.com/sweeney/statehouse/internal/energy"
 	"github.com/sweeney/statehouse/internal/model"
 )
 
@@ -68,5 +70,31 @@ func TestLegacyLocationStillPopulatesRoom(t *testing.T) {
 
 	if got["room"] != "kitchen" {
 		t.Errorf("room = %v, want the legacy location value", got["room"])
+	}
+}
+
+// The device profile endpoint reads from device.Profile rather than
+// model.Device, so it needs the same room/location fallback. Without it a
+// republished namespace empties the profile's location and leaves nothing in
+// its place.
+func TestDeviceProfileResponseResolvesRoom(t *testing.T) {
+	got := buildDeviceProfileResponse(device.Profile{
+		Class:    "continuous_power_device",
+		Room:     "groundfloor.kitchen",
+		Strategy: energy.StrategyCounter,
+	})
+	if got.Location != "groundfloor.kitchen" {
+		t.Errorf("profile location = %q, want the room id", got.Location)
+	}
+}
+
+func TestDeviceProfileResponseKeepsLegacyLocation(t *testing.T) {
+	got := buildDeviceProfileResponse(device.Profile{
+		Class:    "continuous_power_device",
+		Location: "kitchen",
+		Strategy: energy.StrategyCounter,
+	})
+	if got.Location != "kitchen" {
+		t.Errorf("profile location = %q, want the legacy value", got.Location)
 	}
 }
