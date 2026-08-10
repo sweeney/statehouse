@@ -155,6 +155,7 @@ func main() {
 		Bucket: cfg.Influx.Bucket,
 		Token:  cfg.Influx.Token,
 	}, store, logger)
+	influxWriter.Site = cfg.Site
 	engine.AddCanonicalSink(influxWriter)
 	engine.AddDerivedSink(influxWriter)
 

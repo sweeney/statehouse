@@ -18,6 +18,21 @@ go test ./...
 statehouse -config config/config.example.yaml
 ```
 
+The config must declare which property this instance reports for:
+
+```yaml
+site: home    # an id from the `sites` namespace
+```
+
+There is no default. `site` is written as a tag on every Influx point, which is what
+keeps `device_id` unambiguous once a second property reports into the same bucket —
+a second site already exists in the `sites` namespace, so this is not hypothetical. It
+is `site` and not `location` because `location` is already in the data meaning a room.
+
+Points written before this tag existed carry no `site` at all. A consumer filtering on
+`site == "home"` would silently exclude all of that history, so consumers treat an
+absent tag as the primary site rather than filtering it away.
+
 Endpoints:
 
 - `GET /healthz`

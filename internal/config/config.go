@@ -10,6 +10,12 @@ import (
 
 // Config is the top-level service configuration loaded from YAML.
 type Config struct {
+	// Site is the id of the property this instance reports for, matching an entry in
+	// the `sites` namespace. It supplies the Influx `site` tag value.
+	//
+	// There is no default: guessing would write a tag asserting which property the
+	// readings came from.
+	Site          string                       `yaml:"site"`
 	MQTT          MQTTConfig                   `yaml:"mqtt"`
 	HTTP          HTTPConfig                   `yaml:"http"`
 	RecentLog     RecentLogConfig              `yaml:"recent_log"`

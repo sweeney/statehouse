@@ -31,6 +31,15 @@ type Writer struct {
 	Store   *state.Store
 	Logger  *slog.Logger
 
+	// Site is the id of the property this instance reports for, and is written as a
+	// `site` tag on every point.
+	//
+	// It is `site`, not `location`: `location` is already in the data meaning a room,
+	// and one field recording two facts is the problem this migration exists to fix.
+	// Empty means the tag is omitted entirely — an empty tag value is a distinct
+	// series in Influx, so it would be worse than no tag.
+	Site string
+
 	client   influxdb2.Client
 	api      pointWriter
 	queued   uint64
@@ -116,6 +125,7 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 		"device_id": ev.DeviceID,
 		"class":     d.Class,
 	}
+	w.tagSite(tags)
 	if d.Location != "" {
 		tags["location"] = d.Location
 	}
@@ -260,14 +270,23 @@ func (w *Writer) writeHouseElectricity(ev model.CanonicalEvent) {
 	if !ok {
 		return
 	}
+	tags := map[string]string{"scope": "whole_house"}
+	w.tagSite(tags)
 	p := write.NewPoint(
 		"house_electricity",
-		map[string]string{"scope": "whole_house"},
+		tags,
 		map[string]any{ev.Attribute: v},
 		ev.Timestamp,
 	)
 	w.api.WritePoint(p)
 	atomic.AddUint64(&w.queued, 1)
+}
+
+// tagSite stamps the site tag, omitting it entirely when no site is configured.
+func (w *Writer) tagSite(tags map[string]string) {
+	if w.Site != "" {
+		tags["site"] = w.Site
+	}
 }
 
 // Stats returns queued/failure counts; useful for /healthz and /metrics.
