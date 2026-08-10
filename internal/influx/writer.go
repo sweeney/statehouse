@@ -226,6 +226,7 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 			return
 		}
 		tags := map[string]string{"device_id": ev.DeviceID, "class": ev.DeviceClass}
+		w.tagSite(tags)
 		if d, ok := w.Store.Get(ev.DeviceID); ok {
 			if loc := d.Place(); loc != "" {
 				tags["location"] = loc
@@ -238,6 +239,7 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		from, _ := ev.Evidence["from"].(string)
 		to, _ := ev.Evidence["to"].(string)
 		tags := map[string]string{"device_id": ev.DeviceID, "class": ev.DeviceClass}
+		w.tagSite(tags)
 		fields := map[string]any{"from": from, "to": to}
 		p := write.NewPoint("device_activity", tags, fields, ev.Timestamp)
 		w.api.WritePoint(p)
@@ -249,11 +251,14 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		activityConf, _ := ev.Evidence["activity_confidence"].(float64)
 		mode, _ := ev.Evidence["mode"].(string)
 		modeConf, _ := ev.Evidence["mode_confidence"].(float64)
+		// house_state carries no device_id, so site is the only tag
+		// distinguishing one property's house state from another's.
 		tags := map[string]string{
 			"occupancy": occupancy,
 			"activity":  activity,
 			"mode":      mode,
 		}
+		w.tagSite(tags)
 		fields := map[string]any{
 			"occupancy_confidence": occupancyConf,
 			"activity_confidence":  activityConf,
