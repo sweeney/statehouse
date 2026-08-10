@@ -46,7 +46,12 @@ var reCallID = regexp.MustCompile(`^[a-zA-Z0-9_./:-]{1,64}$`)
 
 // Engine is the subset of state.Engine the adapter needs. Defined as an
 // interface so tests can substitute a fake without a full engine.
+//
+// Now is part of the interface deliberately: the adapter takes its notion
+// of the current time from the engine it feeds, so the two can never
+// disagree about when "now" is.
 type Engine interface {
+	Now() time.Time
 	IngestSignal(s model.ActivitySignal)
 	ClearSignal(id string, ts time.Time)
 	RecordActivity(r model.ActivityRecord)
@@ -133,7 +138,11 @@ func (a *Adapter) handleCallEvent(sourceTopic, suffix string, payload []byte) {
 		return
 	}
 
-	now := time.Now()
+	// now comes from the engine, not the wall clock: it is both the reference
+	// for sanitising the publisher's timestamp and the anchor for the signal
+	// TTL, and it has to share a time base with the engine that consumes the
+	// resulting signals.
+	now := a.engine.Now()
 	ts := timeutil.Sanitise(parseTimestamp(p.Timestamp), now)
 
 	switch strings.ToLower(p.Event) {
@@ -246,13 +255,17 @@ func (a *Adapter) emitCallEvent(evtType model.DerivedEventType, callID string, t
 	a.sink.OnDerivedEvent(ev)
 }
 
+// parseTimestamp returns the zero time for an absent or unparseable
+// timestamp. Callers pass the result through timeutil.Sanitise, which
+// substitutes its own now for the zero value — keeping every fallback on
+// the caller's clock rather than reaching for the wall clock here.
 func parseTimestamp(s string) time.Time {
 	if s == "" {
-		return time.Now()
+		return time.Time{}
 	}
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return time.Now()
+		return time.Time{}
 	}
 	return t
 }

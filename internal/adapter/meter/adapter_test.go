@@ -73,8 +73,15 @@ func sensorCfg() config.Config {
 
 func mkAdapter(t *testing.T) (*Adapter, *state.Store, *testutil.FakeClock) {
 	t.Helper()
+	return mkAdapterAt(t, time.Date(2026, 5, 13, 21, 57, 0, 0, time.UTC))
+}
+
+// mkAdapterAt builds an adapter whose engine clock starts at when, so tests
+// can pick an epoch rather than inheriting the wall clock.
+func mkAdapterAt(t *testing.T, when time.Time) (*Adapter, *state.Store, *testutil.FakeClock) {
+	t.Helper()
 	store := state.NewStore()
-	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 21, 57, 0, 0, time.UTC))
+	clock := testutil.NewFakeClock(when)
 	engine := state.NewEngine(sensorCfg(), store, clock)
 	return New(engine, "energy", nil), store, clock
 }
@@ -233,44 +240,38 @@ func TestAdapter_GlowSensorPartialPayload(t *testing.T) {
 }
 
 // TestAdapter_FutureMeterTimestampRejected verifies that an electricity meter
-// payload with a timestamp 50 years in the future is sanitised to approximately
+// payload with a timestamp 50 years in the future is sanitised to the engine's
 // now.
 func TestAdapter_FutureMeterTimestampRejected(t *testing.T) {
-	a, store, _ := mkAdapter(t)
-	future := time.Now().Add(50 * 365 * 24 * time.Hour).Format(time.RFC3339)
+	a, store, clock := mkAdapter(t)
+	future := clock.Now().Add(50 * 365 * 24 * time.Hour).Format(time.RFC3339)
 	payload := fmt.Sprintf(`{"electricitymeter":{"timestamp":%q,"energy":{"import":{"cumulative":100.0}},"power":{"value":1.0}}}`, future)
-	before := time.Now()
 	a.HandleMessage("energy/AABBCCDDEEFF/SENSOR/electricitymeter", []byte(payload), false)
-	after := time.Now()
 
 	dev, ok := store.Get("AABBCCDDEEFF")
 	if !ok {
 		t.Fatal("meter device not found in store")
 	}
-	ts := dev.Latest.LastSeen
-	if ts.Before(before.Add(-time.Second)) || ts.After(after.Add(time.Second)) {
-		t.Errorf("future meter timestamp not sanitised: got %v, want close to now (%v..%v)", ts, before, after)
+	if ts := dev.Latest.LastSeen; !ts.Equal(clock.Now()) {
+		t.Errorf("future meter timestamp not sanitised: got %v, want engine now %v", ts, clock.Now())
 	}
 }
 
 // TestAdapter_FutureGlowSensorTimestampRejected verifies that a glow sensor
-// payload with a timestamp 50 years in the future is sanitised to approximately
+// payload with a timestamp 50 years in the future is sanitised to the engine's
 // now.
 func TestAdapter_FutureGlowSensorTimestampRejected(t *testing.T) {
-	a, store, _ := mkAdapter(t)
-	future := time.Now().Add(50 * 365 * 24 * time.Hour).Format(time.RFC3339)
+	a, store, clock := mkAdapter(t)
+	future := clock.Now().Add(50 * 365 * 24 * time.Hour).Format(time.RFC3339)
 	payload := fmt.Sprintf(`{"glowsensorth1":{"00CAFEBABE01":{"timestamp":%q,"temperature":{"value":20.0},"humidity":{"value":50.0}}}}`, future)
-	before := time.Now()
 	a.HandleMessage("energy/001122AABBCC/SENSOR/glowsensorth1/00CAFEBABE01", []byte(payload), false)
-	after := time.Now()
 
 	dev, ok := store.Get("00CAFEBABE01")
 	if !ok {
 		t.Fatal("glow sensor device not found in store")
 	}
-	ts := dev.Latest.LastSeen
-	if ts.Before(before.Add(-time.Second)) || ts.After(after.Add(time.Second)) {
-		t.Errorf("future glow sensor timestamp not sanitised: got %v, want close to now (%v..%v)", ts, before, after)
+	if ts := dev.Latest.LastSeen; !ts.Equal(clock.Now()) {
+		t.Errorf("future glow sensor timestamp not sanitised: got %v, want engine now %v", ts, clock.Now())
 	}
 }
 

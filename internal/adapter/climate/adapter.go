@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/sweeney/statehouse/internal/adapter/timeutil"
 	"github.com/sweeney/statehouse/internal/adapter/validate"
@@ -87,7 +86,10 @@ func (a *Adapter) handleObservation(location, topic string, payload []byte) {
 		}
 		return
 	}
-	now := time.Now().UTC()
+	// now comes from the engine, never the wall clock: it both sanitises the
+	// publisher timestamp and stamps the reading, so it has to share a time
+	// base with the engine state derived from it.
+	now := a.engine.Now()
 	ts := now
 	if p.Timestamp != 0 {
 		ts = timeutil.UnixSeconds(p.Timestamp, now)
@@ -158,7 +160,10 @@ func (a *Adapter) handleDeviceStatus(location, topic string, payload []byte) {
 		}
 		return
 	}
-	now := time.Now().UTC()
+	// now comes from the engine, never the wall clock: it both sanitises the
+	// publisher timestamp and stamps the reading, so it has to share a time
+	// base with the engine state derived from it.
+	now := a.engine.Now()
 	ts := now
 	if p.Timestamp != 0 {
 		ts = timeutil.UnixSeconds(p.Timestamp, now)
