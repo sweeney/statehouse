@@ -413,9 +413,38 @@ func (c Config) Validate() error {
 
 // Place returns the room this device sits in: its Room when the devices namespace has
 // been republished, otherwise its deprecated Location.
+
+// CoverageHouse is the sentinel meaning a device's readings describe the whole
+// property rather than the room it sits in.
+//
+// It is also a legacy `location` value. That field carried two different facts —
+// usually a place, but `house` was always a scope — which is the conflation this
+// migration exists to remove. Resolving it as a room would publish `house` as a room
+// id, which the floorplan taxonomy forbids outright: it is a reserved series key.
+const CoverageHouse = "house"
+
+// Place returns the room this device sits in: its Room when the devices namespace has
+// been republished, otherwise its deprecated Location — unless that Location is the
+// `house` sentinel, which names no room at all.
 func (d DeviceConfig) Place() string {
 	if d.Room != "" {
 		return d.Room
 	}
+	if d.Location == CoverageHouse {
+		return ""
+	}
 	return d.Location
+}
+
+// Coverage returns what this device's readings describe when that is not its own
+// room, resolving the legacy `location: house` spelling to the same answer as an
+// explicit `covers`.
+func (d DeviceConfig) Coverage() string {
+	if d.Covers != "" {
+		return d.Covers
+	}
+	if d.Room == "" && d.Location == CoverageHouse {
+		return CoverageHouse
+	}
+	return ""
 }

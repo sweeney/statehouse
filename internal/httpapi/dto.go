@@ -503,7 +503,7 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int, i
 		DisplayName:  d.DisplayName,
 		Class:        d.Class,
 		Room:         d.Place(),
-		Covers:       d.Covers,
+		Covers:       d.Coverage(),
 		Location:     d.Place(),
 		Identity:     identity,
 		Availability: d.Availability,

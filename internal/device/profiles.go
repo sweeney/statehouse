@@ -78,7 +78,21 @@ func (p Profile) Place() string {
 	if p.Room != "" {
 		return p.Room
 	}
+	if p.Location == config.CoverageHouse {
+		return ""
+	}
 	return p.Location
+}
+
+// Coverage returns what this device's readings describe when that is not its own room.
+func (p Profile) Coverage() string {
+	if p.Covers != "" {
+		return p.Covers
+	}
+	if p.Room == "" && p.Location == config.CoverageHouse {
+		return config.CoverageHouse
+	}
+	return ""
 }
 
 // Profile is the resolved per-device configuration used at runtime.
