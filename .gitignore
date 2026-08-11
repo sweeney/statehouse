@@ -1,5 +1,14 @@
 /bin/
 /dist/
+
+# Binaries built into the repo root by `go build ./cmd/...`, named for their
+# command. Untracked and unignored, they are swept in by any `git add -A` — which
+# has happened twice, once putting ~48 MB into a commit.
+/statehouse
+/house-state-engine
+/fixture-capture
+/broker-scenario
+/climate-dashboard
 *.test
 *.out
 *.prof
