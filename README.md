@@ -18,11 +18,20 @@ go test ./...
 statehouse -config config/config.example.yaml
 ```
 
-The config must declare which property this instance reports for:
+The config must declare which property this instance serves:
 
 ```yaml
-site: home    # an id from the `sites` namespace
+site:
+  id: home
+  devices_namespace: devices_home
 ```
+
+`devices_namespace` names the config namespace holding this site's devices, so adding
+a second property is a config edit rather than a code change. It defaults to
+`statehouse_devices` — the single shared namespace every service read before devices
+were split per site — so an unedited config keeps reading exactly what it always read.
+
+The older `site: home` scalar is still accepted and means `site: {id: home}`.
 
 There is no default, and **statehouse refuses to start without it**. `site` is written
 as a tag on every Influx point, which is what keeps `device_id` unambiguous once a

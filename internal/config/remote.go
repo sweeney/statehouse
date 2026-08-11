@@ -104,13 +104,22 @@ func (f *Fetcher) applyClasses(ctx context.Context, cfg *Config, token string) {
 }
 
 func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, token string) {
+	// Named by config, not hardcoded: devices are per-site, so the namespace a site
+	// reads is a property of that site. Defaults to the shared pre-migration
+	// namespace, so an unedited config reads exactly what it always read.
+	ns := cfg.Site.DevicesNamespace
+	if ns == "" {
+		ns = DefaultDevicesNamespace
+	}
+
 	var remote map[string]DeviceConfig
-	if err := f.fetch(ctx, token, "statehouse_devices", &remote); err != nil {
-		f.warn("remote config: statehouse_devices unavailable, using local", "error", err)
-		f.recordStatus("statehouse_devices", err)
+	if err := f.fetch(ctx, token, ns, &remote); err != nil {
+		f.warn("remote config: devices namespace unavailable, using local",
+			"namespace", ns, "error", err)
+		f.recordStatus(ns, err)
 		return
 	}
-	f.recordStatus("statehouse_devices", nil)
+	f.recordStatus(ns, nil)
 	if cfg.Devices == nil {
 		cfg.Devices = make(map[string]DeviceConfig)
 	}

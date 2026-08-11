@@ -28,7 +28,7 @@ func TestValidateRejectsUnsetSite(t *testing.T) {
 
 func TestValidateAcceptsConfiguredSite(t *testing.T) {
 	cfg := Default()
-	cfg.Site = "home"
+	cfg.Site = SiteConfig{ID: "home"}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil for a configured site", err)
 	}
