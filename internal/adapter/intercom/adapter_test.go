@@ -5,14 +5,23 @@ import (
 	"time"
 
 	"github.com/sweeney/statehouse/internal/model"
+	"github.com/sweeney/statehouse/internal/testutil"
 )
 
-// fakeEngine records all engine calls.
+// fakeEngine records all engine calls. Its clock stands in for the real
+// engine's, so the adapter's now is under test control.
 type fakeEngine struct {
+	clock    *testutil.FakeClock
 	ingested []model.ActivitySignal
 	cleared  []string
 	recorded []model.ActivityRecord
 }
+
+func newFakeEngineAt(when time.Time) *fakeEngine {
+	return &fakeEngine{clock: testutil.NewFakeClock(when)}
+}
+
+func (f *fakeEngine) Now() time.Time { return f.clock.Now() }
 
 func (f *fakeEngine) IngestSignal(s model.ActivitySignal) { f.ingested = append(f.ingested, s) }
 func (f *fakeEngine) ClearSignal(id string, _ time.Time)  { f.cleared = append(f.cleared, id) }
@@ -28,8 +37,13 @@ func (f *fakeEngine) UpdateActivity(id string, fn func(*model.ActivityRecord)) {
 	}
 }
 
+// testEpoch matches the timestamps embedded in this file's payloads, so
+// sanitisation leaves them untouched and these tests stay deterministic
+// however far the wall clock drifts from the dates in the fixtures.
+var testEpoch = time.Date(2026, 5, 15, 11, 0, 0, 0, time.UTC)
+
 func newTestAdapter() (*Adapter, *fakeEngine) {
-	eng := &fakeEngine{}
+	eng := newFakeEngineAt(testEpoch)
 	return New(eng, "asterisk", nil), eng
 }
 

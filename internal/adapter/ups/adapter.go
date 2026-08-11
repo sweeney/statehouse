@@ -90,7 +90,10 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 		}
 	}
 
-	now := time.Now().UTC()
+	// now comes from the engine, never the wall clock: it both sanitises the
+	// publisher timestamp and stamps the reading, so it has to share a time
+	// base with the engine state derived from it.
+	now := a.engine.Now()
 	ts := now
 	if p.Timestamp != "" {
 		if t, err := time.Parse(time.RFC3339, p.Timestamp); err == nil {
