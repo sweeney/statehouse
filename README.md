@@ -18,6 +18,29 @@ go test ./...
 statehouse -config config/config.example.yaml
 ```
 
+The config must declare which property this instance reports for:
+
+```yaml
+site: home    # an id from the `sites` namespace
+```
+
+There is no default, and **statehouse refuses to start without it**. `site` is written
+as a tag on every Influx point, which is what keeps `device_id` unambiguous once a
+second property reports into the same bucket — a second site already exists in the
+`sites` namespace, so this is not hypothetical. It is `site` and not `location`
+because `location` is already in the data meaning a room.
+
+Starting without it would write untagged points that look identical to the ambiguous
+history the tag exists to prevent, and nothing would surface the mistake until the
+data was already unrecoverable. A refused start is the cheaper failure.
+
+> **Upgrading an existing deployment:** add `site:` to the host's config *before*
+> deploying this version, or the service will not come back up on restart.
+
+Points written before this tag existed carry no `site` at all. A consumer filtering on
+`site == "home"` would silently exclude all of that history, so consumers treat an
+absent tag as the primary site rather than filtering it away.
+
 Endpoints:
 
 - `GET /healthz`

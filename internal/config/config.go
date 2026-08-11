@@ -10,6 +10,12 @@ import (
 
 // Config is the top-level service configuration loaded from YAML.
 type Config struct {
+	// Site is the id of the property this instance reports for, matching an entry in
+	// the `sites` namespace. It supplies the Influx `site` tag value.
+	//
+	// There is no default: guessing would write a tag asserting which property the
+	// readings came from.
+	Site          string                       `yaml:"site"`
 	MQTT          MQTTConfig                   `yaml:"mqtt"`
 	HTTP          HTTPConfig                   `yaml:"http"`
 	RecentLog     RecentLogConfig              `yaml:"recent_log"`
@@ -259,8 +265,16 @@ type DeviceConfig struct {
 
 	Class       string      `yaml:"class"            json:"class,omitempty"`
 	DisplayName string      `yaml:"display_name"     json:"display_name,omitempty"`
-	Location    string      `yaml:"location"         json:"location,omitempty"`
 	Thresholds  *Thresholds `yaml:"thresholds"       json:"thresholds,omitempty"`
+
+	// Room is the floorplan room id this device sits in.
+	Room string `yaml:"room" json:"room,omitempty"`
+	// Covers is what its readings describe when that is not its own room: "house",
+	// or another room id. Absent means it covers the room it sits in.
+	Covers string `yaml:"covers" json:"covers,omitempty"`
+	// Location is the deprecated free-text place. Still decoded because the devices
+	// namespace and its consumers migrate on separate schedules.
+	Location string `yaml:"location" json:"location,omitempty"`
 
 	// EnergyStrategy overrides the class-level energy_strategy for this
 	// specific device. Use "integration" when the device's counter ticks
@@ -376,4 +390,32 @@ func trimTrailingNewline(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
+}
+
+// Validate reports whether the config is complete enough to run a service.
+//
+// It is deliberately separate from Load: Load parses and normalises, and is used by
+// tools and tests that never start a service, while Validate is the gate a running
+// service passes through.
+//
+// An unset site is an error rather than a warning. The site is written as a tag on
+// every Influx point, so running without it silently produces exactly the ambiguous,
+// untagged history the tag exists to prevent — and no later work can recover which
+// property those readings came from.
+func (c Config) Validate() error {
+	if c.Site == "" {
+		return fmt.Errorf("site is not set: add `site: <id>` naming the property this " +
+			"instance reports for, matching an id in the sites namespace. There is no " +
+			"default because guessing would tag readings with the wrong property")
+	}
+	return nil
+}
+
+// Place returns the room this device sits in: its Room when the devices namespace has
+// been republished, otherwise its deprecated Location.
+func (d DeviceConfig) Place() string {
+	if d.Room != "" {
+		return d.Room
+	}
+	return d.Location
 }

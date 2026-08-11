@@ -31,6 +31,15 @@ type Writer struct {
 	Store   *state.Store
 	Logger  *slog.Logger
 
+	// Site is the id of the property this instance reports for, and is written as a
+	// `site` tag on every point.
+	//
+	// It is `site`, not `location`: `location` is already in the data meaning a room,
+	// and one field recording two facts is the problem this migration exists to fix.
+	// Empty means the tag is omitted entirely — an empty tag value is a distinct
+	// series in Influx, so it would be worse than no tag.
+	Site string
+
 	client   influxdb2.Client
 	api      pointWriter
 	queued   uint64
@@ -116,8 +125,12 @@ func (w *Writer) OnCanonicalEvent(ev model.CanonicalEvent) {
 		"device_id": ev.DeviceID,
 		"class":     d.Class,
 	}
-	if d.Location != "" {
-		tags["location"] = d.Location
+	w.tagSite(tags)
+	// Place() so a republished namespace supplying only `room` keeps tagging.
+	// Losing the tag silently would pre-empt step-11-drop-location-tag, and an
+	// Influx series that loses a tag cannot be repaired afterwards.
+	if loc := d.Place(); loc != "" {
+		tags["location"] = loc
 	}
 	var p *write.Point
 	switch ev.Attribute {
@@ -213,8 +226,11 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 			return
 		}
 		tags := map[string]string{"device_id": ev.DeviceID, "class": ev.DeviceClass}
-		if d, ok := w.Store.Get(ev.DeviceID); ok && d.Location != "" {
-			tags["location"] = d.Location
+		w.tagSite(tags)
+		if d, ok := w.Store.Get(ev.DeviceID); ok {
+			if loc := d.Place(); loc != "" {
+				tags["location"] = loc
+			}
 		}
 		p := write.NewPoint("appliance_cycle", tags, fields, ev.Timestamp)
 		w.api.WritePoint(p)
@@ -223,6 +239,7 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		from, _ := ev.Evidence["from"].(string)
 		to, _ := ev.Evidence["to"].(string)
 		tags := map[string]string{"device_id": ev.DeviceID, "class": ev.DeviceClass}
+		w.tagSite(tags)
 		fields := map[string]any{"from": from, "to": to}
 		p := write.NewPoint("device_activity", tags, fields, ev.Timestamp)
 		w.api.WritePoint(p)
@@ -234,11 +251,14 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		activityConf, _ := ev.Evidence["activity_confidence"].(float64)
 		mode, _ := ev.Evidence["mode"].(string)
 		modeConf, _ := ev.Evidence["mode_confidence"].(float64)
+		// house_state carries no device_id, so site is the only tag
+		// distinguishing one property's house state from another's.
 		tags := map[string]string{
 			"occupancy": occupancy,
 			"activity":  activity,
 			"mode":      mode,
 		}
+		w.tagSite(tags)
 		fields := map[string]any{
 			"occupancy_confidence": occupancyConf,
 			"activity_confidence":  activityConf,
@@ -260,14 +280,23 @@ func (w *Writer) writeHouseElectricity(ev model.CanonicalEvent) {
 	if !ok {
 		return
 	}
+	tags := map[string]string{"scope": "whole_house"}
+	w.tagSite(tags)
 	p := write.NewPoint(
 		"house_electricity",
-		map[string]string{"scope": "whole_house"},
+		tags,
 		map[string]any{ev.Attribute: v},
 		ev.Timestamp,
 	)
 	w.api.WritePoint(p)
 	atomic.AddUint64(&w.queued, 1)
+}
+
+// tagSite stamps the site tag, omitting it entirely when no site is configured.
+func (w *Writer) tagSite(tags map[string]string) {
+	if w.Site != "" {
+		tags["site"] = w.Site
+	}
 }
 
 // Stats returns queued/failure counts; useful for /healthz and /metrics.

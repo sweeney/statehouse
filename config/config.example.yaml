@@ -1,3 +1,8 @@
+# The property this instance reports for. Must match an id in the `sites` namespace.
+# Supplies the `site` tag on every Influx point, which is what keeps device ids
+# unambiguous once a second site reports into the same bucket.
+site: home
+
 mqtt:
   broker: tcp://localhost:1883
   client_id: statehouse

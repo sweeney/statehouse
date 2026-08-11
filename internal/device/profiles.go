@@ -70,11 +70,25 @@ const (
 	ResolutionUnclassified Resolution = "unclassified"  // no match found
 )
 
+// Place returns the room this device sits in: its Room when the devices namespace
+// has been republished, otherwise its deprecated Location. Mirrors
+// config.DeviceConfig.Place and model.Device.Place so the two spellings resolve
+// identically whichever type a reader holds.
+func (p Profile) Place() string {
+	if p.Room != "" {
+		return p.Room
+	}
+	return p.Location
+}
+
 // Profile is the resolved per-device configuration used at runtime.
 type Profile struct {
-	ID           string
-	Class        string
-	DisplayName  string
+	ID          string
+	Class       string
+	DisplayName string
+	// Room is the floorplan room id; Location is its deprecated free-text form.
+	Room         string
+	Covers       string
 	Location     string
 	Thresholds   config.Thresholds
 	Strategy     energy.Strategy
@@ -232,6 +246,8 @@ func profileFromOverride(d config.DeviceConfig, classes map[string]config.Device
 	p := Profile{
 		Class:       d.Class,
 		DisplayName: d.DisplayName,
+		Room:        d.Room,
+		Covers:      d.Covers,
 		Location:    d.Location,
 	}
 	if cls, ok := classes[d.Class]; ok {
