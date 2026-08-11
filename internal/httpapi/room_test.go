@@ -103,7 +103,10 @@ func TestDeviceProfileResponseKeepsLegacyLocation(t *testing.T) {
 // water: the legacy `location: house` was a coverage scope, and Place() returned it
 // verbatim as a room. `house` is a reserved series key and not a legal room id.
 func TestLegacyHouseLocationIsReportedAsCoverageNotARoom(t *testing.T) {
-	d := model.Device{ID: "electricity_meter", Class: "energy_meter", Location: "house"}
+	// Covers arrives already resolved from config.DeviceConfig.Coverage(); the DTO
+	// passes it through. Location is still carried so the deprecated alias is exercised.
+	d := model.Device{ID: "electricity_meter", Class: "energy_meter",
+		Location: "house", Covers: "house"}
 
 	b, _ := json.Marshal(buildDeviceResponse(d, time.Time{}, nil, false))
 	var got map[string]any

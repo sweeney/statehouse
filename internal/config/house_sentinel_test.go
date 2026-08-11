@@ -31,6 +31,20 @@ func TestExplicitCoversWins(t *testing.T) {
 	}
 }
 
+// A namespace mid-migration may publish `room` before it publishes `covers`. Losing
+// the coverage fact in that window would make republishing order load-bearing with
+// nothing enforcing it, so the legacy spelling is honoured even once a room exists.
+func TestLegacyHouseSurvivesARoomBeingPublishedFirst(t *testing.T) {
+	d := DeviceConfig{Room: "groundfloor.boiler-room", Location: "house"}
+
+	if got := d.Place(); got != "groundfloor.boiler-room" {
+		t.Errorf("Place() = %q, want the room", got)
+	}
+	if got := d.Coverage(); got != "house" {
+		t.Errorf("Coverage() = %q, want house — coverage must not depend on publish order", got)
+	}
+}
+
 func TestOrdinaryDeviceIsUnaffected(t *testing.T) {
 	for _, d := range []DeviceConfig{
 		{Location: "kitchen"},

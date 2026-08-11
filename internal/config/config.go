@@ -411,9 +411,6 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Place returns the room this device sits in: its Room when the devices namespace has
-// been republished, otherwise its deprecated Location.
-
 // CoverageHouse is the sentinel meaning a device's readings describe the whole
 // property rather than the room it sits in.
 //
@@ -439,11 +436,20 @@ func (d DeviceConfig) Place() string {
 // Coverage returns what this device's readings describe when that is not its own
 // room, resolving the legacy `location: house` spelling to the same answer as an
 // explicit `covers`.
+//
+// This is the one place the two spellings are reconciled. Profiles are built with the
+// resolved value, so everything downstream reads a Covers that is already correct
+// rather than each reader having to remember the legacy form — which is how this
+// codebase has repeatedly ended up resolving a value in some paths and not others.
+//
+// The legacy spelling is honoured even once Room is set. A namespace mid-migration
+// may publish `room` before it publishes `covers`, and dropping the coverage fact in
+// that window would make republishing order load-bearing with nothing enforcing it.
 func (d DeviceConfig) Coverage() string {
 	if d.Covers != "" {
 		return d.Covers
 	}
-	if d.Room == "" && d.Location == CoverageHouse {
+	if d.Location == CoverageHouse {
 		return CoverageHouse
 	}
 	return ""

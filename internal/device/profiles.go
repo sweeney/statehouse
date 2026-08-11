@@ -84,17 +84,6 @@ func (p Profile) Place() string {
 	return p.Location
 }
 
-// Coverage returns what this device's readings describe when that is not its own room.
-func (p Profile) Coverage() string {
-	if p.Covers != "" {
-		return p.Covers
-	}
-	if p.Room == "" && p.Location == config.CoverageHouse {
-		return config.CoverageHouse
-	}
-	return ""
-}
-
 // Profile is the resolved per-device configuration used at runtime.
 type Profile struct {
 	ID          string
@@ -261,7 +250,7 @@ func profileFromOverride(d config.DeviceConfig, classes map[string]config.Device
 		Class:       d.Class,
 		DisplayName: d.DisplayName,
 		Room:        d.Room,
-		Covers:      d.Covers,
+		Covers:      d.Coverage(),
 		Location:    d.Location,
 	}
 	if cls, ok := classes[d.Class]; ok {
