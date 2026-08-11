@@ -12,19 +12,21 @@ import (
 // This file used to pin the `location` tag on device points, resolving the room
 // through Place() so a republished namespace supplying only `room` kept tagging.
 // That mattered while the tag was still written; this branch retires it, so those
-// tests were removed here rather than left asserting behaviour the branch deletes.
+// tests were replaced by their inverses.
 //
-// One case survives, and it is not vestigial. statehouse writes the location tag
-// from two places:
+// statehouse writes points from three paths, and the tag is now gone from all of
+// them:
 //
-//	OnCanonicalEvent    device_power, device_environment, device_battery,
-//	                    device_ups, device_alarm, device_radio   — tag removed
-//	OnDerivedEvent      appliance_cycle                          — tag STILL WRITTEN
+//	OnCanonicalEvent      device_power, device_environment, device_battery,
+//	                      device_ups, device_alarm, device_radio
+//	OnDerivedEvent        appliance_cycle, device_activity, house_state
+//	writeHouseElectricity house_electricity
 //
-// This branch only removes the first. `appliance_cycle` continues to carry
-// `location`, so the tag is not fully retired and the test below records that
-// rather than pretending otherwise. Removing the second write is left to the
-// migration work; when it happens, invert this test.
+// Every recent change to writer.go covered some of those paths and not others —
+// tagSite missed OnDerivedEvent entirely and was caught in production, Place()
+// reached only one reader. The tag is therefore removed from every path in one
+// commit rather than one path at a time, and the test below asserts the absence
+// on the path most recently forgotten.
 
 func seedRoomDevice(t *testing.T, store *state.Store, id, class, room string) {
 	t.Helper()
@@ -37,11 +39,12 @@ func seedRoomDevice(t *testing.T, store *state.Store, id, class, room string) {
 	}, rt)
 }
 
-// TestApplianceCyclePointsStillTagRoomAsLocation documents the write path this
-// branch does not touch. It is deliberately an assertion that the tag is
-// present: if someone removes that write without updating this test, it fails
-// and the gap closes visibly instead of silently.
-func TestApplianceCyclePointsStillTagRoomAsLocation(t *testing.T) {
+// TestApplianceCyclePointsCarryNoLocationTag covers the derived-event path. Left
+// alone it would have kept writing `location` after every other path stopped —
+// and once the devices namespace is published, Place() returns a room id, so the
+// tag would have carried room ids under a name meaning something else, in new
+// history, indefinitely.
+func TestApplianceCyclePointsCarryNoLocationTag(t *testing.T) {
 	w, api, store := newWriterTest(t)
 	seedRoomDevice(t, store, "dishwasher", "cycle_power_device", "groundfloor.kitchen")
 
@@ -57,8 +60,14 @@ func TestApplianceCyclePointsStillTagRoomAsLocation(t *testing.T) {
 	if len(api.Points) != 1 {
 		t.Fatalf("points = %d, want 1", len(api.Points))
 	}
-	if got := tagMap(api.Points[0])["location"]; got != "groundfloor.kitchen" {
-		t.Errorf("appliance_cycle location tag = %q, want the room id; "+
-			"if this write was intentionally removed, invert this test", got)
+	tags := tagMap(api.Points[0])
+	if got, ok := tags["location"]; ok {
+		t.Errorf("appliance_cycle still writes a location tag (%q)", got)
+	}
+	// The tags that replace it must survive.
+	for _, want := range []string{"device_id", "class"} {
+		if tags[want] == "" {
+			t.Errorf("tag %q is missing: %v", want, tags)
+		}
 	}
 }

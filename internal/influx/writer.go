@@ -221,11 +221,6 @@ func (w *Writer) OnDerivedEvent(ev model.DerivedEvent) {
 		}
 		tags := map[string]string{"device_id": ev.DeviceID, "class": ev.DeviceClass}
 		w.tagSite(tags)
-		if d, ok := w.Store.Get(ev.DeviceID); ok {
-			if loc := d.Place(); loc != "" {
-				tags["location"] = loc
-			}
-		}
 		p := write.NewPoint("appliance_cycle", tags, fields, ev.Timestamp)
 		w.api.WritePoint(p)
 		atomic.AddUint64(&w.queued, 1)

@@ -238,8 +238,10 @@ func TestWriter_CycleFinishedWritesApplianceCycle(t *testing.T) {
 	if tagMap(p)["device_id"] != "kitchen_dishwasher" {
 		t.Errorf("device_id tag missing: %+v", tagMap(p))
 	}
-	if tagMap(p)["location"] != "kitchen" {
-		t.Errorf("location tag missing: %+v", tagMap(p))
+	// The location tag is deliberately gone from this path too: room is resolved at
+	// read time from the floorplan, on every measurement.
+	if _, ok := tagMap(p)["location"]; ok {
+		t.Errorf("location tag is still written: %+v", tagMap(p))
 	}
 	fields := fieldMap(p)
 	if fields["selected_energy_kwh"] != 1.0 || fields["energy_source"] != "counter" {
