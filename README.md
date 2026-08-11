@@ -33,6 +33,18 @@ were split per site — so an unedited config keeps reading exactly what it alwa
 
 The older `site: home` scalar is still accepted and means `site: {id: home}`.
 
+**This can deploy before or after the namespace is published, in either order.** An
+unedited config reads the shared namespace exactly as before, so there is no window
+where the binary and the config disagree — unlike the two changes before it in this
+migration, both of which had a sequencing hazard.
+
+One observable consequence: the remote-config block on `/healthz` is keyed by
+namespace name, so its devices entry reports `statehouse_devices` today and
+`devices_home` once the site names one. Keyed by name rather than a fixed label
+deliberately — the sibling entries are namespace names too, and a health block naming
+a namespace it was not actually reading would be worse than one whose key moves when
+the namespace does.
+
 There is no default, and **statehouse refuses to start without it**. `site` is written
 as a tag on every Influx point, which is what keeps `device_id` unambiguous once a
 second property reports into the same bucket — a second site already exists in the

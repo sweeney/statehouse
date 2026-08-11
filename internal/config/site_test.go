@@ -21,7 +21,7 @@ func TestSiteIsReadFromYAML(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 	if cfg.Site.ID != "home" {
-		t.Errorf("Site = %q, want %q", cfg.Site, "home")
+		t.Errorf("Site.ID = %q, want %q", cfg.Site.ID, "home")
 	}
 }
 

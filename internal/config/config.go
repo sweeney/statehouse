@@ -449,9 +449,10 @@ func trimTrailingNewline(b []byte) []byte {
 // property those readings came from.
 func (c Config) Validate() error {
 	if c.Site.ID == "" {
-		return fmt.Errorf("site is not set: add `site: <id>` naming the property this " +
-			"instance reports for, matching an id in the sites namespace. There is no " +
-			"default because guessing would tag readings with the wrong property")
+		return fmt.Errorf("site is not set: add a site block naming the property this " +
+			"instance serves, e.g.\n\n  site:\n    id: <id>\n    devices_namespace: " +
+			"devices_<id>\n\nwhere id matches an entry in the sites namespace. There is " +
+			"no default because guessing would tag readings with the wrong property")
 	}
 	return nil
 }
