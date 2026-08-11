@@ -141,7 +141,7 @@ func main() {
 		Store:  store,
 		Logger: logger,
 		BuildSnapshot: func(snap model.Snapshot, now time.Time) any {
-			return httpapi.BuildSnapshot(snap, store.ActiveSignals(now), store.RecentActivity(state.ActivityLogSize), now, stalenessFor, time.Time{})
+			return httpapi.BuildSnapshot(snap, store.ActiveSignals(now), store.RecentActivity(state.ActivityLogSize), now, stalenessFor, time.Time{}, cfg.Site)
 		},
 		BuildHouse: func(h model.House, now time.Time) any {
 			return httpapi.BuildHouseResponse(h, now)
@@ -168,6 +168,7 @@ func main() {
 
 	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger, cfg.DeviceClasses)
 	api.Version = version
+	api.Site = cfg.Site
 	api.Publisher = publisher
 	api.RemoteConfig = remoteCfgFetcher
 	api.IdentityURL = cfg.Identity.BaseURL
