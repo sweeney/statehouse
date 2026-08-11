@@ -37,6 +37,11 @@ data was already unrecoverable. A refused start is the cheaper failure.
 > **Upgrading an existing deployment:** add `site:` to the host's config *before*
 > deploying this version, or the service will not come back up on restart.
 
+Points no longer carry a `location` tag. It was write-only — both read services
+decoded it into a field neither ever read, and rooms resolve at read time from the
+floorplan instead. Old points keep their stale tag and are simply unread, so there is
+no backfill to get wrong and a room rename never touches stored data.
+
 Points written before this tag existed carry no `site` at all. A consumer filtering on
 `site == "home"` would silently exclude all of that history, so consumers treat an
 absent tag as the primary site rather than filtering it away.

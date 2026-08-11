@@ -9,13 +9,24 @@ import (
 	"github.com/sweeney/statehouse/internal/state"
 )
 
-// The `location` tag on Influx points is the room a device sits in. Once the
-// devices namespace is republished it supplies `room` and stops supplying the
-// free-text `location`, so a writer reading Device.Location directly would
-// silently stop tagging points — ahead of step-11-drop-location-tag, which is
-// the change that is supposed to retire the tag deliberately. An Influx series
-// that loses a tag cannot be repaired afterwards, so the writer resolves the
-// room through Place() like every other reader.
+// This file used to pin the `location` tag on device points, resolving the room
+// through Place() so a republished namespace supplying only `room` kept tagging.
+// That mattered while the tag was still written; this branch retires it, so those
+// tests were replaced by their inverses.
+//
+// statehouse writes points from three paths, and the tag is now gone from all of
+// them:
+//
+//	OnCanonicalEvent      device_power, device_environment, device_battery,
+//	                      device_ups, device_alarm, device_radio
+//	OnDerivedEvent        appliance_cycle, device_activity, house_state
+//	writeHouseElectricity house_electricity
+//
+// Every recent change to writer.go covered some of those paths and not others —
+// tagSite missed OnDerivedEvent entirely and was caught in production, Place()
+// reached only one reader. The tag is therefore removed from every path in one
+// commit rather than one path at a time, and the test below asserts the absence
+// on the path most recently forgotten.
 
 func seedRoomDevice(t *testing.T, store *state.Store, id, class, room string) {
 	t.Helper()
@@ -28,26 +39,12 @@ func seedRoomDevice(t *testing.T, store *state.Store, id, class, room string) {
 	}, rt)
 }
 
-func TestDevicePointsTagRoomAsLocation(t *testing.T) {
-	w, api, store := newWriterTest(t)
-	seedRoomDevice(t, store, "bigfridge", "continuous_power_device", "groundfloor.kitchen")
-
-	w.OnCanonicalEvent(model.CanonicalEvent{
-		DeviceID:  "bigfridge",
-		Attribute: "power_w",
-		Value:     1.0,
-		Timestamp: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
-	})
-
-	if len(api.Points) != 1 {
-		t.Fatalf("points = %d, want 1", len(api.Points))
-	}
-	if got := tagMap(api.Points[0])["location"]; got != "groundfloor.kitchen" {
-		t.Errorf("location tag = %q, want the room id; a device with only Room set must still be tagged", got)
-	}
-}
-
-func TestApplianceCyclePointsTagRoomAsLocation(t *testing.T) {
+// TestApplianceCyclePointsCarryNoLocationTag covers the derived-event path. Left
+// alone it would have kept writing `location` after every other path stopped —
+// and once the devices namespace is published, Place() returns a room id, so the
+// tag would have carried room ids under a name meaning something else, in new
+// history, indefinitely.
+func TestApplianceCyclePointsCarryNoLocationTag(t *testing.T) {
 	w, api, store := newWriterTest(t)
 	seedRoomDevice(t, store, "dishwasher", "cycle_power_device", "groundfloor.kitchen")
 
@@ -63,25 +60,14 @@ func TestApplianceCyclePointsTagRoomAsLocation(t *testing.T) {
 	if len(api.Points) != 1 {
 		t.Fatalf("points = %d, want 1", len(api.Points))
 	}
-	if got := tagMap(api.Points[0])["location"]; got != "groundfloor.kitchen" {
-		t.Errorf("appliance_cycle location tag = %q, want the room id", got)
+	tags := tagMap(api.Points[0])
+	if got, ok := tags["location"]; ok {
+		t.Errorf("appliance_cycle still writes a location tag (%q)", got)
 	}
-}
-
-// A namespace that has not been republished still supplies only `location`,
-// and must keep tagging exactly as before.
-func TestLegacyLocationStillTagsPoints(t *testing.T) {
-	w, api, store := newWriterTest(t)
-	seedDevice(t, store, "bigfridge", "continuous_power_device", "kitchen")
-
-	w.OnCanonicalEvent(model.CanonicalEvent{
-		DeviceID:  "bigfridge",
-		Attribute: "power_w",
-		Value:     1.0,
-		Timestamp: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
-	})
-
-	if got := tagMap(api.Points[0])["location"]; got != "kitchen" {
-		t.Errorf("location tag = %q, want the legacy value kitchen", got)
+	// The tags that replace it must survive.
+	for _, want := range []string{"device_id", "class"} {
+		if tags[want] == "" {
+			t.Errorf("tag %q is missing: %v", want, tags)
+		}
 	}
 }

@@ -79,6 +79,41 @@ func TestNoSiteConfiguredWritesNoSiteTag(t *testing.T) {
 	}
 }
 
+// Step 11 of the floorplan migration: statehouse stops writing the `location` tag.
+//
+// The tag was write-only. Both read services decoded it into a Row field neither ever
+// read, and every `location:` inside a Flux query is timezone.location, not this tag.
+// The one genuine consumer is cmd/climate-dashboard, a standalone dev tool whose chart
+// label already falls back to the device id when the tag is absent.
+//
+// Old points keep their stale tag and are simply unread: no backfill, so no backfill
+// bugs, and a room rename never touches stored data.
+func TestLocationTagIsNoLongerWritten(t *testing.T) {
+	w, api, store := newWriterTest(t)
+	w.Site = "home"
+	seedDevice(t, store, "bigfridge", "continuous_power_device", "kitchen")
+
+	w.OnCanonicalEvent(model.CanonicalEvent{
+		DeviceID: "bigfridge", Attribute: "power_w", Value: 1.0,
+		Timestamp: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+	})
+
+	points := api.Points
+	if len(points) != 1 {
+		t.Fatalf("points = %d, want 1", len(points))
+	}
+	tags := tagMap(points[0])
+	if _, ok := tags["location"]; ok {
+		t.Errorf("location tag is still written: %v", tags)
+	}
+	// The tags that replace it must still be there.
+	for _, want := range []string{"device_id", "class", "site"} {
+		if tags[want] == "" {
+			t.Errorf("tag %q is missing: %v", want, tags)
+		}
+	}
+}
+
 // Derived events produce three more measurements — appliance_cycle,
 // device_activity and house_state — through a separate write path. They need
 // the site tag for the same reason the device points do: without it those
