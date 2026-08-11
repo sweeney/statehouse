@@ -113,3 +113,100 @@ func TestLocationTagIsNoLongerWritten(t *testing.T) {
 		}
 	}
 }
+
+// Derived events produce three more measurements — appliance_cycle,
+// device_activity and house_state — through a separate write path. They need
+// the site tag for the same reason the device points do: without it those
+// series are ambiguous the moment a second property reports, and the gap
+// cannot be repaired retroactively. house_state carries no device_id at all,
+// so site is the only thing distinguishing one property's house state from
+// another's.
+func TestDerivedEventPointsCarryTheSiteTag(t *testing.T) {
+	ts := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		name        string
+		measurement string
+		ev          model.DerivedEvent
+	}{
+		{
+			name:        "appliance_cycle",
+			measurement: "appliance_cycle",
+			ev: model.DerivedEvent{
+				Type:        model.EvtCycleFinished,
+				DeviceID:    "dishwasher",
+				DeviceClass: "cycle_power_device",
+				Timestamp:   ts,
+				Evidence:    map[string]any{"duration_seconds": 3600.0},
+			},
+		},
+		{
+			name:        "device_activity",
+			measurement: "device_activity",
+			ev: model.DerivedEvent{
+				Type:        model.EvtDeviceActivityChanged,
+				DeviceID:    "dishwasher",
+				DeviceClass: "cycle_power_device",
+				Timestamp:   ts,
+				Evidence:    map[string]any{"from": "idle", "to": "active"},
+			},
+		},
+		{
+			name:        "house_state",
+			measurement: "house_state",
+			ev: model.DerivedEvent{
+				Type:      model.EvtHouseStateChanged,
+				Timestamp: ts,
+				Evidence: map[string]any{
+					"occupancy":            "occupied",
+					"occupancy_confidence": 0.9,
+					"activity":             "active",
+					"activity_confidence":  0.8,
+					"mode":                 "day",
+					"mode_confidence":      0.7,
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, api, store := newWriterTest(t)
+			w.Site = "home"
+			seedDevice(t, store, "dishwasher", "cycle_power_device", "kitchen")
+
+			w.OnDerivedEvent(tc.ev)
+
+			if len(api.Points) != 1 {
+				t.Fatalf("points = %d, want 1", len(api.Points))
+			}
+			p := api.Points[0]
+			if p.Name() != tc.measurement {
+				t.Fatalf("measurement = %q, want %q", p.Name(), tc.measurement)
+			}
+			if got := tagMap(p)["site"]; got != "home" {
+				t.Errorf("%s: site tag = %q, want %q", tc.measurement, got, "home")
+			}
+		})
+	}
+}
+
+// And an unconfigured site must still omit the tag on this path rather than
+// writing an empty value.
+func TestDerivedEventPointsOmitEmptySiteTag(t *testing.T) {
+	w, api, store := newWriterTest(t)
+	seedDevice(t, store, "dishwasher", "cycle_power_device", "kitchen")
+
+	w.OnDerivedEvent(model.DerivedEvent{
+		Type:        model.EvtDeviceActivityChanged,
+		DeviceID:    "dishwasher",
+		DeviceClass: "cycle_power_device",
+		Timestamp:   time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+		Evidence:    map[string]any{"from": "idle", "to": "active"},
+	})
+
+	if len(api.Points) != 1 {
+		t.Fatalf("points = %d, want 1", len(api.Points))
+	}
+	if _, ok := tagMap(api.Points[0])["site"]; ok {
+		t.Error("a writer with no site must omit the tag on derived events too")
+	}
+}

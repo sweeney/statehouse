@@ -79,6 +79,12 @@ func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 		if d.Class != "" {
 			entry.Device.Class = d.Class
 		}
+		if d.Room != "" {
+			entry.Device.Room = d.Room
+		}
+		if d.Covers != "" {
+			entry.Device.Covers = d.Covers
+		}
 		if d.Location != "" {
 			entry.Device.Location = d.Location
 		}

@@ -70,6 +70,17 @@ const (
 	ResolutionUnclassified Resolution = "unclassified"  // no match found
 )
 
+// Place returns the room this device sits in: its Room when the devices namespace
+// has been republished, otherwise its deprecated Location. Mirrors
+// config.DeviceConfig.Place and model.Device.Place so the two spellings resolve
+// identically whichever type a reader holds.
+func (p Profile) Place() string {
+	if p.Room != "" {
+		return p.Room
+	}
+	return p.Location
+}
+
 // Profile is the resolved per-device configuration used at runtime.
 type Profile struct {
 	ID          string

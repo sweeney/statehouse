@@ -42,6 +42,13 @@ func main() {
 		logger.Error("load config", "error", err)
 		os.Exit(1)
 	}
+	// Refuse to start on an incomplete config rather than run in a degraded
+	// shape that looks healthy. Checked before the remote overlay because
+	// everything Validate covers is local.
+	if err := cfg.Validate(); err != nil {
+		logger.Error("invalid config", "path", *configPath, "error", err)
+		os.Exit(1)
+	}
 
 	// baseCfg is the local-only config (no remote overlay). On SIGHUP we
 	// re-apply remote config against a fresh copy of baseCfg so that
@@ -134,7 +141,7 @@ func main() {
 		Store:  store,
 		Logger: logger,
 		BuildSnapshot: func(snap model.Snapshot, now time.Time) any {
-			return httpapi.BuildSnapshot(snap, store.ActiveSignals(now), store.RecentActivity(state.ActivityLogSize), now, stalenessFor, time.Time{})
+			return httpapi.BuildSnapshot(snap, store.ActiveSignals(now), store.RecentActivity(state.ActivityLogSize), now, stalenessFor, time.Time{}, cfg.Site)
 		},
 		BuildHouse: func(h model.House, now time.Time) any {
 			return httpapi.BuildHouseResponse(h, now)
@@ -161,6 +168,7 @@ func main() {
 
 	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger, cfg.DeviceClasses)
 	api.Version = version
+	api.Site = cfg.Site
 	api.Publisher = publisher
 	api.RemoteConfig = remoteCfgFetcher
 	api.IdentityURL = cfg.Identity.BaseURL

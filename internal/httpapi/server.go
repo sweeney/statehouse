@@ -30,6 +30,11 @@ type Server struct {
 	Logger        *slog.Logger
 	DeviceClasses map[string]config.DeviceClassConfig
 
+	// Site is the id of the property this instance reports for. Surfaced on
+	// GET /state so a consumer talking to more than one statehouse can tell
+	// them apart. Set by main.go from config; tests may leave it empty.
+	Site string
+
 	// IdentityURL is the base URL of the identity service (e.g. "https://id.swee.net").
 	// When set, all routes except /healthz require a valid Bearer JWT.
 	// When empty, auth is disabled (useful for local development and tests).
@@ -218,7 +223,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 	now := time.Now()
-	writeJSON(w, http.StatusOK, buildSnapshot(s.Store.Snapshot(), s.Store.ActiveSignals(now), s.Store.RecentActivity(state.ActivityLogSize), now, s.stalenessFor, s.started))
+	writeJSON(w, http.StatusOK, buildSnapshot(s.Store.Snapshot(), s.Store.ActiveSignals(now), s.Store.RecentActivity(state.ActivityLogSize), now, s.stalenessFor, s.started, s.Site))
 }
 
 func (s *Server) handleHouse(w http.ResponseWriter, _ *http.Request) {

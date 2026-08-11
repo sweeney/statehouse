@@ -392,6 +392,25 @@ func trimTrailingNewline(b []byte) []byte {
 	return b
 }
 
+// Validate reports whether the config is complete enough to run a service.
+//
+// It is deliberately separate from Load: Load parses and normalises, and is used by
+// tools and tests that never start a service, while Validate is the gate a running
+// service passes through.
+//
+// An unset site is an error rather than a warning. The site is written as a tag on
+// every Influx point, so running without it silently produces exactly the ambiguous,
+// untagged history the tag exists to prevent — and no later work can recover which
+// property those readings came from.
+func (c Config) Validate() error {
+	if c.Site == "" {
+		return fmt.Errorf("site is not set: add `site: <id>` naming the property this " +
+			"instance reports for, matching an id in the sites namespace. There is no " +
+			"default because guessing would tag readings with the wrong property")
+	}
+	return nil
+}
+
 // Place returns the room this device sits in: its Room when the devices namespace has
 // been republished, otherwise its deprecated Location.
 func (d DeviceConfig) Place() string {

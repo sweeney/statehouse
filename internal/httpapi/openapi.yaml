@@ -662,6 +662,14 @@ components:
         schema_version:
           type: string
           example: net.swee.statehouse.snapshot.v1
+        site:
+          type: string
+          example: home
+          description: >
+            Id of the property this instance reports for, matching an id in the
+            `sites` namespace and the `site` tag written on every Influx point.
+            Lets a consumer talking to more than one statehouse tell them apart.
+            Omitted only when unconfigured, which the service refuses to start in.
         generated_at:
           type: string
           format: date-time

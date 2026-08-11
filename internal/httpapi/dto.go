@@ -55,14 +55,20 @@ func agoInt(t time.Time, now time.Time) *int {
 
 // SnapshotResponse is the top-level DTO returned by GET /state.
 type SnapshotResponse struct {
-	SchemaVersion string                    `json:"schema_version"`
-	GeneratedAt   time.Time                 `json:"generated_at"`
-	StartedAt     *time.Time                `json:"started_at,omitempty"`
-	StartedAgo    *int                      `json:"started_ago,omitempty"`
-	Summary       SummaryResponse           `json:"summary"`
-	House         HouseResponse             `json:"house"`
-	Devices       map[string]DeviceResponse `json:"devices"`
-	Activity      ActivityStateResponse     `json:"activity"`
+	SchemaVersion string `json:"schema_version"`
+	// Site is the id of the property this instance reports for, matching the
+	// `site` tag written on every Influx point. It lets a consumer talking to
+	// more than one statehouse tell them apart. Omitted when unconfigured —
+	// Config.Validate refuses to start in that state, so in practice it is
+	// always present.
+	Site        string                    `json:"site,omitempty"`
+	GeneratedAt time.Time                 `json:"generated_at"`
+	StartedAt   *time.Time                `json:"started_at,omitempty"`
+	StartedAgo  *int                      `json:"started_ago,omitempty"`
+	Summary     SummaryResponse           `json:"summary"`
+	House       HouseResponse             `json:"house"`
+	Devices     map[string]DeviceResponse `json:"devices"`
+	Activity    ActivityStateResponse     `json:"activity"`
 }
 
 // SummaryResponse contains aggregate counts across all devices.
@@ -276,8 +282,8 @@ type CycleResponse struct {
 // publisher) that want the same DTO shape as GET /state — same
 // schema_version, summary, warnings, staleness. lookupStaleness may be
 // nil to use class defaults. Pass a zero startedAt to omit uptime fields.
-func BuildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int, startedAt time.Time) SnapshotResponse {
-	return buildSnapshot(snap, signals, records, now, lookupStaleness, startedAt)
+func BuildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int, startedAt time.Time, site string) SnapshotResponse {
+	return buildSnapshot(snap, signals, records, now, lookupStaleness, startedAt, site)
 }
 
 // BuildHouseResponse is the exported HTTP-DTO builder for model.House.
@@ -295,7 +301,7 @@ func BuildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int) D
 // to compute age/staleness so tests can inject a fixed value. lookupStaleness
 // returns the per-class override (nil → class default); pass nil if not needed.
 // startedAt, when non-zero, populates started_at and started_ago.
-func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int, startedAt time.Time) SnapshotResponse {
+func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records []model.ActivityRecord, now time.Time, lookupStaleness func(class string) *int, startedAt time.Time, site string) SnapshotResponse {
 	if lookupStaleness == nil {
 		lookupStaleness = func(string) *int { return nil }
 	}
@@ -308,6 +314,7 @@ func buildSnapshot(snap model.Snapshot, signals []model.ActivitySignal, records 
 
 	r := SnapshotResponse{
 		SchemaVersion: schemaVersion,
+		Site:          site,
 		GeneratedAt:   snap.GeneratedAt,
 		Summary:       summary,
 		House:         buildHouseResponse(snap.House, now),
@@ -653,7 +660,7 @@ func buildDeviceProfileResponse(p device.Profile) DeviceProfileResponse {
 		EnergyStrategy: string(p.Strategy),
 		Resolution:     profileResolution(p),
 		DisplayName:    p.DisplayName,
-		Location:       p.Location,
+		Location:       p.Place(),
 		Thresholds:     buildThresholdsResponse(p.Thresholds),
 	}
 }

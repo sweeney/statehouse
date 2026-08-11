@@ -24,10 +24,18 @@ The config must declare which property this instance reports for:
 site: home    # an id from the `sites` namespace
 ```
 
-There is no default. `site` is written as a tag on every Influx point, which is what
-keeps `device_id` unambiguous once a second property reports into the same bucket —
-a second site already exists in the `sites` namespace, so this is not hypothetical. It
-is `site` and not `location` because `location` is already in the data meaning a room.
+There is no default, and **statehouse refuses to start without it**. `site` is written
+as a tag on every Influx point, which is what keeps `device_id` unambiguous once a
+second property reports into the same bucket — a second site already exists in the
+`sites` namespace, so this is not hypothetical. It is `site` and not `location`
+because `location` is already in the data meaning a room.
+
+Starting without it would write untagged points that look identical to the ambiguous
+history the tag exists to prevent, and nothing would surface the mistake until the
+data was already unrecoverable. A refused start is the cheaper failure.
+
+> **Upgrading an existing deployment:** add `site:` to the host's config *before*
+> deploying this version, or the service will not come back up on restart.
 
 Points no longer carry a `location` tag. It was write-only — both read services
 decoded it into a field neither ever read, and rooms resolve at read time from the
