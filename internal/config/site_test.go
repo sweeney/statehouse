@@ -20,15 +20,15 @@ func TestSiteIsReadFromYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Site != "home" {
-		t.Errorf("Site = %q, want %q", cfg.Site, "home")
+	if cfg.Site.ID != "home" {
+		t.Errorf("Site.ID = %q, want %q", cfg.Site.ID, "home")
 	}
 }
 
 // There is no default site. Guessing one would write a tag asserting which property
 // the readings came from, which is exactly the kind of fact that must be declared.
 func TestSiteHasNoDefault(t *testing.T) {
-	if got := Default().Site; got != "" {
-		t.Errorf("Default().Site = %q, want empty", got)
+	if got := Default().Site.ID; got != "" {
+		t.Errorf("Default().Site.ID = %q, want empty", got)
 	}
 }

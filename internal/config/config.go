@@ -10,12 +10,7 @@ import (
 
 // Config is the top-level service configuration loaded from YAML.
 type Config struct {
-	// Site is the id of the property this instance reports for, matching an entry in
-	// the `sites` namespace. It supplies the Influx `site` tag value.
-	//
-	// There is no default: guessing would write a tag asserting which property the
-	// readings came from.
-	Site          string                       `yaml:"site"`
+	Site          SiteConfig                   `yaml:"site"`
 	MQTT          MQTTConfig                   `yaml:"mqtt"`
 	HTTP          HTTPConfig                   `yaml:"http"`
 	RecentLog     RecentLogConfig              `yaml:"recent_log"`
@@ -28,6 +23,53 @@ type Config struct {
 	Devices       map[string]DeviceConfig      `yaml:"devices"`
 	Identity      IdentityConfig               `yaml:"identity"`
 	RemoteConfig  RemoteConfigConfig           `yaml:"remote_config"`
+}
+
+// SiteConfig identifies the property this instance serves and where that property's
+// configuration lives.
+//
+// It is a block rather than a bare id so that adding a second property is a config
+// edit rather than a code change: each site names its own devices namespace, which
+// is what makes the namespaces per-site rather than one shared document.
+type SiteConfig struct {
+	// ID matches an entry in the `sites` namespace and supplies the Influx `site`
+	// tag value. There is no default: guessing would write a tag asserting which
+	// property the readings came from.
+	ID string `yaml:"id"`
+
+	// DevicesNamespace is the config namespace holding this site's devices.
+	// Defaults to the shared pre-migration namespace, so a config that predates
+	// the per-site split keeps reading exactly what it always read.
+	DevicesNamespace string `yaml:"devices_namespace"`
+}
+
+// DefaultDevicesNamespace is the single shared namespace every service read before
+// devices were split per site.
+const DefaultDevicesNamespace = "statehouse_devices"
+
+// UnmarshalYAML accepts either the block form or the bare id it replaced:
+//
+//	site: home
+//	site:
+//	  id: home
+//	  devices_namespace: devices_home
+//
+// The deployed config uses the scalar and deploy.sh ships only the binary, so a
+// parser that rejected it would take the service down the moment it shipped —
+// before anyone could edit the host's config.
+func (s *SiteConfig) UnmarshalYAML(unmarshal func(any) error) error {
+	var id string
+	if err := unmarshal(&id); err == nil {
+		s.ID = id
+		return nil
+	}
+	type raw SiteConfig
+	var r raw
+	if err := unmarshal(&r); err != nil {
+		return err
+	}
+	*s = SiteConfig(r)
+	return nil
 }
 
 // IdentityConfig holds credentials for the identity service used to
@@ -339,6 +381,9 @@ func Load(path string) (Config, error) {
 	if cfg.MQTT.PublishPrefix == "" {
 		cfg.MQTT.PublishPrefix = "house"
 	}
+	if cfg.Site.DevicesNamespace == "" {
+		cfg.Site.DevicesNamespace = DefaultDevicesNamespace
+	}
 	if cfg.House.Timezone != "" {
 		if _, err := time.LoadLocation(cfg.House.Timezone); err != nil {
 			return cfg, fmt.Errorf("parse house.timezone %q: %w", cfg.House.Timezone, err)
@@ -403,10 +448,11 @@ func trimTrailingNewline(b []byte) []byte {
 // untagged history the tag exists to prevent — and no later work can recover which
 // property those readings came from.
 func (c Config) Validate() error {
-	if c.Site == "" {
-		return fmt.Errorf("site is not set: add `site: <id>` naming the property this " +
-			"instance reports for, matching an id in the sites namespace. There is no " +
-			"default because guessing would tag readings with the wrong property")
+	if c.Site.ID == "" {
+		return fmt.Errorf("site is not set: add a site block naming the property this " +
+			"instance serves, e.g.\n\n  site:\n    id: <id>\n    devices_namespace: " +
+			"devices_<id>\n\nwhere id matches an entry in the sites namespace. There is " +
+			"no default because guessing would tag readings with the wrong property")
 	}
 	return nil
 }

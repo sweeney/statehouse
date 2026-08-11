@@ -141,7 +141,7 @@ func main() {
 		Store:  store,
 		Logger: logger,
 		BuildSnapshot: func(snap model.Snapshot, now time.Time) any {
-			return httpapi.BuildSnapshot(snap, store.ActiveSignals(now), store.RecentActivity(state.ActivityLogSize), now, stalenessFor, time.Time{}, cfg.Site)
+			return httpapi.BuildSnapshot(snap, store.ActiveSignals(now), store.RecentActivity(state.ActivityLogSize), now, stalenessFor, time.Time{}, cfg.Site.ID)
 		},
 		BuildHouse: func(h model.House, now time.Time) any {
 			return httpapi.BuildHouseResponse(h, now)
@@ -162,13 +162,13 @@ func main() {
 		Bucket: cfg.Influx.Bucket,
 		Token:  cfg.Influx.Token,
 	}, store, logger)
-	influxWriter.Site = cfg.Site
+	influxWriter.Site = cfg.Site.ID
 	engine.AddCanonicalSink(influxWriter)
 	engine.AddDerivedSink(influxWriter)
 
 	api := httpapi.New(cfg.HTTP.Listen, store, hlog, mqttClient, influxWriter, logger, cfg.DeviceClasses)
 	api.Version = version
-	api.Site = cfg.Site
+	api.Site = cfg.Site.ID
 	api.Publisher = publisher
 	api.RemoteConfig = remoteCfgFetcher
 	api.IdentityURL = cfg.Identity.BaseURL

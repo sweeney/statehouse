@@ -1,7 +1,16 @@
-# The property this instance reports for. Must match an id in the `sites` namespace.
-# Supplies the `site` tag on every Influx point, which is what keeps device ids
-# unambiguous once a second site reports into the same bucket.
-site: home
+# The property this instance serves.
+#
+#   id                 must match an id in the `sites` namespace. Supplies the `site`
+#                      tag on every Influx point, which is what keeps device ids
+#                      unambiguous once a second site reports into the same bucket.
+#   devices_namespace  the config namespace holding this site's devices. Defaults to
+#                      `statehouse_devices`, the shared namespace read before devices
+#                      were split per site.
+#
+# `site: home` is still accepted as shorthand for `site: {id: home}`.
+site:
+  id: home
+  devices_namespace: devices_home
 
 mqtt:
   broker: tcp://localhost:1883
