@@ -296,5 +296,12 @@ func (d Device) Place() string {
 	if d.Room != "" {
 		return d.Room
 	}
+	if d.Location == CoverageHouse {
+		return ""
+	}
 	return d.Location
 }
+
+// CoverageHouse is the sentinel meaning the readings describe the whole property.
+// It is also a legacy `location` value, and is not a room: see config.CoverageHouse.
+const CoverageHouse = "house"

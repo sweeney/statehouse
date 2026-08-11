@@ -78,6 +78,9 @@ func (p Profile) Place() string {
 	if p.Room != "" {
 		return p.Room
 	}
+	if p.Location == config.CoverageHouse {
+		return ""
+	}
 	return p.Location
 }
 
@@ -247,7 +250,7 @@ func profileFromOverride(d config.DeviceConfig, classes map[string]config.Device
 		Class:       d.Class,
 		DisplayName: d.DisplayName,
 		Room:        d.Room,
-		Covers:      d.Covers,
+		Covers:      d.Coverage(),
 		Location:    d.Location,
 	}
 	if cls, ok := classes[d.Class]; ok {
