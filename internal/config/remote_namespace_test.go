@@ -66,8 +66,8 @@ func TestHealthStatusIsKeyedByTheNamespaceActuallyRead(t *testing.T) {
 	defer srv.Close()
 
 	for _, tc := range []struct{ configured, wantKey string }{
-		{"", "statehouse_devices"},
 		{"devices_home", "devices_home"},
+		{"devices_annexe", "devices_annexe"},
 	} {
 		f := &Fetcher{BaseURL: srv.URL, Tokens: &staticTokenSource{token: "t"}, HTTPClient: srv.Client()}
 		cfg := Default()

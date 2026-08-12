@@ -3,11 +3,13 @@
 #   id                 must match an id in the `sites` namespace. Supplies the `site`
 #                      tag on every Influx point, which is what keeps device ids
 #                      unambiguous once a second site reports into the same bucket.
-#   devices_namespace  the config namespace holding this site's devices. Defaults to
-#                      `statehouse_devices`, the shared namespace read before devices
-#                      were split per site.
+#   devices_namespace  the config namespace holding this site's devices. Required,
+#                      with no default: the shared namespace it used to fall back to
+#                      has been deleted, and a failed devices fetch is silent — the
+#                      service would start, report healthy and serve no devices.
 #
-# `site: home` is still accepted as shorthand for `site: {id: home}`.
+# Both are required; statehouse refuses to start without them. `site: home` still
+# parses as `site: {id: home}`, but names no namespace, so it is not startable alone.
 site:
   id: home
   devices_namespace: devices_home
