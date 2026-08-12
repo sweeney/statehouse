@@ -105,11 +105,14 @@ func (f *Fetcher) applyClasses(ctx context.Context, cfg *Config, token string) {
 
 func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, token string) {
 	// Named by config, not hardcoded: devices are per-site, so the namespace a site
-	// reads is a property of that site. Defaults to the shared pre-migration
-	// namespace, so an unedited config reads exactly what it always read.
+	// reads is a property of that site. There is no fallback — Validate refuses to
+	// start an unnamed config, and guessing here would ask the service for a
+	// namespace nobody named. Callers that skip Validate (tools, tests) get no
+	// devices rather than a request for a deleted document.
 	ns := cfg.Site.DevicesNamespace
 	if ns == "" {
-		ns = DefaultDevicesNamespace
+		f.warn("remote config: no devices namespace named, skipping devices fetch")
+		return
 	}
 
 	var remote map[string]DeviceConfig

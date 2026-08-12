@@ -40,7 +40,23 @@ if [ ! -f /etc/$SERVICE/config.yaml ]; then
         echo "STATEHOUSE_CLIENT_SECRET must be set in the environment" >&2
         exit 1
     fi
+    # The site block is required and has no defaults: statehouse refuses to start
+    # without both halves. Demanded here rather than written as a placeholder so a
+    # fresh host either works or fails at install time — never installs a config that
+    # looks complete and produces a service serving no devices.
+    if [ -z "${STATEHOUSE_SITE_ID:-}" ]; then
+        echo "STATEHOUSE_SITE_ID must be set in the environment (an id from the sites namespace)" >&2
+        exit 1
+    fi
+    if [ -z "${STATEHOUSE_DEVICES_NAMESPACE:-}" ]; then
+        echo "STATEHOUSE_DEVICES_NAMESPACE must be set in the environment (e.g. devices_${STATEHOUSE_SITE_ID})" >&2
+        exit 1
+    fi
     cat > /etc/$SERVICE/config.yaml << CONFIG
+site:
+  id: ${STATEHOUSE_SITE_ID}
+  devices_namespace: ${STATEHOUSE_DEVICES_NAMESPACE}
+
 mqtt:
   broker: tcp://192.168.1.200:1883
   client_id: statehouse

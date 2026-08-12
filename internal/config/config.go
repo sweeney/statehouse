@@ -38,14 +38,15 @@ type SiteConfig struct {
 	ID string `yaml:"id"`
 
 	// DevicesNamespace is the config namespace holding this site's devices.
-	// Defaults to the shared pre-migration namespace, so a config that predates
-	// the per-site split keeps reading exactly what it always read.
+	//
+	// There is no default. The shared pre-migration namespace it used to fall back
+	// to was deleted once every service read its own, so the only guess available
+	// names a document that does not exist — and a failed devices fetch is silent:
+	// the service starts, reports healthy and serves nothing. It is also not derived
+	// from ID, because deriving it would turn a typo in the id into that same silent
+	// 404. Both facts are stated so they can be checked against each other.
 	DevicesNamespace string `yaml:"devices_namespace"`
 }
-
-// DefaultDevicesNamespace is the single shared namespace every service read before
-// devices were split per site.
-const DefaultDevicesNamespace = "statehouse_devices"
 
 // UnmarshalYAML accepts either the block form or the bare id it replaced:
 //
@@ -381,9 +382,6 @@ func Load(path string) (Config, error) {
 	if cfg.MQTT.PublishPrefix == "" {
 		cfg.MQTT.PublishPrefix = "house"
 	}
-	if cfg.Site.DevicesNamespace == "" {
-		cfg.Site.DevicesNamespace = DefaultDevicesNamespace
-	}
 	if cfg.House.Timezone != "" {
 		if _, err := time.LoadLocation(cfg.House.Timezone); err != nil {
 			return cfg, fmt.Errorf("parse house.timezone %q: %w", cfg.House.Timezone, err)
@@ -443,16 +441,29 @@ func trimTrailingNewline(b []byte) []byte {
 // tools and tests that never start a service, while Validate is the gate a running
 // service passes through.
 //
-// An unset site is an error rather than a warning. The site is written as a tag on
-// every Influx point, so running without it silently produces exactly the ambiguous,
-// untagged history the tag exists to prevent — and no later work can recover which
-// property those readings came from.
+// Both halves of the site block are errors rather than warnings, for the same reason.
+//
+// An unset id means the Influx `site` tag is missing, producing exactly the ambiguous
+// untagged history the tag exists to prevent, which no later work can recover.
+//
+// An unnamed devices namespace fails even more quietly: the fetch 404s, applyDevices
+// fails open onto an empty snapshot, /healthz still reports "ok", and every endpoint
+// honestly serves zero devices. A service that looks healthy and serves nothing is
+// worse than one that refuses to start.
 func (c Config) Validate() error {
 	if c.Site.ID == "" {
 		return fmt.Errorf("site is not set: add a site block naming the property this " +
 			"instance serves, e.g.\n\n  site:\n    id: <id>\n    devices_namespace: " +
 			"devices_<id>\n\nwhere id matches an entry in the sites namespace. There is " +
 			"no default because guessing would tag readings with the wrong property")
+	}
+	if c.Site.DevicesNamespace == "" {
+		return fmt.Errorf("site.devices_namespace is not set: name the config namespace "+
+			"holding this site's devices, e.g.\n\n  site:\n    id: %s\n    "+
+			"devices_namespace: devices_%s\n\nThere is no default: the shared namespace "+
+			"this used to fall back to has been deleted, and a failed devices fetch is "+
+			"silent — the service would start, report healthy and serve no devices at all",
+			c.Site.ID, c.Site.ID)
 	}
 	return nil
 }

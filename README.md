@@ -27,11 +27,17 @@ site:
 ```
 
 `devices_namespace` names the config namespace holding this site's devices, so adding
-a second property is a config edit rather than a code change. It defaults to
-`statehouse_devices` — the single shared namespace every service read before devices
-were split per site — so an unedited config keeps reading exactly what it always read.
+a second property is a config edit rather than a code change.
 
-The older `site: home` scalar is still accepted and means `site: {id: home}`.
+**Both halves are required and neither has a default.** `statehouse_devices` — the
+single shared namespace every service read before devices were split per site — was
+deleted once each service read its own, so the fallback that used to exist now names a
+document that is not there. A failed devices fetch is silent: it fails open onto an
+empty snapshot, `/healthz` still reports `ok`, and every endpoint honestly serves zero
+devices. Refusing to start is the louder failure and the cheaper one.
+
+The older `site: home` scalar still parses as `site: {id: home}`, but it names no
+namespace, so it is no longer a startable config on its own.
 
 **This can deploy before or after the namespace is published, in either order.** An
 unedited config reads the shared namespace exactly as before, so there is no window

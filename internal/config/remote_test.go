@@ -71,10 +71,11 @@ func TestFetcher_ApplyClasses(t *testing.T) {
 			"energy_strategy": "integration",
 		},
 	})
-	serveNamespace(mux, "statehouse_devices", map[string]any{})
+	serveNamespace(mux, "devices_test", map[string]any{})
 	serveNamespace(mux, "statehouse_behaviour", map[string]any{})
 
 	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
 	cfg.DeviceClasses = map[string]DeviceClassConfig{
 		"media_power_device": {EnergyStrategy: "counter"}, // will be overwritten
 		"cycle_power_device": {EnergyStrategy: "counter"}, // local-only, preserved
@@ -100,7 +101,7 @@ func TestFetcher_ApplyClasses(t *testing.T) {
 func TestFetcher_ApplyDevices(t *testing.T) {
 	mux := http.NewServeMux()
 	serveNamespace(mux, "statehouse_classes", map[string]any{})
-	serveNamespace(mux, "statehouse_devices", map[string]any{
+	serveNamespace(mux, "devices_test", map[string]any{
 		"washingmachine": map[string]any{
 			"ieee_address": "0xaabbccddeeff0011",
 			"class":        "cycle_power_device",
@@ -111,6 +112,7 @@ func TestFetcher_ApplyDevices(t *testing.T) {
 	serveNamespace(mux, "statehouse_behaviour", map[string]any{})
 
 	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
 	cfg.Devices = map[string]DeviceConfig{
 		"localdevice": {Class: "binary_state_device"}, // local-only, preserved
 	}
@@ -139,7 +141,7 @@ func TestFetcher_ApplyDevices(t *testing.T) {
 func TestFetcher_RemoteDeviceOverridesLocal(t *testing.T) {
 	mux := http.NewServeMux()
 	serveNamespace(mux, "statehouse_classes", map[string]any{})
-	serveNamespace(mux, "statehouse_devices", map[string]any{
+	serveNamespace(mux, "devices_test", map[string]any{
 		"kettle": map[string]any{
 			"ieee_address": "0xremote",
 			"class":        "short_burst_power_device",
@@ -150,6 +152,7 @@ func TestFetcher_RemoteDeviceOverridesLocal(t *testing.T) {
 	serveNamespace(mux, "statehouse_behaviour", map[string]any{})
 
 	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
 	cfg.Devices = map[string]DeviceConfig{
 		"kettle": {IEEEAddress: "0xlocal", Class: "short_burst_power_device", DisplayName: "Local Kettle"},
 	}
@@ -166,7 +169,7 @@ func TestFetcher_RemoteDeviceOverridesLocal(t *testing.T) {
 func TestFetcher_ApplyBehaviour(t *testing.T) {
 	mux := http.NewServeMux()
 	serveNamespace(mux, "statehouse_classes", map[string]any{})
-	serveNamespace(mux, "statehouse_devices", map[string]any{})
+	serveNamespace(mux, "devices_test", map[string]any{})
 	serveNamespace(mux, "statehouse_behaviour", map[string]any{
 		"energy": map[string]any{
 			"divergence_warning_pct": 15,
@@ -182,6 +185,7 @@ func TestFetcher_ApplyBehaviour(t *testing.T) {
 	})
 
 	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
 	newTestFetcher(t, mux).ApplyRemote(context.Background(), &cfg)
 
 	if cfg.Energy.DivergenceWarningPct != 15 {
@@ -201,13 +205,14 @@ func TestFetcher_ApplyBehaviour(t *testing.T) {
 func TestFetcher_BehaviourAbsentSectionsPreserveLocal(t *testing.T) {
 	mux := http.NewServeMux()
 	serveNamespace(mux, "statehouse_classes", map[string]any{})
-	serveNamespace(mux, "statehouse_devices", map[string]any{})
+	serveNamespace(mux, "devices_test", map[string]any{})
 	// behaviour has only energy; availability/house/adapters absent.
 	serveNamespace(mux, "statehouse_behaviour", map[string]any{
 		"energy": map[string]any{"divergence_warning_pct": 25},
 	})
 
 	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
 	localDebounce := 45 * time.Second
 	cfg.Availability.OfflineDebounce = localDebounce
 
@@ -241,7 +246,7 @@ func TestFetcher_NamespaceUnavailablePreservesOtherSections(t *testing.T) {
 	mux.HandleFunc("/api/v1/config/statehouse_classes", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	})
-	serveNamespace(mux, "statehouse_devices", map[string]any{
+	serveNamespace(mux, "devices_test", map[string]any{
 		"remotedevice": map[string]any{"class": "binary_state_device"},
 	})
 	serveNamespace(mux, "statehouse_behaviour", map[string]any{
@@ -249,6 +254,7 @@ func TestFetcher_NamespaceUnavailablePreservesOtherSections(t *testing.T) {
 	})
 
 	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
 	cfg.DeviceClasses = map[string]DeviceClassConfig{
 		"cycle_power_device": {EnergyStrategy: "counter"},
 	}
@@ -271,7 +277,7 @@ func TestFetcher_NamespaceUnavailablePreservesOtherSections(t *testing.T) {
 
 func TestFetcher_401CallsInvalidate(t *testing.T) {
 	mux := http.NewServeMux()
-	for _, ns := range []string{"statehouse_classes", "statehouse_devices", "statehouse_behaviour"} {
+	for _, ns := range []string{"statehouse_classes", "devices_test", "statehouse_behaviour"} {
 		mux.HandleFunc("/api/v1/config/"+ns, func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		})
@@ -285,6 +291,7 @@ func TestFetcher_401CallsInvalidate(t *testing.T) {
 		HTTPClient: srv.Client(),
 	}
 	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
 	f.ApplyRemote(context.Background(), &cfg)
 	if !src.invalidated {
 		t.Error("expected Invalidate() to be called after 401 response, but it was not")
@@ -294,7 +301,7 @@ func TestFetcher_401CallsInvalidate(t *testing.T) {
 func TestFetcher_BearerTokenSentInRequest(t *testing.T) {
 	var gotAuth string
 	mux := http.NewServeMux()
-	for _, ns := range []string{"statehouse_classes", "statehouse_devices", "statehouse_behaviour"} {
+	for _, ns := range []string{"statehouse_classes", "devices_test", "statehouse_behaviour"} {
 		ns := ns
 		mux.HandleFunc("/api/v1/config/"+ns, func(w http.ResponseWriter, r *http.Request) {
 			gotAuth = r.Header.Get("Authorization")
@@ -303,6 +310,7 @@ func TestFetcher_BearerTokenSentInRequest(t *testing.T) {
 	}
 
 	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
 	newTestFetcher(t, mux).ApplyRemote(context.Background(), &cfg)
 
 	if gotAuth != "Bearer test-token" {

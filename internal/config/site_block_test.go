@@ -31,33 +31,6 @@ func TestSiteBlockCarriesIDAndDevicesNamespace(t *testing.T) {
 	}
 }
 
-// The deployed config says `site: home`, and deploy.sh ships only the binary — so a
-// binary that could not parse the scalar form would take the service down the moment
-// it shipped, before anyone edited the host's config. The old spelling keeps working.
-func TestLegacyScalarSiteStillParses(t *testing.T) {
-	cfg, err := Load(writeConfig(t, "site: home\n"))
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Site.ID != "home" {
-		t.Errorf("Site.ID = %q, want home", cfg.Site.ID)
-	}
-	if cfg.Site.DevicesNamespace != "statehouse_devices" {
-		t.Errorf("DevicesNamespace = %q, want the pre-migration default", cfg.Site.DevicesNamespace)
-	}
-}
-
-// A site block with no namespace keeps reading the namespace it always read.
-func TestDevicesNamespaceDefaults(t *testing.T) {
-	cfg, err := Load(writeConfig(t, "site:\n  id: home\n"))
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Site.DevicesNamespace != "statehouse_devices" {
-		t.Errorf("DevicesNamespace = %q, want statehouse_devices", cfg.Site.DevicesNamespace)
-	}
-}
-
 // Still refuses to start without a site, in either spelling.
 func TestValidateStillRequiresASite(t *testing.T) {
 	cfg, err := Load(writeConfig(t, "http:\n  listen: :8080\n"))
