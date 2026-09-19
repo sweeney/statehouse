@@ -82,9 +82,7 @@ that override the class defaults. Make the type tree inheritable with NILM
 Metadata's semantics — this generalises `mergeThresholds` from one level to N, and
 removes the copy-paste that per-site remote config will otherwise accumulate.
 
-### `control` is the missing input to occupancy
-
-This is the cheapest high-value idea in the whole review.
+### `control` is the per-device escape hatch issue #32 asked for
 
 `internal/state/house.go` decides occupancy relevance from a hardcoded class switch:
 
@@ -94,14 +92,61 @@ case device.ClassShortBurst, device.ClassCyclePower,
      return true
 ```
 
-So a thermostat-driven boiler relay and a hand-pressed light switch are both
-`binary_state_device`, and both count as evidence a human is home. One of them
-isn't. `control: [manual]` means a person did this; `control: [thermostat]` or
-`[timer]` or `[always on]` means no person was required. Attaching `control` to the
-appliance type turns `isOccupancyRelevant` from a class switch into a general rule,
-and makes the existing `ClassContinuous` special-case in `DeriveHouseState`
-(compressor cycles excluded from `activeCount`) fall out of the model instead of
-being hand-carved.
+so the boiler's CH/HW channels — `binary_state_device` in the shipped config —
+drive occupancy. **That is deliberate, not an accident.** Issue #32 argued for it
+explicitly ("for a home where central heating is the strongest occupancy signal,
+heating on at 06:30 → empty at 06:31 is a meaningful misclassification"), it was
+fixed in b4c850a, and `TestDeriveHouseState_BinaryStateIdleWithinQuietAfter` and
+`TestDeriveHouseState_BinaryStateCurrentlyActive` pin it. For the primary case — a
+UK home in winter, heating on, nothing else running — the prior is right.
+
+What NILM Metadata adds is the exception that issue #32 itself said should exist
+and still doesn't:
+
+> If specific binary devices *shouldn't* count as occupancy (e.g. a freezer alarm
+> contact), the right place to express that is at the device config level — not by
+> class-wide exclusion.
+
+`control: [manual | timer | thermostat | motion | sunlight | always on]` is exactly
+that device-level place, already designed and already vocabulary-controlled.
+
+#### The cost of having no exception yet: `away` never fires
+
+Heating-as-occupancy is right when the heating tracks occupants. It inverts when
+the heating is running *because* they're gone — frost protection, or a winter
+schedule left on during a holiday. Each firing refreshes `mostRecentActivity`, so
+`EmptyAfter` restarts before it can elapse.
+
+Simulating an empty house over 48h against `DeriveHouseState`, with `EmptyAfter: 6h`
+and the boiler running 30 min on a fixed schedule:
+
+| Heating interval | Reaches `occupancy: empty`? | Reaches `mode: away`? |
+| --- | --- | --- |
+| every 4h | no | no |
+| every 8h | yes | yes |
+
+Whenever the heating interval is shorter than `EmptyAfter`, the house can never
+report empty or away, for as long as the heating schedule runs — and that is
+precisely the two-weeks-in-January case where `away` is worth having. The bound is
+sharp: it flips purely on interval vs `EmptyAfter`, with no other signal involved.
+
+A second, smaller effect: a 3am thermostat firing moves `mode` from `night` to
+`day`, because `HouseActivityQuiet` plus `OccupancyOccupied` takes the day branch
+before the hour is consulted.
+
+`control` fixes both without giving up issue #32's decision, because it is per
+device, not per class: the CH relay on a thermostat-led system can stay occupancy
+evidence, while a frost-protection channel or a freezer alarm contact declares
+itself as machine-driven. It also lets the existing `ClassContinuous` special-case
+in `DeriveHouseState` (compressor cycles excluded from `activeCount`) fall out of
+the model rather than stay hand-carved.
+
+The honest caveat on all of this: it only bites when the devices namespace actually
+classifies the boiler channels as `binary_state_device`. An unclassified boiler
+device contributes nothing to occupancy at all — verified by driving a `CH_ON`
+through the real adapter and engine with and without a devices entry. Worth
+confirming against the live `devices_home` namespace before treating it as
+load-bearing.
 
 ### `components` reframes the split-cycle problem
 
@@ -407,7 +452,7 @@ Ordered by leverage-per-unit-effort, not by section number.
 | # | Item | § | Effort | Why first/last |
 | --- | --- | --- | --- | --- |
 | 1 | `cmd/statehouse-eval` + ground-truth sidecars | 5 | M | Everything below is unfalsifiable without it |
-| 2 | `control` on device config, feeding occupancy | 1 | S | Smallest change, directly improves a wrong answer today |
+| 2 | `control` on device config, feeding occupancy | 1 | S | Smallest change; unblocks `away` without reversing issue #32 |
 | 3 | Meter-device catalogue (`sample_period`, `max_sample_period`, `ac_type`) | 3 | M | Fixes staleness axis *and* explains coverage>1 |
 | 4 | `submeter_of` + `disabled` on device config | 2 | M | Closes a real latent double-count |
 | 5 | `dropout_rate`, `coverage_fraction` on cycle energy | 3 | S | Cheap once 3 lands |
