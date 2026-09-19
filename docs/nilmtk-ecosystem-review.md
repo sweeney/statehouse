@@ -458,7 +458,7 @@ Small amount of code. Large amount of reach. It also forces §2 and §3 to be
 answered honestly, because the schema has required fields for exactly the things
 statehouse currently leaves implicit.
 
-### 6.2 Attribution of the residual — design
+### 6.2 Attribution of the residual — start with events, not models
 
 Statehouse already computes `UnmonitoredW`. Today it is one opaque number.
 
@@ -468,251 +468,22 @@ show F1 around 0.45 for a fridge with a strong transformer model. Full
 disaggregation is not close to a solved problem at this resolution.
 
 The realistic win is **step detection on the residual**, which needs no ML at all.
-NILMTK's `switch_times` is a >40 W change between successive readings. A step in
+NILMTK's `switch_times` is a >40 W change between successive readings; a step in
 the residual is an unattributed load starting or stopping — the oven, the shower,
-the immersion heater.
+the immersion heater. Feed that residual to the existing `device.Runtime` and an
+unmonitored oven becomes a device in `/state/devices` like any other, with no new
+downstream contract.
 
-What follows is the implementation, including the two parts that are genuinely
-hard: knowing when a load *stops*, and coping with a load whose shape changes.
+**This grew past the size of a subsection and now has its own design document:
+[`residual-load-attribution.md`](residual-load-attribution.md)** — problem
+statement, ideas, a risk register, staged implementation, and open questions. It
+includes measurements against the current engine that constrain the design, most
+importantly that detection must be gated on meter-triggered recomputes or it fires
+on every monitored appliance in the house.
 
----
-
-#### Where it hooks in: meter-triggered recomputes only
-
-This is the first decision and getting it wrong invalidates everything after it.
-
-`recomputeElectricity` runs on **every power-bearing reading**, meter and plug
-alike. Plugs are change-reporting Zigbee; the meter samples on its own clock. So
-between a plug reporting and the meter catching up, `MonitoredW` has moved and
-`GrossW` has not — and the residual takes a large excursion that means nothing.
-
-Measured against the real engine, a monitored 3 kW kettle switching on:
-
-| | gross | monitored | residual |
-| --- | --- | --- | --- |
-| t+0s steady, kettle off | 640 | 0 | 640 |
-| t+4s plug reports, meter stale | 640 | 3000 | **−2360** |
-| t+10s meter catches up | 3640 | 3000 | 640 |
-
-A detector running on every recompute would fire on **every monitored appliance in
-the house**, with the wrong sign, which is the precise opposite of its job.
-
-So: evaluate steps only when `triggeredByMeter` is true. There is already a
-precedent for exactly this gate — `emitElectricityCanonical` is behind it, so that
-"the canonical stream stays locked to meter cadence". Residual step detection
-belongs behind the same gate for the same reason.
-
-Two properties come for free by living inside `recomputeElectricity`:
-
-- the existing monotonicity guard (`!now.After(e.lastElecAt)`) already drops
-  out-of-order and duplicate-timestamp readings — and the real meter fixture
-  contains a duplicate timestamp, so this is not hypothetical;
-- `StaleDevices` is already computed. A residual step while a monitored plug is
-  stale is not an unattributed load, it is a missing plug reading. Suppress
-  detection, or at minimum mark the event `contaminated`, whenever
-  `StaleDeviceCount > 0`.
-
-#### Even meter-locked, one sample is not enough
-
-Skew survives the gate in smaller form: the meter reports at *t* reflecting power
-at *t*, while the plug last spoke at *t−8s*. A monitored load that started in
-between shows in gross and not yet in monitored, so the residual steps up and then
-back down one or two samples later.
-
-The fix is the settle window, and statehouse already has the primitive:
-`candidateSample` plus `maybeBegin`/`maybeEnd` in `device/statemachine.go`. Require
-the residual to hold its new level for N meter samples (or T seconds) before
-confirming a step. Use that code rather than writing a second hysteresis.
-
-Choosing the threshold: the real meter fixture sits at 640 W with a ±4 W wobble and
-1 W quantisation, so NILMTK's 40 W is comfortably above the noise floor. But
-**measure it rather than inherit it** — capture a fixture of a demonstrably quiet
-house, take the residual's standard deviation, set the threshold at max(5σ, 50 W).
-That measurement is one of the first things the §5 eval harness should produce.
-
----
-
-#### Stage 1: the residual as a single virtual device
-
-Ship this before anything below. It is perhaps 150 lines and immediately useful.
-
-Feed the (settled, meter-locked) residual into one virtual device —
-`identity.scheme = "residual"`, `primary = "unattributed"` — and let the **existing**
-`device.Runtime` drive it. It is a power signal; statehouse already owns a
-well-tested state machine that turns a power signal into activity states, cycles
-with hysteresis, and integrated energy.
-
-That answers "we publish an event, then what?" without any new consumer contract:
-
-- `/state/devices/residual:unattributed` shows it like any other device;
-- `cycle_started` / `cycle_finished` fire through the existing emitter;
-- the Influx writer, MQTT retained topics and the recent-event log all work
-  unchanged;
-- `house.ActiveDevices` includes it when it is running.
-
-You immediately get "something unmonitored is drawing 2.4 kW and has been for 20
-minutes" as first-class house state, with no attribution at all.
-
-#### Stage 2: decomposing the residual into tracked sessions
-
-The residual is a *sum*, so one device cannot separate an oven from a shower. Stage
-2 adds a tracker above it.
-
-State: a set of open sessions, each `{id, magnitude_w, started_at, label?,
-last_confirmed_at}`.
-
-On each confirmed step of Δ:
-
-- **Δ > 0** — open a new session with `magnitude_w = Δ`.
-- **Δ < 0** — match |Δ| against open sessions within `max(50 W, 10% of magnitude)`.
-  - exactly one match → close it;
-  - several → close the one whose elapsed duration best fits its label's expected
-    duration, falling back to oldest-first;
-  - none → emit `unattributed_load_unexplained_stop`. This is normal at boot
-    (loads already running before we started) and a real signal otherwise.
-
-**The conservation check is what keeps this honest.** At any moment,
-`UnmonitoredW ≈ Σ(open session magnitudes)`. The drift between them is a direct
-error measure. When it exceeds a threshold, the tracking is wrong: force-close every
-open session, re-seed from the current residual level, and emit
-`residual_divergence_warning`.
-
-This is deliberately the same shape as the existing energy design — two parallel
-estimates, tracked continuously, with a divergence warning when they disagree
-(`energy_divergence_warning`, `energy.divergence_warning_pct`). Same pattern,
-second application. It matters because it bounds error: a mis-tracked session
-cannot corrupt state indefinitely, it gets caught and resynced.
-
----
-
-#### The two shape problems
-
-You identified this as the hard part. It is, and it is really two different
-problems that want different answers.
-
-**(a) Within a session: cycling.** An oven thermostats — 2400 W on, 0 W off,
-repeating for an hour. Naively that is thirty sessions, not one.
-
-The fix is NILM Metadata's `min_off_duration`, applied here: a down-step followed by
-an up-step of similar magnitude within `min_off_duration` is one session with a gap,
-not two sessions. Implement as a `pending_close` state — a down-step closes the
-session provisionally, and a matching up-step inside the window reopens and merges
-it.
-
-Note this is the *same mechanism* §1 proposes for the dishwasher's
-`finished_recently` problem: hold a provisional end, retract it if the load returns.
-One primitive, two uses. That convergence is a good sign it is the right primitive,
-and an argument for building it once, properly, in the state machine rather than
-twice ad hoc.
-
-**(b) Across sessions: drift.** The element ages, a bulb is replaced, seasonal
-inlet temperature changes what the shower draws. The signature moves over weeks.
-
-Do not store a fixed magnitude. Store a running distribution per label — which is
-exactly NILM Metadata's `distributions.on_power` with `source: empirical from data`
-and `n_datapoints`, i.e. §1's provenance proposal arriving where it is actually
-needed. Each confirmed, labelled session updates it. Matching becomes "within k
-standard deviations" instead of "within 10%", which adapts on its own and widens
-honestly for loads that are genuinely variable.
-
-**(c) The one that does not work: ramps.** An EV charger tapering as the battery
-fills does not step down, it slides. Step detection will miss the end entirely, the
-session will appear to run forever, and the conservation check will catch it as
-drift — correctly flagging a failure, but not tracking the load.
-
-This is a real limitation and worth stating rather than papering over. Options, in
-order of preference: monitor such loads directly (an EV charger is exactly the case
-where a dedicated meter earns its place); or add a slow-drift mode that attributes
-gradual residual change to the largest open session. Do not let it block stages 1–2.
-
----
-
-#### Labelling: the walk-around, and the better default
-
-Two modes, and the less obvious one should be primary.
-
-**Retro-labelling (primary).** Every session is stored with its features
-regardless of whether anyone was watching. Label it afterwards from the activity
-log:
-
-```
-PUT /state/loads/sessions/{id}/label   {"label": "oven"}
-```
-
-No stopwatch, no live coordination, and it works for things noticed in hindsight —
-"what was that 3 kW thing at 06:40 every morning?" is answerable weeks later.
-
-**Live calibration (for a deliberate walk).** Arm a label, then go and switch the
-thing on:
-
-```
-POST /state/loads/labelling   {"label": "oven", "ttl": "5m"}
-```
-
-The next confirmed session inside the TTL takes the label. Walk the house arming
-one at a time.
-
-The walk-around is worth doing because **isolation is what makes a signature
-clean**. Turn the oven on while the dishwasher is heating and the step is
-contaminated. Statehouse already knows whether the house is quiet — record
-`house.Activity` and `StaleDeviceCount` at session start and mark each signature
-`clean` or `contaminated` accordingly. Then weight the clean ones when building the
-distribution, and have the API tell you when it is a good moment to calibrate.
-
-#### What the features can and cannot discriminate
-
-At 10 s cadence on a single aggregate, the available features are: step magnitude
-(the primary discriminator), steady-state mean and variance during the session
-(flat vs cycling), duty cycle if cycling, duration, time of day and day of week,
-house state at start, and which monitored devices were active concurrently.
-
-Realistically that separates an oven (≈2.4 kW, cycling, 30–60 min, evening) from a
-shower (≈8 kW, flat, 8 min) from an immersion heater (≈3 kW, flat, overnight). It
-will **not** separate two similar resistive loads — two 2 kW heaters are the same
-signature, and no amount of modelling at this resolution fixes that. Say so in the
-API: the label carries a confidence, and ambiguous matches return a candidate set
-rather than a guess.
-
-#### Event vocabulary
-
-Fits the existing `DerivedEventType` list without stretching it:
-
-| Event | Evidence |
-| --- | --- |
-| `unattributed_load_started` | `delta_w`, `residual_before/after`, `session_id`, `contaminated` |
-| `unattributed_load_finished` | `session_id`, `duration_seconds`, `energy_kwh`, `matched_magnitude_w` |
-| `unattributed_load_identified` | `session_id`, `label`, `confidence`, `candidates[]` |
-| `unattributed_load_unexplained_stop` | `delta_w`, `open_sessions[]` |
-| `residual_divergence_warning` | `tracked_sum_w`, `actual_residual_w`, `drift_w` |
-
-#### The payoff, stated plainly
-
-Once a session is labelled, promote it to a device: `identity.scheme = "residual"`,
-`primary = "oven"`. From that moment **an unmonitored oven is indistinguishable
-from a monitored one to every downstream consumer** — same `/state/devices` entry,
-same cycle events, same Influx series, same MQTT topic. Nothing downstream learns a
-new contract.
-
-That is squarely the North Star in `oracle-definition-of-success.md`: downstream
-systems reasoning about the house in meaningful state rather than telemetry. It
-extends the device model to appliances that have no sensor at all.
-
-One consequence to decide deliberately: a residual device turning on is *evidence
-of occupancy*, and a strong one — nobody's oven switches itself on. That means
-residual devices want the `control` dimension from §1 too, defaulting to `manual`.
-An oven starting is among the best occupancy signals in the house, and today it is
-invisible.
-
-#### Suggested sequencing
-
-1. Measure the residual noise floor from a quiet-house fixture; set the threshold.
-2. Stage 1 — residual as one virtual device, meter-locked, with a settle window.
-3. Stage 2 — session tracking with the conservation check and resync.
-4. `min_off_duration` merging, shared with the §1 dishwasher fix.
-5. Retro-labelling, then live calibration.
-6. Per-label distributions replacing fixed magnitudes.
-
-Stages 1 and 2 are independently useful and need no labelling at all.
+Disaggregation proper becomes interesting *later*, once §6.1 has accumulated enough
+labelled history to train on — and at that point the labels are free, because
+statehouse generated them.
 
 ### 6.3 Routines, learned rather than configured
 
@@ -766,8 +537,8 @@ Ordered by leverage-per-unit-effort, not by section number.
 | — | `submeter_of` / `disabled` | 2 | — | **Dropped**: no topology that needs it (§2) |
 | 6 | `appliance_type` with inheritance, per-type durations | 1 | L | Wants 1 to prove it helps |
 | 7 | NILM-Metadata export | 6.1 | M | Independent; do when 3 is settled |
-| 8 | Residual as one virtual device, meter-locked (stage 1) | 6.2 | S–M | Independent, no ML, no labelling; reuses `device.Runtime` |
-| 9 | Residual session tracking + conservation check (stage 2) | 6.2 | M | Needs 8; `min_off_duration` merging shared with 6 |
+| 8 | Residual as one virtual device, meter-locked (stage 1) | [residual doc](residual-load-attribution.md) | S–M | Independent, no ML, no labelling; reuses `device.Runtime` |
+| 9 | Residual session tracking + conservation check (stage 2) | [residual doc](residual-load-attribution.md) | M | Needs 8; `min_off_duration` merging shared with 6 |
 
 ---
 
