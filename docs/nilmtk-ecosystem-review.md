@@ -148,6 +148,53 @@ through the real adapter and engine with and without a devices entry. Worth
 confirming against the live `devices_home` namespace before treating it as
 load-bearing.
 
+#### Occupancy doesn't accumulate evidence today — it latches
+
+The right way to hold heating is as *one contributor among several*, no single one
+definitive. `DeriveHouseState` does not currently work that way. `anyCurrentlyActive`
+is a boolean OR, and occupancy confidence is a constant per branch:
+
+| Contributors | occupancy | confidence |
+| --- | --- | --- |
+| thermostat-driven boiler relay, alone | `occupied` | **0.90** |
+| kettle + TV + hall motion + boiler + a live phone call | `occupied` | **0.90** |
+| one WiFi signal the adapter itself labelled `Confidence: 0.10` | `occupied` | **0.90** |
+
+Five independent agreeing sources are worth exactly as much as one thermostat. And
+the third row is the sharp one: `model.ActivitySignal` already carries a
+`Confidence` field documented as *"the adapter's estimate that this signal
+represents genuine occupancy/activity, in [0,1]"* — `dto.go` serves it over the API,
+and `DeriveHouseState` never reads it. The evidence-weight channel exists and is
+discarded.
+
+`activeCount` does vary with contributors, but it feeds the *activity* dimension
+(idle/quiet/active/busy) only; it never reaches occupancy.
+
+#### So `control` should be a weight, not a filter
+
+This changes the recommendation. Rather than extending the boolean in
+`isOccupancyRelevant`, give every contributor an evidence weight in [0,1]:
+
+- **devices** — weight from `control`: `manual` ≈ 1.0 (a person pressed it),
+  `motion` high, `thermostat` / `timer` / `always on` low or zero
+- **signals** — weight is the `Confidence` the adapter already supplies
+
+and combine them with noisy-OR, `1 − ∏(1 − wᵢ)`: monotone in contributors, saturating
+at 1, and graceful with a single weak source. Then apply `EmptyAfter` against
+*weighted* recency rather than bare recency.
+
+That satisfies all three constraints at once. Issue #32 keeps its decision —
+heating still contributes, and a house with only the boiler running still reads
+`occupied`, just at ~0.3 rather than 0.90, which is the honest number. The `away`
+failure above dissolves, because a low-weight contributor no longer refreshes the
+empty timer at full strength. And the API gains a confidence figure that actually
+means something, instead of four constants.
+
+The one thing to decide deliberately is whether a low-weight contributor should
+refresh recency *at all* or merely slow its decay — that's the difference between
+"heating can never fully hold off `away`" and "heating alone reaches `away` more
+slowly than silence does". The second is probably the one you want.
+
 ### `components` reframes the split-cycle problem
 
 Statehouse doesn't need component modelling. But the framing is useful: a dishwasher
@@ -452,7 +499,7 @@ Ordered by leverage-per-unit-effort, not by section number.
 | # | Item | § | Effort | Why first/last |
 | --- | --- | --- | --- | --- |
 | 1 | `cmd/statehouse-eval` + ground-truth sidecars | 5 | M | Everything below is unfalsifiable without it |
-| 2 | `control` on device config, feeding occupancy | 1 | S | Smallest change; unblocks `away` without reversing issue #32 |
+| 2 | `control` as an evidence weight; consume `ActivitySignal.Confidence` | 1 | S–M | Unblocks `away` without reversing issue #32; makes occupancy confidence mean something |
 | 3 | Meter-device catalogue (`sample_period`, `max_sample_period`, `ac_type`) | 3 | M | Fixes staleness axis *and* explains coverage>1 |
 | 4 | `submeter_of` + `disabled` on device config | 2 | M | Closes a real latent double-count |
 | 5 | `dropout_rate`, `coverage_fraction` on cycle energy | 3 | S | Cheap once 3 lands |
