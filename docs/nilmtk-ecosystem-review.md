@@ -420,17 +420,21 @@ A `cmd/statehouse-eval` that replays a fixture against a config and emits:
 - cycles detected vs expected; start/end timestamp error
 - energy error per cycle, per strategy
 - F1 on the active/idle series (NILMTK's `f1_score`, `precision_recall`,
-  `mean_normalized_error_power` are all ~30-line pure functions worth porting)
+  `mean_normalized_error_power` are all ~30-line pure functions; implement from
+  their definitions rather than transcribing — see *Licensing and attribution*)
 - the config hash the run used
 
 The fixtures already exist. What's missing is a ground-truth sidecar per fixture
 (`dishwasher_cycle.expected.json`) and a scorer. Everything else on this list
 becomes measurable the moment it lands.
 
-And steal the versioned metric policy specifically: **statehouse's thresholds live
-in remote config and change under a running system with no record.** A threshold
-change is a semantic change to every event emitted after it, and there is currently
-nothing in the data that says which threshold generation produced a given event.
+Their versioned metric policy is the practice worth adopting: **statehouse's
+thresholds live in remote config and change under a running system with no
+record.** A threshold change is a semantic change to every event emitted after it,
+and there is currently nothing in the data that says which threshold generation
+produced a given event. nilmbench's answer — keep the old policy alongside the new
+one, each with its provenance, so prior numbers stay reproducible — is a convention
+we can arrive at independently; it needs none of their code.
 
 ---
 
@@ -530,6 +534,53 @@ Ordered by leverage-per-unit-effort, not by section number.
 | 6 | `appliance_type` with inheritance, per-type durations | 1 | L | Wants 1 to prove it helps |
 | 7 | NILM-Metadata export | 6.1 | M | Independent; do when 3 is settled |
 | 8 | `unattributed_load_started` from residual step changes | 6.2 | S | Independent, no ML, fits existing event model |
+
+---
+
+## Licensing and attribution
+
+This document recommends two things that are not merely inspiration — porting
+metric functions (§5) and adopting appliance-type defaults such as
+`min_on_duration` / `min_off_duration` (§1). Both produce derivative works, so the
+terms matter.
+
+**All four projects are Apache-2.0.** `nilmtk`, `nilm_metadata` and
+`nilmtk-contrib` each ship the full licence text; `nilmbench` declares
+`license = "Apache-2.0"` in `pyproject.toml` but has no `LICENSE` file at the
+reviewed commit — fine to rely on, worth raising with them as a packaging bug if we
+ever depend on it directly.
+
+Apache-2.0 permits use, modification and redistribution, including in a closed
+codebase. It asks in return for:
+
+- the licence text retained with any redistributed portion;
+- existing copyright and attribution notices preserved;
+- **prominent notice of what we changed**, where we ship a modified file.
+
+Statehouse has no `LICENSE` of its own and is private, so nothing is being
+redistributed today and the practical obligation is small. It is still not zero,
+and it becomes real the moment anything is published.
+
+Concretely, by category:
+
+| What we take | Status | What we owe |
+| --- | --- | --- |
+| Design ideas — `control` as a dimension, evidence weighting, versioned metric policies, submetering topology | Not copyrightable | Nothing. Cite as courtesy; this document does. |
+| Metric *formulae* — F1, MAE, NDE, normalised error power | Not copyrightable; standard statistics predating NILMTK | Nothing, if implemented from the definition. |
+| Metric *implementations* transcribed from `nilmtk/metrics.py` or `losses.py` | Derivative work | Attribution header naming NILMTK and Apache-2.0; note the port to Go. |
+| Appliance vocabulary — the YAML tree, its durations, synonyms, the hierarchy | Derivative work; the values are their curation, not facts | Attribution in the data file. Ideally cite the papers behind their priors too. |
+
+**Preference:** implement the metrics from their published definitions rather than
+transcribing the Python. They are standard statistics, the Go will not resemble the
+NumPy anyway, and it keeps the boundary clean without argument. Where we do adopt
+their vocabulary — which is the genuinely valuable, genuinely authored part — carry
+the attribution in the file that holds it.
+
+Cite the NILMTK papers where the work draws on them: the nilmtk-contrib paper
+(Batra et al., BuildSys '19) for the model suite, and NILMBench2026 (Kuloor, Singh,
+Dhru, Batra) for protocols or leaderboard results. The repos ask for this
+explicitly, and §6.1 would have us contributing a dataset back to that community —
+which goes better if we have been good citizens of it first.
 
 ---
 
