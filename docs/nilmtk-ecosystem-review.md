@@ -239,27 +239,25 @@ NILMTK builds a `wiring_graph` from it and computes `proportion_of_upstream`,
 gross (site meter) − monitored (sum of plugs) = unmonitored (remainder). The README
 is admirably honest that coverage can exceed 1 and unmonitored can go negative.
 
-### The latent bug
+### The UPS double-count: noted, not pursued
 
-Statehouse assumes every monitored device is directly downstream of the meter.
-There is no way to say otherwise. `isPowerMonitored` includes `ClassUPSSensor`, and
-the code comment reasons about it:
+Statehouse assumes every monitored device is directly downstream of the meter, and
+there is no way to say otherwise. `isPowerMonitored` includes `ClassUPSSensor`, whose
+code comment reasons that the gear behind the UPS is "none of which is otherwise on
+a monitored plug" — a property of the deployment rather than an expressed constraint.
+Put a monitored plug behind the UPS and `MonitoredW` double-counts it silently.
 
-> A UPS is included too: it reports its output load (LoadWatts) as PowerW, which is
-> real consumption — typically the network/computing gear behind it, **none of
-> which is otherwise on a monitored plug**, so counting it improves coverage rather
-> than double-counting.
+**Judged not worth fixing, deliberately.** A monitored plug behind the UPS would be
+redundant *by construction*: the UPS already reports the load behind it, so a plug
+there buys nothing and costs real money. The arrangement isn't prevented by
+discipline, it's prevented by there being no reason to want it. Recorded here so the
+assumption is written down somewhere other than a code comment; not queued as work.
 
-That emphasised clause is a hoped-for property of the current deployment, not an
-expressed constraint. The moment a monitored plug goes behind the UPS,
-`MonitoredW` silently double-counts it, `UnmonitoredW` goes negative, and the only
-signal is a README sentence saying consumers decide whether to render it.
+`submeter_of` would make it expressible and checkable, and remains the right
+mechanism if a second site ever has a different topology. Until then it is
+schema for a problem nobody has.
 
-`submeter_of` makes that constraint expressible and, more importantly, checkable:
-a device whose upstream is another monitored device is excluded from the top-level
-sum by construction rather than by hope.
-
-**Also worth taking:**
+**Worth taking on its own merits:**
 
 - **`disabled: true` for redundant parallel meters.** Statehouse's "lowest-id meter
   wins" tiebreak is deterministic-but-arbitrary where NILM Metadata has an explicit
@@ -314,15 +312,40 @@ hand.
    `sample_period` and `max_sample_period`. Per-hardware staleness replaces
    per-class staleness.
 
-2. **Declare `ac_type` per meter model.** This is the documented cause of
-   statehouse's coverage>1 problem. The README mentions "apparent-vs-active power on
-   some plugs" as an aside; NILM Metadata makes it a declared property, and
-   nilmbench records a resolved *preference order* per dataset
-   (`"mains_ac_types": ["apparent", "active"]`) in every result bundle. Statehouse
-   currently sums apparent-power plugs against an active-power meter and calls the
-   difference "unmonitored". Declaring it lets the aggregator convert, refuse, or at
-   minimum flag the mixture — instead of silently folding a systematic error into
-   the residual.
+2. **Declare `ac_type` per meter model — a separate cause of coverage drift from
+   the topology question above, and an unconditional one.** Three adapters write
+   `Reading.PowerW`, and the aggregator sums them as if commensurable:
+
+   | Source | Field | Quantity |
+   | --- | --- | --- |
+   | Z2M plugs | `power` | usually active (Electrical Measurement `activePower`), apparent on some cheap plugs |
+   | Glow / SMETS2 | `power.value` (kW→W) | active import |
+   | UPS | `computed.load_watts` | depends on the NUT bridge |
+
+   The UPS row is the one to check, and the "the UPS can monitor the power so I
+   don't need a plug" argument makes it *more* load-bearing rather than less —
+   it means the UPS's number carries the whole rack in the coverage figure. NUT's
+   `ups.load` is a **percentage of rated VA**; unless the UPS exposes
+   `ups.realpower` and the bridge prefers it, `load_watts` is an apparent-power
+   estimate quantised to whole percent. Summed against the meter's active watts,
+   that is a systematic, always-on bias folded silently into `UnmonitoredW` —
+   no unusual wiring required. Worth reading the bridge to see which it is.
+
+   **The cheap detector needs no catalogue at all.** The Z2M adapter already
+   decodes `voltage` and `current` alongside `power` on the same reading —
+   `CurrentA` is emitted as a canonical event and then used by nothing, and
+   `model.Latest` has no field for it. Power factor is `P / (V × A)`, free from
+   data already in hand: a plug reporting apparent power pins at ≈1.00 forever,
+   a plug reporting active power on a reactive load (fridge, laptop charger)
+   sits below it. That distinguishes the two quantities empirically, per device,
+   without a vendor table or any new config — and a PF that is implausibly and
+   invariably 1.00 is itself the flag.
+
+   The declared-metadata version (NILM Metadata's `measurements` with
+   `physical_quantity` × `type`; nilmbench recording a resolved preference order
+   like `"mains_ac_types": ["apparent", "active"]` in every result bundle) is
+   where this ends up once the answer per device is known. Measure first,
+   declare second.
 
 3. **Compute `dropout_rate` per device.** Statehouse has `LinkQuality` and `RSSI`
    but no measure of delivered-vs-expected samples. With `sample_period` from the
@@ -500,11 +523,12 @@ Ordered by leverage-per-unit-effort, not by section number.
 | --- | --- | --- | --- | --- |
 | 1 | `cmd/statehouse-eval` + ground-truth sidecars | 5 | M | Everything below is unfalsifiable without it |
 | 2 | `control` as an evidence weight; consume `ActivitySignal.Confidence` | 1 | S–M | Unblocks `away` without reversing issue #32; makes occupancy confidence mean something |
-| 3 | Meter-device catalogue (`sample_period`, `max_sample_period`, `ac_type`) | 3 | M | Fixes staleness axis *and* explains coverage>1 |
-| 4 | `submeter_of` + `disabled` on device config | 2 | M | Closes a real latent double-count |
+| 3 | Meter-device catalogue (`sample_period`, `max_sample_period`, `ac_type`) | 3 | M | Fixes staleness axis; declares what 4 measures |
+| 4 | Power-factor cross-check (`P / V×A`) to pin down AC type per plug | 3 | S | Free from data already decoded; no catalogue needed |
 | 5 | `dropout_rate`, `coverage_fraction` on cycle energy | 3 | S | Cheap once 3 lands |
+| — | `submeter_of` / `disabled` | 2 | — | **Dropped**: no topology that needs it (§2) |
 | 6 | `appliance_type` with inheritance, per-type durations | 1 | L | Wants 1 to prove it helps |
-| 7 | NILM-Metadata export | 6.1 | M | Independent; do when 3 and 4 are settled |
+| 7 | NILM-Metadata export | 6.1 | M | Independent; do when 3 is settled |
 | 8 | `unattributed_load_started` from residual step changes | 6.2 | S | Independent, no ML, fits existing event model |
 
 ---
