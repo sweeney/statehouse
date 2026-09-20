@@ -53,13 +53,26 @@ func fakeJWKSServer(t *testing.T, pub *ecdsa.PublicKey, kid string) *httptest.Se
 	return srv
 }
 
+// signJWT signs claims as a user access token (JOSE `typ` of "JWT").
 func signJWT(t *testing.T, priv *ecdsa.PrivateKey, kid string, claims map[string]any) string {
+	t.Helper()
+	return signTypedJWT(t, priv, kid, userTokenTyp, claims)
+}
+
+// signTypedJWT signs claims with an explicit JOSE `typ` header. Service tokens
+// use "at+jwt"; user tokens use "JWT". A typ of "" omits the header entirely,
+// which is how the "no typ at all" routing case is exercised.
+func signTypedJWT(t *testing.T, priv *ecdsa.PrivateKey, kid, typ string, claims map[string]any) string {
 	t.Helper()
 	b64j := func(v any) string {
 		b, _ := json.Marshal(v)
 		return base64.RawURLEncoding.EncodeToString(b)
 	}
-	header := b64j(map[string]any{"alg": "ES256", "typ": "JWT", "kid": kid})
+	hdr := map[string]any{"alg": "ES256", "kid": kid}
+	if typ != "" {
+		hdr["typ"] = typ
+	}
+	header := b64j(hdr)
 	payload := b64j(claims)
 	msg := header + "." + payload
 	h := sha256.Sum256([]byte(msg))

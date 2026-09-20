@@ -40,6 +40,10 @@ type Server struct {
 	// When empty, auth is disabled (useful for local development and tests).
 	IdentityURL string
 
+	// ServiceTokens decides what a client_credentials service token may do.
+	// New() sets DefaultServiceTokenPolicy(); main.go overrides it from config.
+	ServiceTokens ServiceTokenPolicy
+
 	// PublicURL is the externally-reachable base URL of this server
 	// (e.g. "https://statehouse.swee.net"). When set it is substituted into
 	// the OpenAPI spec's servers list. When empty the placeholder is left as-is.
@@ -61,6 +65,7 @@ type Server struct {
 	srv           *http.Server
 	verifier      *auth.JWKSVerifier
 	specConverter *spec.Converter
+	authm         authMetrics
 
 	canonicalCount uint64
 	derivedCount   uint64
@@ -78,6 +83,7 @@ func New(listen string, store *state.Store, log *history.Log, mqtt mqtt.Client, 
 		Influx:        infl,
 		Logger:        logger,
 		DeviceClasses: deviceClasses,
+		ServiceTokens: DefaultServiceTokenPolicy(),
 		started:       time.Now().UTC(),
 	}
 }
@@ -140,7 +146,18 @@ func (s *Server) authMiddleware() func(http.Handler) http.Handler {
 		panic(err)
 	}
 	s.verifier = verifier
-	return func(h http.Handler) http.Handler { return requireAuth(verifier, h) }
+	logger := s.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	a := &authenticator{
+		parser:  verifier,
+		realm:   verifier.Issuer(),
+		service: s.ServiceTokens,
+		logger:  logger,
+		metrics: &s.authm,
+	}
+	return func(h http.Handler) http.Handler { return requireAuth(a, h) }
 }
 
 // Start runs the HTTP server until the context is cancelled.
@@ -298,6 +315,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		RecentLogEvents  int          `json:"recent_log_events"`
 		RecentLogBytes   int64        `json:"recent_log_size_bytes"`
 		JWKS             *jwksMetrics `json:"jwks,omitempty"`
+		// Auth counts authentication outcomes by reason. Counters only —
+		// nothing here identifies a caller.
+		Auth authMetricsJSON `json:"auth"`
 	}
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
@@ -310,6 +330,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		HeapSysBytes:    ms.HeapSys,
 		GCCycles:        ms.NumGC,
 		LastGCPauseMS:   float64(ms.PauseNs[(ms.NumGC+255)%256]) / 1e6,
+		Auth:            s.authm.snapshot(),
 	}
 	if s.Influx != nil && s.Influx.Enabled {
 		m.InfluxQueued, m.InfluxFailure = s.Influx.Stats()

@@ -23,6 +23,7 @@ type Config struct {
 	Devices       map[string]DeviceConfig      `yaml:"devices"`
 	Identity      IdentityConfig               `yaml:"identity"`
 	RemoteConfig  RemoteConfigConfig           `yaml:"remote_config"`
+	Auth          AuthConfig                   `yaml:"auth"`
 }
 
 // SiteConfig identifies the property this instance serves and where that property's
@@ -85,6 +86,63 @@ type IdentityConfig struct {
 type RemoteConfigConfig struct {
 	BaseURL string `yaml:"base_url"`
 }
+
+// AuthConfig configures how inbound HTTP callers are authenticated.
+//
+// It governs tokens coming *in* to this service's API. IdentityConfig above is
+// the other direction — the credentials this service uses to call out. The two
+// are separate blocks because they are separate trust relationships: a host may
+// hold client credentials for the config service and still refuse every inbound
+// service token, or the reverse.
+type AuthConfig struct {
+	ServiceTokens ServiceTokenConfig `yaml:"service_tokens"`
+}
+
+// ServiceTokenConfig decides which client_credentials callers reach the API.
+//
+// A service principal has no IsActive flag and no role, so the checks that
+// bound a user token have no equivalent here. These four knobs are what stands
+// in for them, and all four are optional: the default is "any token this
+// instance's identity service signed".
+//
+// That default is deliberate. Statehouse is read-only, sits on a private
+// network, and already requires a signed token from a single issuer; the
+// identity service decides who gets a client registration at all. Requiring a
+// scope by default would have meant every sibling 403ing until identity was
+// taught to stamp one, which is the same outage as the bug this replaces. The
+// tighter settings exist so a deployment can opt in as identity grows the
+// claims to support them.
+type ServiceTokenConfig struct {
+	// Enabled accepts service tokens at all. Absent means true — see the note
+	// above on why the permissive default is the safe one here. Set false to
+	// restore the user-token-only behaviour.
+	Enabled *bool `yaml:"enabled"`
+
+	// RequiredAudience, when set, requires the token's `aud` to include this
+	// value. This is the standard defence against token redirection: without
+	// it, a token minted for a sibling service is accepted here too, so any
+	// service that can obtain a token can read house state.
+	//
+	// It is enforced against the parsed service claims rather than by setting
+	// JWKSVerifierConfig.RequiredAudience, because that field applies to user
+	// tokens as well — and user tokens carry no `aud`, so it would lock every
+	// human caller out.
+	RequiredAudience string `yaml:"required_audience"`
+
+	// RequiredScope, when set, requires the token's space-delimited `scope` to
+	// contain this value. One scope, matched whole.
+	RequiredScope string `yaml:"required_scope"`
+
+	// AllowedClients, when non-empty, restricts callers to these `client_id`s,
+	// matched exactly. It is the one restriction that needs nothing new from
+	// the identity service, so it is the cheapest least-privilege control a
+	// deployment can turn on today.
+	AllowedClients []string `yaml:"allowed_clients"`
+}
+
+// IsEnabled reports whether service tokens are accepted. An absent `enabled`
+// means yes.
+func (s ServiceTokenConfig) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
 
 // MQTTConfig describes broker connectivity. Per-adapter subscription
 // topics are now owned by the adapter blocks below, not by MQTT.
