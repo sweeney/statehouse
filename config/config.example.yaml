@@ -53,6 +53,46 @@ adapters:
 
 http:
   listen: :8383
+  # Externally-reachable base URL. Substituted into the `servers` list of the
+  # OpenAPI document served at /openapi.json, so a generated client points at
+  # the real host rather than a placeholder.
+  # public_url: https://statehouse.example.net
+
+# Credentials this service uses to call *out* — today, to fetch remote config.
+# Setting identity.base_url also switches on inbound authentication: every
+# endpoint except /healthz and /openapi.json then requires a Bearer JWT signed
+# by this issuer. Leave it unset for local development and the API is open.
+# identity:
+#   base_url: https://id.example.net
+#   client_id: statehouse
+#   client_secret: <from the identity service>
+
+# remote_config:
+#   base_url: https://config.example.net
+
+# How callers authenticate *in*. See docs/service-tokens.md.
+auth:
+  service_tokens:
+    # Accept tokens from services using the client_credentials grant, not just
+    # user tokens from the UI. Absent means true. Set false to refuse them.
+    enabled: true
+
+    # Optional hardening; each is unenforced when empty, which is the default.
+    #
+    #   required_audience  require the token's `aud` to name this server, so a
+    #                      token minted for a sibling service is not accepted
+    #                      here. Set this once identity stamps an audience.
+    #   required_scope     require one scope, matched whole against the token's
+    #                      space-delimited `scope` claim.
+    #   allowed_clients    permit only these client_ids, matched exactly. The
+    #                      one restriction that needs nothing new from the
+    #                      identity service.
+    #
+    # required_audience: https://statehouse.example.net
+    # required_scope: statehouse:read
+    # allowed_clients:
+    #   - countinghouse
+    #   - greenhouse
 
 recent_log:
   path: /var/lib/statehouse/events.jsonl

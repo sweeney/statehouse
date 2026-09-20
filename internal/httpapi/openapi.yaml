@@ -4,7 +4,8 @@ info:
   description: >
     Read-only HTTP API for the statehouse home automation state engine.
     All endpoints except /healthz and /openapi.json require a Bearer JWT
-    issued by the configured identity service.
+    issued by the configured identity service — either a user access token
+    or a `client_credentials` service token.
   version: "1"
 servers:
   - url: __PUBLIC_URL__
@@ -68,6 +69,8 @@ paths:
                 $ref: "#/components/schemas/SnapshotResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /state/house:
     get:
@@ -84,6 +87,8 @@ paths:
                 $ref: "#/components/schemas/HouseResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /state/devices:
     get:
@@ -102,6 +107,8 @@ paths:
                   $ref: "#/components/schemas/DeviceResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /state/devices/{id}:
     get:
@@ -125,6 +132,8 @@ paths:
                 $ref: "#/components/schemas/DeviceResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Device not found
 
@@ -143,6 +152,8 @@ paths:
                 $ref: "#/components/schemas/ActivityStateResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /events/recent:
     get:
@@ -171,6 +182,8 @@ paths:
                   type: object
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /metrics:
     get:
@@ -187,6 +200,8 @@ paths:
                 $ref: "#/components/schemas/MetricsResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /config/devices:
     get:
@@ -205,6 +220,8 @@ paths:
                   $ref: "#/components/schemas/DeviceProfileResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /config/devices/{id}:
     get:
@@ -228,6 +245,8 @@ paths:
                 $ref: "#/components/schemas/DeviceProfileResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Device not found
 
@@ -237,10 +256,36 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: >
+        A Bearer JWT issued by the configured identity service. Two kinds are
+        accepted. A **user access token**, obtained by signing in, must belong
+        to an account that is still active. A **service token**, obtained with
+        the OAuth 2.0 `client_credentials` grant, is accepted for the whole
+        API; a deployment may additionally require a matching `aud`, a
+        particular `scope`, or restrict callers to an allowlist of `client_id`s
+        (see docs/service-tokens.md). Both kinds get the same read-only access
+        — there is no per-endpoint distinction between them.
 
   responses:
     Unauthorized:
-      description: Missing or invalid Bearer JWT
+      description: >
+        Missing or invalid Bearer JWT. The WWW-Authenticate header carries an
+        RFC 6750 `error` and `error_description` saying which — an expired
+        token, an audience that does not include this server, or a service
+        token where the deployment does not accept them. A request with no
+        Authorization header at all gets a bare challenge with no error code.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+    Forbidden:
+      description: >
+        The token is valid but the principal is not permitted: a service token
+        whose `client_id` is not on this deployment's allowlist, or which does
+        not carry the required scope. The WWW-Authenticate header carries
+        `error="insufficient_scope"`, and a `scope` parameter naming what is
+        required when a scope is the reason. Retrying with the same token will
+        not help.
       headers:
         WWW-Authenticate:
           schema:

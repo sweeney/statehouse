@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -522,6 +523,35 @@ func (c Config) Validate() error {
 			"this used to fall back to has been deleted, and a failed devices fetch is "+
 			"silent — the service would start, report healthy and serve no devices at all",
 			c.Site.ID, c.Site.ID)
+	}
+	return c.Auth.ServiceTokens.validate()
+}
+
+// validate rejects service-token settings that would silently match nothing.
+//
+// Each of these is a config that parses, starts, and then turns away every
+// sibling service with a 403 or 401 the operator has no way to explain from the
+// outside — the same shape of silent failure as an unnamed devices namespace,
+// and refused at startup for the same reason.
+func (s ServiceTokenConfig) validate() error {
+	if f := strings.Fields(s.RequiredAudience); len(f) > 1 {
+		return fmt.Errorf("auth.service_tokens.required_audience %q contains a space: it "+
+			"names one audience, matched whole against the token's aud claim, and a value "+
+			"with a space in it can never match", s.RequiredAudience)
+	}
+	if f := strings.Fields(s.RequiredScope); len(f) > 1 {
+		return fmt.Errorf("auth.service_tokens.required_scope %q contains a space: it names "+
+			"one scope, matched whole against the token's space-delimited scope claim, so "+
+			"%q would match nothing. Require the single scope every permitted caller holds",
+			s.RequiredScope, s.RequiredScope)
+	}
+	for i, c := range s.AllowedClients {
+		if strings.TrimSpace(c) == "" {
+			return fmt.Errorf("auth.service_tokens.allowed_clients[%d] is empty: an empty "+
+				"entry matches no client_id but does switch the allowlist on, so the list "+
+				"reads as \"permit nothing\". Remove the entry, or remove the list to "+
+				"permit any client the identity service issued a token to", i)
+		}
 	}
 	return nil
 }
