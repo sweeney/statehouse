@@ -329,12 +329,12 @@ func validateHost(h string) (string, error) {
 		return "", errNoHost
 	}
 	if strings.HasPrefix(h, "[") {
-		inner, ok := strings.CutSuffix(strings.TrimPrefix(h, "["), "]")
-		if !ok {
-			return "", errBadLabel
-		}
+		// The unbalanced case cannot arrive from split, which only produces a
+		// bracketed host once it has found the closing bracket — but the two
+		// are checked together so this stays correct if that ever changes.
+		inner, balanced := strings.CutSuffix(strings.TrimPrefix(h, "["), "]")
 		ip := net.ParseIP(inner)
-		if ip == nil {
+		if !balanced || ip == nil {
 			return "", errBadLabel
 		}
 		// Brackets mean IPv6. An IPv4 address inside them — written directly or
