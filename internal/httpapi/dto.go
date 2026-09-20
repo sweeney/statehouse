@@ -174,6 +174,7 @@ type DeviceResponse struct {
 	DisplayName  string             `json:"display_name,omitempty"`
 	Class        string             `json:"class"`
 	Room         string             `json:"room,omitempty"`
+	Floor        string             `json:"floor,omitempty"`
 	Covers       string             `json:"covers,omitempty"`
 	Location     string             `json:"location,omitempty"`
 	Identity     *IdentityResponse  `json:"identity,omitempty"`
@@ -503,6 +504,7 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int, i
 		DisplayName:  d.DisplayName,
 		Class:        d.Class,
 		Room:         d.Place(),
+		Floor:        d.Floor,
 		Covers:       d.Covers,
 		Location:     d.Place(),
 		Identity:     identity,
@@ -635,13 +637,26 @@ func buildCycleResponse(c *model.Cycle, class string) *CycleResponse {
 }
 
 // DeviceProfileResponse is the resolved runtime config for one device.
+//
+// Room, Floor and Covers mirror DeviceResponse field for field. They were missing
+// here long after /state had them, which left one service answering two vocabularies
+// about the same device: Location alone, fed from Place(), published a floorplan room
+// id under the key the migration exists to retire, and Covers was dropped entirely —
+// so the whole-house meter looked like an ordinary device sitting in basement.hallway
+// and anything grouping off this endpoint attributed the property to that room.
 type DeviceProfileResponse struct {
-	Class          string              `json:"class"`
-	EnergyStrategy string              `json:"energy_strategy"`
-	Resolution     string              `json:"resolution"`
-	DisplayName    string              `json:"display_name,omitempty"`
-	Location       string              `json:"location,omitempty"`
-	Thresholds     *ThresholdsResponse `json:"thresholds,omitempty"`
+	Class          string `json:"class"`
+	EnergyStrategy string `json:"energy_strategy"`
+	Resolution     string `json:"resolution"`
+	DisplayName    string `json:"display_name,omitempty"`
+	Room           string `json:"room,omitempty"`
+	Floor          string `json:"floor,omitempty"`
+	Covers         string `json:"covers,omitempty"`
+	// Location is the DEPRECATED alias for Room, carrying the same value. Kept for
+	// one more release so consumers migrate on their own schedule; removed once the
+	// last of them reads Room.
+	Location   string              `json:"location,omitempty"`
+	Thresholds *ThresholdsResponse `json:"thresholds,omitempty"`
 }
 
 // ThresholdsResponse is the effective activity-detection thresholds.
@@ -660,6 +675,9 @@ func buildDeviceProfileResponse(p device.Profile) DeviceProfileResponse {
 		EnergyStrategy: string(p.Strategy),
 		Resolution:     profileResolution(p),
 		DisplayName:    p.DisplayName,
+		Room:           p.Place(),
+		Floor:          p.Floor,
+		Covers:         p.Covers,
 		Location:       p.Place(),
 		Thresholds:     buildThresholdsResponse(p.Thresholds),
 	}

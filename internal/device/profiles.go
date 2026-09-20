@@ -90,7 +90,10 @@ type Profile struct {
 	Class       string
 	DisplayName string
 	// Room is the floorplan room id; Location is its deprecated free-text form.
-	Room         string
+	Room string
+	// Floor is the floor id as declared by the devices namespace, never derived
+	// from Room. See config.DeviceConfig.Floor.
+	Floor        string
 	Covers       string
 	Location     string
 	Thresholds   config.Thresholds
@@ -250,6 +253,7 @@ func profileFromOverride(d config.DeviceConfig, classes map[string]config.Device
 		Class:       d.Class,
 		DisplayName: d.DisplayName,
 		Room:        d.Room,
+		Floor:       d.Floor,
 		Covers:      d.Coverage(),
 		Location:    d.Location,
 	}

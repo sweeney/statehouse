@@ -600,6 +600,12 @@ components:
           type: string
           description: >
             Floorplan room id this device sits in, e.g. "groundfloor.kitchen".
+        floor:
+          type: string
+          description: >
+            Floor id as DECLARED by the devices namespace, e.g. "groundfloor". Absent
+            when the namespace declares none — never derived from the room id's
+            "<floor>.<slug>" shape, since the floorplan owns that fact.
         covers:
           type: string
           description: >
@@ -802,8 +808,28 @@ components:
           description: Sampling resolution label (e.g. "high", "standard").
         display_name:
           type: string
+        room:
+          type: string
+          description: >
+            Floorplan room id this device sits in, e.g. "groundfloor.kitchen". Same
+            value and same meaning as DeviceResponse.room.
+        floor:
+          type: string
+          description: >
+            Floor id as DECLARED by the devices namespace, e.g. "groundfloor". Absent
+            when the namespace declares none — never derived from the room id's
+            "<floor>.<slug>" shape, since the floorplan owns that fact.
+        covers:
+          type: string
+          description: >
+            What this device's readings describe when that is not its own room:
+            "house", or another room id. Absent means it covers the room it is in.
         location:
           type: string
+          deprecated: true
+          description: >
+            DEPRECATED alias for room, carrying the same value. Removed once the
+            devices namespace is published and consumers have migrated.
         thresholds:
           $ref: "#/components/schemas/ThresholdsResponse"
 

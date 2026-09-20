@@ -119,3 +119,119 @@ func TestLegacyHouseLocationIsReportedAsCoverageNotARoom(t *testing.T) {
 		t.Errorf("covers = %v, want house", got["covers"])
 	}
 }
+
+// The devices namespace declares `floor` alongside `room` for every device, and
+// countinghouse and greenhouse both relay it. statehouse dropped it at the config
+// boundary, so /state could not answer which storey a device was on.
+func TestDeviceResponseCarriesFloor(t *testing.T) {
+	d := model.Device{
+		ID: "basement-dishwasher", Class: "cycle_power_device",
+		Room: "basement.kitchen", Floor: "basement",
+	}
+
+	b, _ := json.Marshal(buildDeviceResponse(d, time.Time{}, nil, false))
+	var got map[string]any
+	_ = json.Unmarshal(b, &got)
+
+	if got["floor"] != "basement" {
+		t.Errorf("floor = %v, want basement", got["floor"])
+	}
+}
+
+// An undeclared floor is UNKNOWN, not a value derived from the room id's
+// "<floor>.<slug>" shape. Splitting the id here would be a second implementation of
+// the floorplan's taxonomy, disagreeing the moment a room id is spelled unexpectedly.
+func TestFloorIsNeverDerivedFromTheRoomID(t *testing.T) {
+	d := model.Device{ID: "bigfridge", Class: "continuous_power_device",
+		Room: "groundfloor.kitchen"}
+
+	b, _ := json.Marshal(buildDeviceResponse(d, time.Time{}, nil, false))
+	var got map[string]any
+	_ = json.Unmarshal(b, &got)
+
+	if v, ok := got["floor"]; ok {
+		t.Errorf("floor = %v, want absent: the namespace declared none", v)
+	}
+}
+
+// /config/devices served `location` as its only place field while /state served
+// room+covers, so one service answered two vocabularies about the same device. The
+// profile endpoint now says everything /state does.
+func TestDeviceProfileResponseCarriesRoomCoversAndFloor(t *testing.T) {
+	b, err := json.Marshal(buildDeviceProfileResponse(device.Profile{
+		Class:    "energy_meter",
+		Room:     "basement.hallway",
+		Covers:   "house",
+		Floor:    "basement",
+		Strategy: energy.StrategyCounter,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+
+	for k, want := range map[string]string{
+		"room":   "basement.hallway",
+		"covers": "house",
+		"floor":  "basement",
+		// Unchanged: the alias keeps carrying the room id for one more release,
+		// exactly as DeviceResponse does. This change is purely additive.
+		"location": "basement.hallway",
+	} {
+		if got[k] != want {
+			t.Errorf("%s = %v, want %v", k, got[k], want)
+		}
+	}
+}
+
+// Dropping `covers` from the profile endpoint was the one gap that could produce wrong
+// numbers rather than a missing label: the whole-house meter looked like an ordinary
+// device sitting in basement.hallway, so a consumer grouping off /config/devices would
+// attribute the entire property's consumption to that room.
+func TestDeviceProfileResponseOmitsCoversWhenDeviceCoversItsOwnRoom(t *testing.T) {
+	b, _ := json.Marshal(buildDeviceProfileResponse(device.Profile{
+		Class:    "cycle_power_device",
+		Room:     "basement.kitchen",
+		Floor:    "basement",
+		Strategy: energy.StrategyCounter,
+	}))
+	var got map[string]any
+	_ = json.Unmarshal(b, &got)
+
+	if v, ok := got["covers"]; ok {
+		t.Errorf("covers = %v, want absent: the device covers the room it sits in", v)
+	}
+}
+
+// The profile endpoint must resolve the legacy `location: house` exactly as /state
+// does: `house` was always a coverage scope rather than a place, so it names no room
+// and must not be published as one — it is a reserved series key that the floorplan
+// taxonomy forbids as a room id.
+//
+// /state has had this guarantee since the sentinel was fixed; the profile DTO went
+// without it only because it had no room field to get wrong.
+func TestDeviceProfileResponseReportsLegacyHouseAsCoverageNotARoom(t *testing.T) {
+	b, _ := json.Marshal(buildDeviceProfileResponse(device.Profile{
+		Class: "energy_meter",
+		// Covers arrives already resolved by config.DeviceConfig.Coverage(); the
+		// legacy Location is still carried so the deprecated alias is exercised.
+		Location: "house",
+		Covers:   "house",
+		Strategy: energy.StrategyCounter,
+	}))
+	var got map[string]any
+	_ = json.Unmarshal(b, &got)
+
+	if v, ok := got["room"]; ok {
+		t.Errorf("room = %v, want absent: `house` names no room", v)
+	}
+	if v, ok := got["location"]; ok {
+		t.Errorf("location = %v, want absent for the same reason", v)
+	}
+	if got["covers"] != "house" {
+		t.Errorf("covers = %v, want house", got["covers"])
+	}
+}

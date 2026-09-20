@@ -88,3 +88,77 @@ func keysOf(m map[string]NamespaceStatus) []string {
 	}
 	return out
 }
+
+// Every record in the live devices namespace declares `floor` alongside `room`, and the
+// document carries keys statehouse has no use for (`coordinate`, `environment_fields`,
+// `note`). The fetch is a plain json.Unmarshal, so an unmapped field is dropped in
+// silence — which is exactly how `floor` went missing from every statehouse response
+// while countinghouse and greenhouse both relayed it.
+func TestDevicesNamespaceCarriesFloor(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/config/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path[len("/api/v1/config/"):] != "devices_home" {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		// Shaped like the real document, unused keys included.
+		_, _ = w.Write([]byte(`{
+			"basement-dishwasher": {
+				"class": "cycle_power_device",
+				"display_name": "Dishwasher (Basement)",
+				"room": "basement.kitchen",
+				"floor": "basement",
+				"coordinate": [8.241, 3.211],
+				"ieee_address": "0x20a716fffed182ed"
+			},
+			"electricity_meter": {
+				"class": "energy_meter",
+				"room": "basement.hallway",
+				"floor": "basement",
+				"covers": "house",
+				"scheme": "meter",
+				"primary": "7C9EBDF6E56C"
+			}
+		}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	f := &Fetcher{BaseURL: srv.URL, Tokens: &staticTokenSource{token: "t"}, HTTPClient: srv.Client()}
+	cfg := Default()
+	cfg.Site = SiteConfig{ID: "home", DevicesNamespace: "devices_home"}
+	f.ApplyRemote(context.Background(), &cfg)
+
+	if got := cfg.Devices["basement-dishwasher"].Floor; got != "basement" {
+		t.Errorf("dishwasher floor = %q, want basement", got)
+	}
+	if got := cfg.Devices["electricity_meter"].Floor; got != "basement" {
+		t.Errorf("meter floor = %q, want basement", got)
+	}
+}
+
+// A device the namespace gives no `floor` has an UNKNOWN floor. Deriving one by
+// splitting the room id on its first dot would be a second implementation of the
+// floorplan's taxonomy, living here and disagreeing the moment a room id is spelled
+// unexpectedly. Both sibling services refuse the same derivation for the same reason.
+func TestUndeclaredFloorStaysEmptyRatherThanBeingDerivedFromTheRoom(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/config/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path[len("/api/v1/config/"):] == "devices_home" {
+			_, _ = w.Write([]byte(`{"bigfridge":{"class":"continuous_power_device","room":"groundfloor.kitchen"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	f := &Fetcher{BaseURL: srv.URL, Tokens: &staticTokenSource{token: "t"}, HTTPClient: srv.Client()}
+	cfg := Default()
+	cfg.Site = SiteConfig{ID: "home", DevicesNamespace: "devices_home"}
+	f.ApplyRemote(context.Background(), &cfg)
+
+	if got := cfg.Devices["bigfridge"].Floor; got != "" {
+		t.Errorf("floor = %q, want empty: the namespace declared none", got)
+	}
+}
