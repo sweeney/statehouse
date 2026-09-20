@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 	"github.com/sweeney/statehouse/internal/influx"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/mqtt"
+	"github.com/sweeney/statehouse/internal/origin"
 	"github.com/sweeney/statehouse/internal/state"
 )
 
@@ -39,6 +41,20 @@ type Server struct {
 	// When set, all routes except /healthz require a valid Bearer JWT.
 	// When empty, auth is disabled (useful for local development and tests).
 	IdentityURL string
+
+	// AllowedOrigins lists the browser origins permitted to read this API
+	// cross-origin. Empty means no origin is — which is how the service behaved
+	// before CORS existed, so an unedited config is unchanged by this field.
+	//
+	// Entries are exact origins ("https://app.swee.net"), subdomain wildcards
+	// ("https://*.swee.net", which does not admit the apex), port wildcards
+	// ("http://localhost:*") or the flat "*". See internal/origin.
+	//
+	// This is not access control. A CORS allowlist tells a browser which pages
+	// may read a response with JavaScript; the Bearer token is what protects
+	// the API, and anything that is not a browser ignores this entirely.
+	// Set by main.go from config; tests may leave it nil.
+	AllowedOrigins []string
 
 	// PublicURL is the externally-reachable base URL of this server
 	// (e.g. "https://statehouse.swee.net"). When set it is substituted into
@@ -143,11 +159,30 @@ func (s *Server) authMiddleware() func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler { return requireAuth(verifier, h) }
 }
 
+// handler builds the full handler chain: the CORS wrapper above the mux, which
+// is above auth. Tests go through this rather than newMux so that they exercise
+// the ordering the running server uses.
+//
+// A malformed allowlist is an error here rather than a silently skipped entry.
+// Config.Validate rejects the same thing earlier for a YAML-loaded config; this
+// is the gate for a Server whose field was set in code.
+func (s *Server) handler() (http.Handler, error) {
+	policy, err := origin.Compile(s.AllowedOrigins)
+	if err != nil {
+		return nil, fmt.Errorf("http.allowed_origins: %w", err)
+	}
+	return withCORS(policy, newMux(s)), nil
+}
+
 // Start runs the HTTP server until the context is cancelled.
 func (s *Server) Start(ctx context.Context) error {
+	h, err := s.handler()
+	if err != nil {
+		return err
+	}
 	s.srv = &http.Server{
 		Addr:              s.Listen,
-		Handler:           newMux(s),
+		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
