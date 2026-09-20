@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -702,4 +703,108 @@ func TestNew_DefaultsToAcceptingServiceTokens(t *testing.T) {
 		len(srv.ServiceTokens.AllowedClients) != 0 {
 		t.Errorf("default policy should be unrestricted, got %+v", srv.ServiceTokens)
 	}
+}
+
+// ── Disclosure and short-circuiting ───────────────────────────────────────────
+
+// A 401 body is the one response an unauthenticated stranger can always read.
+// Nothing about the token they presented may come back in it — a reflected
+// credential turns any log, proxy cache or error tracker that captures response
+// bodies into a place tokens accumulate.
+func TestChallenge_NeverReflectsTheToken(t *testing.T) {
+	srv, priv, kid := authSetup(t)
+	srv.ServiceTokens.AllowedClients = []string{"greenhouse"}
+
+	marker := "d15c105ab1e-secret-marker"
+	claims := validServiceClaims(srv.IdentityURL)
+	claims["client_id"] = "countinghouse-" + marker
+	claims["jti"] = marker
+
+	for name, token := range map[string]string{
+		"malformed": "Bearer-" + marker,
+		"rejected":  signServiceJWT(t, priv, kid, claims),
+		"wrong issuer": signServiceJWT(t, priv, kid,
+			map[string]any{"iss": "https://evil." + marker, "client_id": "x",
+				"exp": time.Now().Add(time.Minute).Unix()}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := getWith(t, srv, "/state", token)
+			if strings.Contains(w.Body.String(), marker) {
+				t.Errorf("response body reflects the credential: %q", w.Body.String())
+			}
+			for k, vs := range w.Header() {
+				for _, v := range vs {
+					if strings.Contains(v, marker) {
+						t.Errorf("header %s reflects the credential: %q", k, v)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Every rejection must stop at the middleware. A handler that still ran would
+// have already read house state, whatever status code was written after it.
+func TestRejectedRequests_NeverReachTheHandler(t *testing.T) {
+	srv, priv, kid := authSetup(t)
+	srv.ServiceTokens.RequiredScope = "statehouse:read"
+	srv.ServiceTokens.AllowedClients = []string{"countinghouse"}
+
+	expiredUser := validClaims(srv.IdentityURL)
+	expiredUser["exp"] = time.Now().Add(-time.Minute).Unix()
+	inactive := validClaims(srv.IdentityURL)
+	inactive["act"] = false
+	wrongClient := validServiceClaims(srv.IdentityURL)
+	wrongClient["client_id"] = "greenhouse"
+
+	tokens := map[string]string{
+		"no credentials": "",
+		"garbage":        "garbage",
+		"expired user":   signJWT(t, priv, kid, expiredUser),
+		"inactive user":  signJWT(t, priv, kid, inactive),
+		"no scope":       signServiceJWT(t, priv, kid, validServiceClaims(srv.IdentityURL)),
+		"wrong client":   signServiceJWT(t, priv, kid, wrongClient),
+	}
+
+	for name, token := range tokens {
+		t.Run(name, func(t *testing.T) {
+			called := false
+			a := &authenticator{
+				parser:  srv.mustVerifier(t),
+				realm:   srv.IdentityURL,
+				service: srv.ServiceTokens,
+				logger:  slog.New(slog.DiscardHandler),
+				metrics: &authMetrics{},
+			}
+			h := requireAuth(a, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				called = true
+			}))
+			r := httptest.NewRequest(http.MethodGet, "/state", nil)
+			if token != "" {
+				r.Header.Set("Authorization", "Bearer "+token)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+
+			if called {
+				t.Errorf("handler ran for a rejected request (status %d)", w.Code)
+			}
+			if w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
+				t.Errorf("want 401 or 403, got %d", w.Code)
+			}
+		})
+	}
+}
+
+// mustVerifier builds a verifier against the server's fake JWKS endpoint.
+func (s *Server) mustVerifier(t *testing.T) *auth.JWKSVerifier {
+	t.Helper()
+	v, err := auth.NewJWKSVerifier(auth.JWKSVerifierConfig{
+		IssuerURL: s.IdentityURL,
+		Issuer:    s.IdentityURL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }
