@@ -112,6 +112,7 @@ Accepted forms:
 |---|---|
 | `https://app.swee.net` | that origin exactly |
 | `https://*.swee.net` | any subdomain of `swee.net`, at any depth — **not** `swee.net` itself |
+| `http://[::1]:3000` | an IP literal, matched by address rather than spelling |
 | `http://localhost:*` | any port on that host, including none |
 | `https://*.swee.net:*` | the two wildcards combine |
 | `*` | every origin, as a flat wildcard |
@@ -125,6 +126,22 @@ The apex is not implied by its wildcard. `https://*.swee.net` admits `app.swee.n
 and not `swee.net`; listing the apex is one more line. It also does not admit
 `evil-swee.net`, which is the suffix-matching bug that a bare "ends with swee.net"
 check would have — worth stating because it is the failure that looks like it works.
+
+A wildcard needs a parent of **at least two labels**, which rules out `https://*.net`
+and `http://*.localhost`. That is a guard against the obvious footgun, **not** a
+registrable-domain check: a two-label parent can still be a public suffix, so
+`https://*.co.uk` and `https://*.github.io` compile and mean exactly what they say.
+Checking properly would mean depending on `golang.org/x/net/publicsuffix`; for a
+hand-edited allowlist, the operator reading the entry is the check.
+
+IP literals are matched by address, not by spelling: `http://[0:0:0:0:0:0:0:1]:3000`
+and `http://[::1]:3000` are the same entry. A browser only ever sends the compressed
+form, so without that an expanded literal would compile, validate, start the service
+and never match anything. An IPv4 address is written unbracketed.
+
+Surrounding whitespace on an entry is trimmed — a stray space from a YAML copy-paste
+is the likeliest mistake here and it lands on an error path that refuses the start.
+Whitespace *inside* an entry is still an error.
 
 ### What it does and does not protect
 
@@ -170,6 +187,11 @@ the request origin — including the ones where no origin matched, since the res
 *would* have differed for another. Cloudflare sits in front of this service, so that
 one is load-bearing.
 
+It is **not** sent where the answer provably cannot vary: on a deployment with no
+allowlist, and on the public routes, where every origin gets the same `*`. Sending it
+anyway would fragment the edge cache key on a header that is unbounded and
+attacker-controllable on any non-browser client, for no benefit.
+
 `Timing-Allow-Origin` tracks `Access-Control-Allow-Origin` exactly. It is a separate
 opt-in that CORS does not imply: without it a cross-origin consumer's
 `PerformanceResourceTiming` entry has every phase (DNS, TCP, TLS, TTFB) and both
@@ -187,19 +209,22 @@ already send. Browsers cap it well below that, so agreeing costs nothing.
 
 ### Two routes that are not like the others
 
-`GET /openapi.json` always answers `Access-Control-Allow-Origin: *`, whatever the
-allowlist says — this is the header `spec.go` used to set by hand, now expressed as
-route policy so there is one place to reason about it. The route is unauthenticated, so
-the spec is already world-readable by anything that is not a browser; narrowing it to
-the allowlist would protect nothing while breaking Swagger UI, Redoc,
-`editor.swagger.io` and every codegen tool that fetches a spec from an arbitrary origin.
+`GET /openapi.json` and `GET /healthz` always answer `Access-Control-Allow-Origin: *`,
+whatever the allowlist says. For the spec that is the header `spec.go` used to set by
+hand, now expressed as route policy so there is one place to reason about it.
 
-`GET /healthz` is **not** given that treatment, though it is also unauthenticated. The
-spec is a static document describing what the API is; `/healthz` reports live
-operational detail about one deployment — version, uptime, goroutine count, which
-remote namespaces are failing and the error text saying why. A wildcard would let any
-page anyone happens to visit read that. It is a fingerprint of a specific house, so it
-stays on the allowlist.
+Both are unauthenticated, so both are already world-readable by anything that is not a
+browser; CORS restricts browser JS, it is not access control. Narrowing the spec to the
+allowlist would protect nothing while breaking Swagger UI, Redoc, `editor.swagger.io`
+and every codegen tool that fetches a spec from an arbitrary origin. `/healthz` is the
+same argument: a browser liveness check is the same request `curl` already makes, and
+making it the one unauthenticated route a page cannot read would be a difference with
+nothing behind it.
+
+`/healthz` does report operational detail about one deployment — version, uptime,
+goroutine count, which remote namespaces are failing and why — so the two routes are
+not quite alike. What keeps that private is not a CORS entry, though; it is whether the
+route is served unauthenticated at all, which is a separate decision this does not make.
 
 `GET /metrics` stays behind auth and inherits the allowlist like every other route. It
 carries counters and runtime stats, no secrets, and a browser ops dashboard is a
@@ -208,15 +233,20 @@ browser cannot reach.
 
 ### Upgrading
 
-Deploying this version against an unedited config changes nothing: no origins means no
-CORS, and `/openapi.json` keeps the wildcard it already had. Browser access is opt-in
-per deployment via `http.allowed_origins`.
+Deploying this version against an unedited config changes nothing. No origins means no
+allowlist-driven headers, no `Vary`, and `OPTIONS` dispatches to the handler exactly as
+it did before. `/openapi.json` keeps the wildcard it already had, and `/healthz` gains
+one — the only difference on a deployment that never opts in, and one that adds a
+header rather than removing a response.
 
-One behaviour does change for every deployment: `OPTIONS` on any path now returns `204`
-from the CORS layer rather than reaching a route. For an allowlisted origin it carries
-the preflight headers; otherwise it carries none and the browser refuses the real
-request, which is the specified way to say no. Nothing served a useful `OPTIONS` before
-— authenticated routes answered `401` — so no client loses anything.
+Once an allowlist **is** configured, `OPTIONS` on any path is answered by the CORS
+layer with `204` instead of reaching a route. That is a real change and worth knowing:
+no handler here checks `r.Method`, so `ServeMux` previously dispatched an `OPTIONS` to
+the handler and it served the full response — `OPTIONS /healthz` returned a health
+document and `OPTIONS /openapi.json` the whole spec. Nothing is known to rely on that,
+and a read-only API has no other use for the method, but it is a change and not a
+no-op. It is gated on the allowlist precisely so that deployments which never enable
+CORS are not affected by it.
 
 ## Capturing fixtures
 

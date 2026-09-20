@@ -95,7 +95,7 @@ func TestPreflightOnAuthenticatedRouteIsAnsweredWithoutAuth(t *testing.T) {
 		t.Fatalf("status = %d, want 204", w.Code)
 	}
 	assertHeader(t, w, "Access-Control-Allow-Origin", allowlisted)
-	assertHeader(t, w, "Access-Control-Allow-Methods", "GET, OPTIONS")
+	assertHeader(t, w, "Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
 	assertHeader(t, w, "Access-Control-Allow-Headers", "Authorization, Content-Type")
 	assertHeader(t, w, "Access-Control-Max-Age", "86400")
 	assertVaryOrigin(t, w)
@@ -129,7 +129,7 @@ func TestPreflightFromDisallowedOriginCarriesNoCORSHeaders(t *testing.T) {
 func TestPreflightOnEveryRoute(t *testing.T) {
 	h := corsSetupAuthed(t, testOrigins()...)
 	for _, path := range []string{
-		"/healthz", "/state", "/state/house", "/state/devices",
+		"/state", "/state/house", "/state/devices",
 		"/state/devices/0xabc", "/state/activity", "/events/recent",
 		"/metrics", "/config/devices", "/config/devices/0xabc",
 	} {
@@ -139,6 +139,16 @@ func TestPreflightOnEveryRoute(t *testing.T) {
 		}
 		if got := w.Header().Get("Access-Control-Allow-Origin"); got != allowlisted {
 			t.Errorf("OPTIONS %s ACAO = %q, want %q", path, got, allowlisted)
+		}
+	}
+	// The public routes answer a preflight with their wildcard instead.
+	for _, path := range []string{"/healthz", "/openapi.json"} {
+		w := do(h, http.MethodOptions, path, allowlisted)
+		if w.Code != http.StatusNoContent {
+			t.Errorf("OPTIONS %s status = %d, want 204", path, w.Code)
+		}
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != publicACAO {
+			t.Errorf("OPTIONS %s ACAO = %q, want %q", path, got, publicACAO)
 		}
 	}
 }
@@ -207,24 +217,34 @@ func TestHealthzCarriesCORSHeaders(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
-	assertHeader(t, w, "Access-Control-Allow-Origin", allowlisted)
-	assertVaryOrigin(t, w)
+	assertHeader(t, w, "Access-Control-Allow-Origin", publicACAO)
 }
 
-// /healthz is allowlisted, not public. It is unauthenticated, but unlike the
-// spec it reports live operational detail about one house — version, uptime,
-// goroutine count, which remote namespaces are failing and why. Anything that
-// is not a browser can already read it; what a wildcard would add is the
-// ability for any page anyone visits to read it, and that is worth declining
-// for a health block that is a fingerprint of a specific deployment.
-func TestHealthzIsNotPublicallyWildcarded(t *testing.T) {
+// /healthz is a public route, so it answers every origin with the flat
+// wildcard. It is unauthenticated, so anything that is not a browser can
+// already read it; a browser liveness check is the same request, and making it
+// the one unauthenticated route a page cannot read would be a difference with
+// nothing behind it.
+func TestHealthzIsPublicallyWildcarded(t *testing.T) {
 	h := corsSetup(t, testOrigins()...)
-	w := do(h, http.MethodGet, "/healthz", "https://evil.example.com")
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+	for _, o := range []string{"https://evil.example.com", "null", allowlisted, ""} {
+		w := do(h, http.MethodGet, "/healthz", o)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d for origin %q, want 200", w.Code, o)
+		}
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != publicACAO {
+			t.Errorf("ACAO for %q = %q, want %q", o, got, publicACAO)
+		}
 	}
-	assertNoHeader(t, w, "Access-Control-Allow-Origin")
+}
+
+// ...and keeps the wildcard on a deployment that configures no allowlist at
+// all, since it is the route's own policy rather than something the allowlist
+// grants.
+func TestHealthzKeepsWildcardWithNoAllowlist(t *testing.T) {
+	h := corsSetup(t)
+	w := do(h, http.MethodGet, "/healthz", "https://evil.example.com")
+	assertHeader(t, w, "Access-Control-Allow-Origin", publicACAO)
 }
 
 // ── The public route ─────────────────────────────────────────────────────────
@@ -289,7 +309,7 @@ func TestOpenAPIJSONPreflight(t *testing.T) {
 		t.Fatalf("status = %d, want 204", w.Code)
 	}
 	assertHeader(t, w, "Access-Control-Allow-Origin", "*")
-	assertHeader(t, w, "Access-Control-Allow-Methods", "GET, OPTIONS")
+	assertHeader(t, w, "Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
 }
 
 // ── Origin matching through the HTTP layer ───────────────────────────────────
@@ -331,7 +351,7 @@ func TestLocalhostAnyPortIsAllowed(t *testing.T) {
 // CORS on is an explicit act.
 func TestNoAllowedOriginsMeansNoCORSHeaders(t *testing.T) {
 	h := corsSetup(t)
-	for _, path := range []string{"/healthz", "/state", "/metrics"} {
+	for _, path := range []string{"/state", "/metrics", "/state/devices", "/events/recent"} {
 		w := do(h, http.MethodGet, path, allowlisted)
 		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
 			t.Errorf("%s ACAO = %q, want absent", path, got)
@@ -420,4 +440,83 @@ func TestHandlerRejectsABadAllowlist(t *testing.T) {
 	if _, err := srv.handler(); err == nil {
 		t.Fatal("handler() = nil error for a malformed allowlist, want a rejection")
 	}
+}
+
+// ── Deployments that never enable CORS ───────────────────────────────────────
+
+// Vary: Origin is only sent where the response can actually vary by origin.
+// With no allowlist it never can, and adding the header anyway would fragment
+// the edge cache key on an attacker-controllable value for no benefit —
+// Cloudflare sits in front of this service, and Origin is unbounded on any
+// non-browser client.
+func TestNoAllowedOriginsSendsNoVary(t *testing.T) {
+	h := corsSetup(t)
+	for _, path := range []string{"/state", "/metrics", "/no/such/route"} {
+		w := do(h, http.MethodGet, path, allowlisted)
+		if got := w.Header().Values("Vary"); len(got) != 0 {
+			t.Errorf("%s Vary = %v, want the header to be absent with CORS off", path, got)
+		}
+	}
+}
+
+// A public route's answer is the same for every origin, so it does not vary
+// either — and a cache can store it once rather than once per origin that asks.
+func TestPublicRoutesSendNoVary(t *testing.T) {
+	h := corsSetup(t, testOrigins()...)
+	for _, path := range []string{"/openapi.json", "/healthz"} {
+		w := do(h, http.MethodGet, path, allowlisted)
+		if got := w.Header().Values("Vary"); len(got) != 0 {
+			t.Errorf("%s Vary = %v, want the header to be absent on a public route", path, got)
+		}
+	}
+}
+
+// With no allowlist configured, OPTIONS is dispatched to the mux exactly as it
+// was before this change. No handler checks r.Method, so these routes really
+// did serve a full response to an OPTIONS — the CORS layer must not quietly
+// take that away from a deployment that never opted in.
+func TestNoAllowedOriginsLeavesOPTIONSToTheMux(t *testing.T) {
+	h := corsSetup(t)
+	for _, path := range []string{"/healthz", "/openapi.json", "/state"} {
+		w := do(h, http.MethodOptions, path, allowlisted)
+		if w.Code != http.StatusOK {
+			t.Errorf("OPTIONS %s status = %d, want 200 (dispatched to the mux)", path, w.Code)
+		}
+		if w.Body.Len() == 0 {
+			t.Errorf("OPTIONS %s returned an empty body, want the handler's response", path)
+		}
+	}
+}
+
+// Once an allowlist exists, the CORS layer owns OPTIONS for every route.
+func TestOPTIONSIsShortCircuitedOnceCORSIsEnabled(t *testing.T) {
+	h := corsSetup(t, testOrigins()...)
+	for _, path := range []string{"/healthz", "/openapi.json", "/state"} {
+		w := do(h, http.MethodOptions, path, allowlisted)
+		if w.Code != http.StatusNoContent {
+			t.Errorf("OPTIONS %s status = %d, want 204", path, w.Code)
+		}
+		if w.Body.Len() != 0 {
+			t.Errorf("OPTIONS %s returned a body, want none", path)
+		}
+	}
+}
+
+// ── HEAD ─────────────────────────────────────────────────────────────────────
+
+// HEAD is served by the mux today, so it belongs in Access-Control-Allow-
+// Methods: without it HEAD is the one request a browser cannot make that a
+// non-browser client can, and the failure surfaces as a preflight rejection
+// that explains nothing.
+func TestHEADIsAnAllowedMethod(t *testing.T) {
+	h := corsSetup(t, testOrigins()...)
+
+	pre := do(h, http.MethodOptions, "/state", allowlisted)
+	assertHeader(t, pre, "Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+
+	w := do(h, http.MethodHead, "/state", allowlisted)
+	if w.Code != http.StatusOK {
+		t.Fatalf("HEAD /state status = %d, want 200", w.Code)
+	}
+	assertHeader(t, w, "Access-Control-Allow-Origin", allowlisted)
 }

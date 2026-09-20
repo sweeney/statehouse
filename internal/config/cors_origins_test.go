@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/sweeney/statehouse/internal/origin"
 )
 
 // loadWithHTTP loads a config carrying the given http block, plus the site
@@ -75,7 +77,7 @@ func TestValidateRejectsAMalformedOrigin(t *testing.T) {
 		"*.swee.net",            // no scheme, wildcard form
 		"https://app.swee.net/", // a URL, not an origin
 		"https://*",             // allow-everything, ambiguously spelled
-		"https://*.net",         // a public suffix is not an allowlist
+		"https://*.net",         // a wildcard needs a parent of two or more labels
 		"ftp://app.swee.net",    // not a browser origin
 	} {
 		cfg := validConfig()
@@ -117,14 +119,63 @@ func TestValidateAcceptsNoOrigins(t *testing.T) {
 	}
 }
 
-// The shipped example config must offer an allowlist the service will actually
-// start with. It is the only place an operator discovers the option exists, so
-// a typo there is a typo everybody copies.
+// The shipped example config is where an operator discovers the option exists,
+// so a typo there is a typo everybody copies.
 //
-// Parsed with yaml directly rather than through Load: Load also reads the Influx
-// token file the example points at, which does not exist on a test machine, and
-// this test is about the origins.
-func TestExampleConfigOriginsAreValid(t *testing.T) {
+// The entries are commented out deliberately — "http://localhost:*" is
+// meaningful on every deployment and would otherwise be inherited by anyone
+// starting from this file — which means the usual "load it and validate" check
+// would pass vacuously. So both halves are asserted separately: that the file
+// documents the option at all, and that the forms it offers actually compile.
+func TestExampleConfigDocumentsAllowedOrigins(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "config.example.yaml"))
+	if err != nil {
+		t.Fatalf("read example config: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "allowed_origins") {
+		t.Error("the example config never mentions allowed_origins: the option is undiscoverable")
+	}
+
+	// The commented entries are the ones an operator uncomments, so they are
+	// the ones that have to be valid. Pull them out of the commented
+	// allowed_origins block — and only that block — and put them through the
+	// real compiler.
+	var offered []string
+	inBlock := false
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "#") {
+			inBlock = false
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+		if strings.HasPrefix(line, "allowed_origins:") {
+			inBlock = true
+			continue
+		}
+		rest, isEntry := strings.CutPrefix(line, "- ")
+		if !inBlock || !isEntry {
+			continue
+		}
+		// Drop any trailing "# development"-style comment, then the quotes.
+		if i := strings.Index(rest, " #"); i >= 0 {
+			rest = rest[:i]
+		}
+		offered = append(offered, strings.Trim(strings.TrimSpace(rest), `"`))
+	}
+	if len(offered) == 0 {
+		t.Fatal("found no commented allowed_origins entries in the example config")
+	}
+	if _, err := origin.Compile(offered); err != nil {
+		t.Errorf("the example config offers entries that do not compile: %v (entries: %v)",
+			err, offered)
+	}
+}
+
+// And the example must still be a config the service will start with, which
+// with the allowlist commented out means an empty one.
+func TestExampleConfigValidates(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "config.example.yaml"))
 	if err != nil {
 		t.Fatalf("read example config: %v", err)
@@ -133,8 +184,10 @@ func TestExampleConfigOriginsAreValid(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		t.Fatalf("parse example config: %v", err)
 	}
-	if len(cfg.HTTP.AllowedOrigins) == 0 {
-		t.Fatal("the example config sets no allowed_origins: the option is undiscoverable without one")
+	if len(cfg.HTTP.AllowedOrigins) != 0 {
+		t.Errorf("the example config ships a live allowlist (%v): CORS is meant to be opt-in, "+
+			"and http://localhost:* would be inherited by anyone copying the file",
+			cfg.HTTP.AllowedOrigins)
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("the example config does not validate: %v", err)

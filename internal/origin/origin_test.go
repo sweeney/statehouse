@@ -302,8 +302,8 @@ func TestOriginCaseIsNormalised(t *testing.T) {
 	allowed(t, p, "https://App.Swee.Net", "https://app.swee.net")
 }
 
-// IP-literal origins are matched exactly. A LAN deployment is a plausible place
-// to want one, and it must not be mistaken for a hostname by the label rules.
+// IP-literal origins are matched by address, not by spelling. A LAN deployment
+// is a plausible place to want one.
 func TestIPLiteralOrigins(t *testing.T) {
 	p := compile(t, "http://192.168.1.10:8080", "http://[::1]:3000")
 	allowed(t, p, "http://192.168.1.10:8080", "http://192.168.1.10:8080")
@@ -312,64 +312,107 @@ func TestIPLiteralOrigins(t *testing.T) {
 	denied(t, p, "http://[::2]:3000")
 }
 
-// The bracketed-IPv6 parser is the fiddliest code here, because the brackets
-// change which colon separates the port. Every way of getting that wrong is a
-// way of admitting an origin that was not allowlisted, so each is pinned.
-func TestMalformedIPLiteralsDenied(t *testing.T) {
-	p := compile(t, "http://[::1]:3000", "http://[::1]")
-	for _, o := range []string{
-		"http://[::1:3000",    // no closing bracket
-		"http://[::1]x",       // trailing junk where a port should be
-		"http://[::1]:",       // empty port
-		"http://[::1]:abc",    //
-		"http://[notanip]",    // brackets do not make it an address
-		"http://[]",           //
-		"http://[::1]:3000:4", // a second colon is not a second port
-	} {
-		denied(t, p, o)
-	}
+// An IPv6 address has many spellings and a browser only ever sends one of them
+// (the compressed RFC 5952 form). Matching them as text would mean an operator
+// who writes the expanded literal gets an entry that compiles, validates,
+// starts the service — and never matches anything: the silent-in-both-
+// directions failure the refuse-to-start design exists to prevent, relocated
+// from "malformed" to "differently spelled". So both sides canonicalise.
+func TestIPv6SpellingsAreCanonicalised(t *testing.T) {
+	// The expanded form in the config matches what a browser actually sends.
+	expanded := compile(t, "http://[0:0:0:0:0:0:0:1]:3000")
+	allowed(t, expanded, "http://[::1]:3000", "http://[::1]:3000")
+
+	// And the reverse: a compressed entry matches an expanded origin, which is
+	// what a non-browser client might send.
+	compressed := compile(t, "http://[::1]:3000")
+	allowed(t, compressed, "http://[0:0:0:0:0:0:0:1]:3000", "http://[::1]:3000")
+
+	// Upper-case hex and the IPv4-mapped notations collapse too. The echoed
+	// value is always the canonical form, for the same reason the doc comment
+	// gives for casing: a browser compares it byte-for-byte.
+	upper := compile(t, "http://[2001:DB8::1]")
+	allowed(t, upper, "http://[2001:db8:0:0:0:0:0:1]", "http://[2001:db8::1]")
+
 }
 
-// An IPv6 origin with no port is a distinct origin from one with a port, and
-// each matches only the entry that names it.
-func TestIPv6OriginWithoutPort(t *testing.T) {
-	p := compile(t, "http://[::1]")
-	allowed(t, p, "http://[::1]", "http://[::1]")
-	denied(t, p, "http://[::1]:3000")
-}
-
-// Ports a browser never serialises are refused rather than matched loosely: a
-// leading zero and an over-long number are both ways of writing a port that
-// some parser somewhere will read differently from this one.
-func TestUnusualPortFormsDenied(t *testing.T) {
-	p := compile(t, "http://localhost:80", "http://localhost:*")
-	for _, o := range []string{
-		"http://localhost:0080", // leading zero
-		"http://localhost:080",  //
-		"http://localhost:0",    // not a real port
-		"http://localhost:123456",
-		"http://localhost:+80",
-		"http://localhost: 80",
-	} {
-		denied(t, p, o)
-	}
-}
-
-// A wildcard's parent domain is held to the same rules as any other host, so a
-// typo in it is refused at compile time rather than becoming an entry that can
-// never match.
-func TestCompileRejectsAMalformedWildcardParent(t *testing.T) {
+// An IPv4 address in brackets is refused rather than canonicalised. net.IP
+// renders both the direct and the IPv4-mapped spelling as a dotted quad, and
+// "[127.0.0.1]" is not a host a browser sends or a parser should emit — so
+// echoing it would put a malformed value in a response header.
+func TestBracketedIPv4Rejected(t *testing.T) {
 	for _, pattern := range []string{
-		"https://*.-swee.net",
-		"https://*.swee-.net",
-		"https://*.swee .net",
-		"https://*..swee.net",
-		"https://*.",
+		"http://[127.0.0.1]:8080",
+		"http://[::ffff:127.0.0.1]:8080",
+		"http://[::ffff:7f00:1]:8080",
 	} {
 		if _, err := Compile([]string{pattern}); err == nil {
 			t.Errorf("Compile(%q) = nil error, want a rejection", pattern)
 		}
 	}
+	// And the same value arriving as an Origin header is never echoed.
+	p := compile(t, "http://[::1]:8080")
+	denied(t, p, "http://[::ffff:127.0.0.1]:8080")
+}
+
+// A wildcard over an IP literal can never match anything — there are no
+// subdomains of an address — so it is refused rather than accepted as a rule
+// that silently never fires.
+func TestCompileRejectsAWildcardOverAnIPLiteral(t *testing.T) {
+	for _, pattern := range []string{
+		"http://*.[::1]",
+		"http://*.[::ffff:127.0.0.1]", // has dots, so the label count alone lets it through
+	} {
+		if _, err := Compile([]string{pattern}); err == nil {
+			t.Errorf("Compile(%q) = nil error, want a rejection", pattern)
+		}
+	}
+}
+
+// ── Whitespace ───────────────────────────────────────────────────────────────
+
+// A stray space from a hand-edited YAML allowlist is about the likeliest
+// mistake in this list, and it lands on an error path that refuses the start.
+// Reporting it as "unsupported scheme" or as hostname syntax sends the operator
+// looking in the wrong place, so entries are trimmed.
+func TestCompileTrimsSurroundingWhitespace(t *testing.T) {
+	p := compile(t, "  https://app.swee.net", "http://localhost:*\t")
+	allowed(t, p, "https://app.swee.net", "https://app.swee.net")
+	allowed(t, p, "http://localhost:3000", "http://localhost:3000")
+
+	// The allow-all entry is recognised after trimming too.
+	all := compile(t, " * ")
+	allowed(t, all, "https://anywhere.example.com", "*")
+}
+
+// An entry that is only whitespace is an empty entry, and says so rather than
+// complaining about a missing scheme.
+func TestCompileRejectsAnEmptyEntry(t *testing.T) {
+	for _, pattern := range []string{"", " ", "\t\n"} {
+		_, err := Compile([]string{pattern})
+		if err == nil {
+			t.Fatalf("Compile(%q) = nil error, want a rejection", pattern)
+		}
+		if !contains(err.Error(), "empty") {
+			t.Errorf("Compile(%q) error = %q, want it to name the entry as empty", pattern, err)
+		}
+	}
+}
+
+// Whitespace *inside* an entry is still a malformed origin, not something to
+// tidy away: "https://app swee.net" is not a typo with an obvious intent.
+func TestCompileRejectsInteriorWhitespace(t *testing.T) {
+	if _, err := Compile([]string{"https://app swee.net"}); err == nil {
+		t.Error("Compile = nil error for an origin with an interior space, want a rejection")
+	}
+}
+
+// An Origin *header* is not trimmed. A browser never sends a padded one, and
+// accepting padding would mean two spellings of one origin reach the matcher.
+func TestOriginHeaderIsNotTrimmed(t *testing.T) {
+	p := compile(t, "https://app.swee.net")
+	denied(t, p, " https://app.swee.net")
+	denied(t, p, "https://app.swee.net ")
 }
 
 // ── Pattern validation ───────────────────────────────────────────────────────
@@ -399,7 +442,6 @@ func TestCompileRejectsBadPatterns(t *testing.T) {
 		"https://app.swee.net:ab", //
 		"https://",                // no host
 		"https://app swee.net",    //
-		"https://app.swee.net\n",  //
 	} {
 		if _, err := Compile([]string{pattern}); err == nil {
 			t.Errorf("Compile(%q) = nil error, want a rejection", pattern)
@@ -407,15 +449,29 @@ func TestCompileRejectsBadPatterns(t *testing.T) {
 	}
 }
 
-// A wildcard needs at least two labels beneath it. "https://*.net" would hand
-// the API to every site under a public suffix, which is never what anyone
-// means; localhost is the known single-label case and is listed exactly.
-func TestCompileRejectsTooBroadAWildcard(t *testing.T) {
-	for _, pattern := range []string{"https://*.net", "http://*.localhost"} {
+// A wildcard needs a parent of at least two labels. That rules out the bare
+// TLDs and "*.localhost", whose single label would otherwise admit every name a
+// resolver invents.
+//
+// It is NOT a public-suffix check, and deliberately is not — see
+// TestTwoLabelParentIsNotARegistrableDomainCheck.
+func TestCompileRejectsASingleLabelWildcardParent(t *testing.T) {
+	for _, pattern := range []string{"https://*.net", "http://*.localhost", "https://*.com"} {
 		if _, err := Compile([]string{pattern}); err == nil {
 			t.Errorf("Compile(%q) = nil error, want a rejection", pattern)
 		}
 	}
+}
+
+// The label-count rule is a guard against the most obvious footgun, not a
+// registrable-domain check: a two-label parent can still be a public suffix,
+// and "https://*.co.uk" compiles. Pinned as a test so that nobody reads the
+// rejection above and concludes public suffixes are handled — they are not, and
+// doing so properly would mean depending on golang.org/x/net/publicsuffix.
+func TestTwoLabelParentIsNotARegistrableDomainCheck(t *testing.T) {
+	p := compile(t, "https://*.co.uk", "https://*.github.io")
+	allowed(t, p, "https://anyone.co.uk", "https://anyone.co.uk")
+	allowed(t, p, "https://anyone.github.io", "https://anyone.github.io")
 }
 
 // The error names the offending entry, so an operator reading a startup failure

@@ -24,10 +24,13 @@ import (
 // path could never cover it.
 
 const (
-	// allowedMethods is the read-only surface this API actually offers. It is
-	// not derived from the routes because every route is a GET; when that stops
-	// being true this is the line that has to change with it.
-	allowedMethods = "GET, OPTIONS"
+	// allowedMethods is the read-only surface this API actually offers. HEAD is
+	// in the list because ServeMux serves it today: leaving it out made HEAD the
+	// one request a browser could not make that a non-browser client could, and
+	// the failure surfaced as a preflight rejection that explained nothing. It
+	// is not derived from the routes, so when the surface changes this is the
+	// line that has to change with it.
+	allowedMethods = "GET, HEAD, OPTIONS"
 
 	// allowedHeaders is what a preflight may ask for. Authorization is the
 	// Bearer token; Content-Type is here because a client that sets it on a GET
@@ -67,15 +70,17 @@ const (
 // the header spec.go used to set by hand — same bytes on the wire, one place to
 // reason about it.
 //
-// /healthz is deliberately NOT here, though it is also unauthenticated. The
-// spec is a static document that says what the API is; /healthz reports live
-// operational detail about one deployment — version, uptime, goroutine count,
-// which remote namespaces are failing and the error text explaining why. A
-// wildcard would let any page anyone happens to visit read that, which is worth
-// declining for a fingerprint of a specific house even though a non-browser
-// client can already fetch it.
+// /healthz is here for the same reason. It is unauthenticated, so anything that
+// is not a browser can already read it, and a browser liveness check is the
+// same request: making it the one unauthenticated route a page cannot read
+// would be a difference with nothing behind it. It does report operational
+// detail about one deployment — version, uptime, goroutine count, which remote
+// namespaces are failing — so the two routes are not quite alike, but a
+// wildlist entry is not what keeps that private; not serving it unauthenticated
+// would be, and that is a separate decision this change does not make.
 var publicRoutes = map[string]struct{}{
 	"/openapi.json": {},
+	"/healthz":      {},
 }
 
 // corsDecision is what the policy says about one request: the value to echo,
@@ -97,11 +102,17 @@ func decideCORS(policy origin.Policy, r *http.Request) corsDecision {
 		return corsDecision{value: publicACAO, allowed: true}
 	}
 	value, ok := policy.Allow(r.Header.Get("Origin"))
-	// Vary whether or not the origin matched. The response *would* have
-	// differed for a different origin, and that is what a cache needs to know:
+	// Vary whether or not this particular origin matched — the response *would*
+	// have differed for a different one, and that is what a cache needs to know.
 	// Cloudflare sits in front of this service, so a missing Vary here would
 	// mean one origin's headers served to another.
-	return corsDecision{value: value, allowed: ok, varyOrigin: true}
+	//
+	// But only when an allowlist exists at all. With none, the response
+	// provably cannot depend on the origin, and the header would fragment the
+	// edge cache key on a value that is unbounded and attacker-controllable on
+	// any non-browser client — for no benefit, on a deployment that never opted
+	// into CORS.
+	return corsDecision{value: value, allowed: ok, varyOrigin: policy.Enabled()}
 }
 
 // withCORS wraps h with the cross-origin policy described above.
@@ -137,9 +148,17 @@ func withCORS(policy origin.Policy, h http.Handler) http.Handler {
 		// way to refuse: the browser blocks the real request on the strength of
 		// their absence, and the response reveals nothing about whether the
 		// route exists. A non-preflight OPTIONS gets the same 204, which is a
-		// truthful answer for a read-only API that has no other use for the
-		// method.
-		if r.Method == http.MethodOptions {
+		// truthful answer for a read-only API that has no other use for it.
+		//
+		// Gated on the policy, so a deployment with no allowlist keeps the
+		// dispatch it had. No handler here checks r.Method, so ServeMux really
+		// did hand an OPTIONS to the handler and it served the full response —
+		// OPTIONS /healthz returned a health document and OPTIONS /openapi.json
+		// the whole spec. Taking that away from a deployment that never opted
+		// into CORS would be a change nobody asked for, and the gate is the
+		// difference between "unedited config changes nothing" being true and
+		// being true-with-exceptions.
+		if r.Method == http.MethodOptions && policy.Enabled() {
 			if d.allowed {
 				w.Header().Set("Access-Control-Allow-Methods", allowedMethods)
 				w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)

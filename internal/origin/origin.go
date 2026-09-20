@@ -65,6 +65,7 @@ var (
 	errScheme      = errors.New("unsupported scheme: a browser origin is http or https")
 	errNotAnOrigin = errors.New("an origin carries a scheme, a host and an optional port only — " +
 		"no path, query, fragment or credentials")
+	errEmptyEntry  = errors.New("empty entry")
 	errNoHost      = errors.New("no host")
 	errHostTooLong = errors.New("host is longer than DNS permits (253 characters)")
 	errBadLabel    = errors.New("host is not a hostname or IP literal: labels are 1-63 characters " +
@@ -96,11 +97,21 @@ var (
 func Compile(patterns []string) (Policy, error) {
 	var p Policy
 	for _, raw := range patterns {
-		if raw == Wildcard {
+		// Trimmed because a stray space from a hand-edited YAML allowlist is
+		// the likeliest mistake here, and it lands on an error path that
+		// refuses the start — reporting it as a bad scheme or bad hostname
+		// syntax would send the operator looking in the wrong place. Only the
+		// surrounding whitespace goes: "https://app swee.net" is a malformed
+		// origin, not a typo with an obvious intent.
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			return Policy{}, fmt.Errorf("%q is not a usable origin pattern: %w", raw, errEmptyEntry)
+		}
+		if entry == Wildcard {
 			p.allowAll = true
 			continue
 		}
-		r, err := compileRule(raw)
+		r, err := compileRule(entry)
 		if err != nil {
 			return Policy{}, fmt.Errorf("%q is not a usable origin pattern: %w", raw, err)
 		}
@@ -148,15 +159,16 @@ func (p Policy) Allow(o string) (string, bool) {
 	// is the *absence* of a host, so no allowlist entry can name it: a
 	// sandboxed iframe, a file:// page and a cross-site redirect all present
 	// it, and treating it as allowlistable would hand them the API.
-	if validateHost(host) != nil {
+	canonical, err := validateHost(host)
+	if err != nil {
 		return "", false
 	}
 	if port != "" && validatePort(port) != nil {
 		return "", false
 	}
 	for _, r := range p.rules {
-		if r.match(scheme, host, port) {
-			return serialise(scheme, host, port), true
+		if r.match(scheme, canonical, port) {
+			return serialise(scheme, canonical, port), true
 		}
 	}
 	return "", false
@@ -204,29 +216,43 @@ func compileRule(raw string) (rule, error) {
 		if strings.Contains(parent, Wildcard) {
 			return rule{}, errWildcard
 		}
-		if err := validateHost(parent); err != nil {
+		// An address has no subdomains, so a wildcard over one is a rule that
+		// could never fire. Refusing beats accepting a silent no-op.
+		if strings.HasPrefix(parent, "[") {
+			return rule{}, errors.New("a wildcard has no meaning over an IP literal: " +
+				"an address has no subdomains")
+		}
+		canonical, err := validateHost(parent)
+		if err != nil {
 			return rule{}, err
 		}
-		// A wildcard needs a parent of at least two labels. "*.net" would admit
-		// every site under a public suffix, and "*.localhost" every name a
-		// resolver invents — neither is ever what anyone means. The known
-		// single-label case is localhost itself, listed exactly as
-		// "http://localhost:*".
-		if strings.Count(parent, ".") < 1 {
+		// A wildcard needs a parent of at least two labels. That rules out the
+		// bare TLDs and "*.localhost", whose single label would otherwise admit
+		// every name a resolver invents; the known single-label host is named
+		// exactly, as "http://localhost:*".
+		//
+		// This is NOT a public-suffix check and does not pretend to be one: a
+		// two-label parent can still be a public suffix, so "*.co.uk" and
+		// "*.github.io" both compile. Doing that properly would mean depending
+		// on golang.org/x/net/publicsuffix, which is more machinery than a
+		// hand-edited allowlist warrants — the operator reading the entry is
+		// the check.
+		if strings.Count(canonical, ".") < 1 {
 			return rule{}, fmt.Errorf("%q is too broad to allowlist: a wildcard needs a parent "+
 				`domain of at least two labels, and a single-label host is named exactly `+
 				`(e.g. "http://localhost:*")`, host)
 		}
-		r.suffix = "." + parent
+		r.suffix = "." + canonical
 		return r, nil
 	}
 	if strings.Contains(host, Wildcard) {
 		return rule{}, errWildcard
 	}
-	if err := validateHost(host); err != nil {
+	canonical, err := validateHost(host)
+	if err != nil {
 		return rule{}, err
 	}
-	r.host = host
+	r.host = canonical
 	return r, nil
 }
 
@@ -288,37 +314,57 @@ func split(raw string) (scheme, host, port string, err error) {
 }
 
 // validateHost accepts a hostname, an IPv4 address or a bracketed IPv6 literal,
-// and nothing else. It is the gate that keeps control characters, spaces and
-// header-splitting shapes out of a value destined for a response header.
-func validateHost(h string) error {
+// and nothing else, returning the host in canonical form. It is the gate that
+// keeps control characters, spaces and header-splitting shapes out of a value
+// destined for a response header.
+//
+// Canonicalising matters for IPv6 in the same way lower-casing matters for a
+// hostname. One address has many spellings and a browser only ever sends the
+// compressed RFC 5952 form, so matching them as text would mean an operator who
+// writes "[0:0:0:0:0:0:0:1]" gets an entry that compiles, validates, starts the
+// service and never matches anything. Both sides go through here, so the
+// spelling cannot matter on either.
+func validateHost(h string) (string, error) {
 	if h == "" {
-		return errNoHost
+		return "", errNoHost
 	}
 	if strings.HasPrefix(h, "[") {
 		inner, ok := strings.CutSuffix(strings.TrimPrefix(h, "["), "]")
-		if !ok || net.ParseIP(inner) == nil {
-			return errBadLabel
+		if !ok {
+			return "", errBadLabel
 		}
-		return nil
+		ip := net.ParseIP(inner)
+		if ip == nil {
+			return "", errBadLabel
+		}
+		// Brackets mean IPv6. An IPv4 address inside them — written directly or
+		// as the IPv4-mapped "::ffff:127.0.0.1" — canonicalises through
+		// net.IP.String() to a dotted quad, and "[127.0.0.1]" is not a host any
+		// browser sends or any parser should emit. Refuse rather than echo it.
+		if ip.To4() != nil {
+			return "", errors.New("an IPv4 address is written without brackets " +
+				`(e.g. "http://127.0.0.1:3000"); brackets are for IPv6`)
+		}
+		return "[" + ip.String() + "]", nil
 	}
 	if len(h) > 253 {
-		return errHostTooLong
+		return "", errHostTooLong
 	}
 	for _, label := range strings.Split(h, ".") {
 		if label == "" || len(label) > 63 {
-			return errBadLabel
+			return "", errBadLabel
 		}
 		if label[0] == '-' || label[len(label)-1] == '-' {
-			return errBadLabel
+			return "", errBadLabel
 		}
 		for i := 0; i < len(label); i++ {
 			c := label[i]
 			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
-				return errBadLabel
+				return "", errBadLabel
 			}
 		}
 	}
-	return nil
+	return h, nil
 }
 
 // validatePort accepts the decimal ports a browser serialises: 1-65535, no
