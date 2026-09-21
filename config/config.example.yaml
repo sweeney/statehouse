@@ -54,6 +54,41 @@ adapters:
 http:
   listen: :8383
 
+  # Browser origins permitted to read this API cross-origin.
+  #
+  # Empty (or absent) means none: no Access-Control-* headers on any
+  # allowlisted route, which is how the service behaved before CORS existed.
+  # Turning it on is an explicit act.
+  #
+  # Forms:
+  #   https://app.swee.net   one origin exactly
+  #   https://*.swee.net     any subdomain of swee.net — but NOT swee.net
+  #                          itself, which is listed separately if wanted
+  #   http://localhost:*     any port on that host, including none
+  #   *                      every origin, as a flat wildcard
+  #
+  # This is not access control. It tells a browser which pages may read a
+  # response with JavaScript; the Bearer token is what protects the API, and
+  # anything that is not a browser ignores it. What the allowlist buys is that
+  # a page on some other origin cannot spend a token the browser already holds.
+  #
+  # A malformed entry is refused at startup rather than skipped, because a
+  # skipped entry fails silently in both directions.
+  #
+  # GET /healthz and GET /openapi.json are exempt and always answer "*": both
+  # are unauthenticated, so they are already world-readable, and a Swagger or
+  # Redoc viewer on an arbitrary origin has to be able to fetch the spec.
+  #
+  # Left commented out on purpose. "http://localhost:*" is meaningful on every
+  # deployment, so shipping it live would grant every locally-served page, on
+  # any port, the ability to read the API with a token the browser already
+  # holds — inherited by anyone who copies this file, without the explicit act
+  # promised three paragraphs up. Uncomment what you actually want.
+  #
+  # allowed_origins:
+  #   - "https://*.swee.net"
+  #   - "http://localhost:*"   # development
+
 recent_log:
   path: /var/lib/statehouse/events.jsonl
   retention_hours: 72

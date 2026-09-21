@@ -173,6 +173,7 @@ func main() {
 	api.RemoteConfig = remoteCfgFetcher
 	api.IdentityURL = cfg.Identity.BaseURL
 	api.PublicURL = cfg.HTTP.PublicURL
+	api.AllowedOrigins = cfg.HTTP.AllowedOrigins
 	engine.AddCanonicalSink(api)
 	engine.AddDerivedSink(api)
 

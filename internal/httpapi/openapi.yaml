@@ -5,6 +5,20 @@ info:
     Read-only HTTP API for the statehouse home automation state engine.
     All endpoints except /healthz and /openapi.json require a Bearer JWT
     issued by the configured identity service.
+
+
+    Browser clients: cross-origin access is governed by the deployment's
+    http.allowed_origins allowlist, and is off until one is configured.
+    Every path answers an OPTIONS preflight with 204 ahead of
+    authentication, since a browser never attaches credentials to one.
+    Responses to an allowlisted origin carry Access-Control-Allow-Origin,
+    Timing-Allow-Origin and Vary: Origin, on error responses as well as
+    successful ones, so a browser client can read a 401 rather than seeing
+    an opaque network failure. GET /openapi.json and GET /healthz are
+    exempt from the allowlist and always answer
+    Access-Control-Allow-Origin: * — both are unauthenticated, so both are
+    already readable by any non-browser client, and a spec viewer on an
+    arbitrary origin has to be able to fetch the spec.
   version: "1"
 servers:
   - url: __PUBLIC_URL__
@@ -26,7 +40,11 @@ paths:
   /healthz:
     get:
       summary: Health check
-      description: Returns server health, MQTT/Influx status, and remote config fetch status. No auth required.
+      description: >
+        Returns server health, MQTT/Influx status, and remote config fetch
+        status. No auth required, and always served with
+        Access-Control-Allow-Origin "*" regardless of the deployment's
+        allowlist, so a browser on any origin can check liveness.
       operationId: getHealth
       security: []
       tags: [system]
@@ -41,7 +59,10 @@ paths:
   /openapi.json:
     get:
       summary: OpenAPI spec
-      description: This spec document, as JSON. No auth required.
+      description: >
+        This spec document, as JSON. No auth required, and always served
+        with Access-Control-Allow-Origin "*" regardless of the deployment's
+        allowlist, so a spec viewer on any origin can fetch it.
       operationId: getOpenAPISpec
       security: []
       tags: [system]
