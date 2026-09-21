@@ -27,9 +27,11 @@ service.
 The visible cost was duplication. Countinghouse and greenhouse could not call
 statehouse, so they read the `devices_home` config namespace directly, and three
 services each grew their own copy of `DeviceConfig` — free to drift, with
-nothing to catch it. [#67](https://github.com/sweeney/statehouse/pull/67), in review, adds
-`room`, `floor` and `covers` to `/config/devices` precisely so a consumer can
-resolve a device to a place — and the consumers that want that are services.
+nothing to catch it. [#67](https://github.com/sweeney/statehouse/pull/67) added
+`room`, `floor` and `covers` to `/config/devices` precisely so a consumer could
+resolve a device to a place, and the consumers that want that are services —
+which is why those fields shipped addressed to callers who could not reach
+them.
 
 ## Calling the API as a service
 
@@ -211,7 +213,7 @@ whitespace before the credential is tolerated. A correct client that sends
 
 **What is behind this door.** Statehouse serves household telemetry: which
 devices are drawing power, whether the house reads as occupied, asleep or empty,
-recent activity, and, once #67 lands, the room and floor each device sits in. On
+recent activity, and — since #67 — the room and floor each device sits in. On
 this property rooms are named after the people who sleep in them. Taken
 together, that is a record of when a specific person is at home and what they
 are doing. It is not device trivia, and the point of an auth change here is to
@@ -307,6 +309,12 @@ disables inbound authentication entirely. Statehouse logs
 ## Related
 
 - `internal/httpapi/auth.go` — the middleware.
+- `internal/httpapi/cors.go` — the CORS wrapper that sits above it. It answers
+  preflights ahead of authentication (a browser never attaches credentials to
+  one) and exposes `WWW-Authenticate`, which is what lets browser JS read the
+  error codes in the table above.
+- `docs/floorplan-vocabulary.md` — what `/config/devices` serves, and what it
+  deliberately does not.
 - `internal/httpapi/service_token_test.go` — the behaviour, as tests.
 - [`identity/common/auth`](https://github.com/sweeney/identity) — `TokenSource`,
   `JWKSVerifier`, `ServiceTokenClaims`.

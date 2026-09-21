@@ -82,6 +82,9 @@ func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 		if d.Room != "" {
 			entry.Device.Room = d.Room
 		}
+		if d.Floor != "" {
+			entry.Device.Floor = d.Floor
+		}
 		if d.Covers != "" {
 			entry.Device.Covers = d.Covers
 		}
@@ -249,19 +252,49 @@ func (s *Store) RecentActivity(limit int) []model.ActivityRecord {
 	return s.actLog.Recent(limit)
 }
 
-// Profiles returns the resolved Profile for every known device that has an
-// initialised runtime. Devices without a runtime (should not occur in normal
-// operation) are omitted.
-func (s *Store) Profiles() map[string]device.Profile {
+// ProfiledDevice pairs a device's resolved runtime profile with its stored device
+// record.
+//
+// The two carry placement (room, floor, covers) under opposite update rules, and the
+// pairing exists so a caller cannot pick the wrong one by accident. Device is
+// AUTHORITATIVE for placement: it is merged so an absent field does not overwrite,
+// while Runtime.Profile is replaced wholesale on every EnsureDiscovered — including
+// the one ReloadConfig runs for every known device on SIGHUP. A republished namespace
+// record that drops a placement key therefore clears it from the profile but not from
+// the device, and anything serving placement out of the profile would answer
+// differently from /state one SIGHUP later.
+//
+// Profile remains authoritative for what it alone knows: class, energy strategy,
+// thresholds and how the device was resolved.
+type ProfiledDevice struct {
+	Profile device.Profile
+	Device  model.Device
+}
+
+// ProfiledDevices returns both records for every device that has a runtime, taken
+// under a single read lock so a concurrent reload cannot tear a pair apart.
+func (s *Store) ProfiledDevices() map[string]ProfiledDevice {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make(map[string]device.Profile, len(s.dev))
+	out := make(map[string]ProfiledDevice, len(s.dev))
 	for id, e := range s.dev {
 		if e.Runtime != nil {
-			out[id] = e.Runtime.Profile
+			out[id] = ProfiledDevice{Profile: e.Runtime.Profile, Device: e.Device}
 		}
 	}
 	return out
+}
+
+// GetProfiled returns both records for one device. Reports false when the device is
+// unknown or has no runtime yet, matching ProfiledDevices' membership exactly.
+func (s *Store) GetProfiled(id string) (ProfiledDevice, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	e, ok := s.dev[id]
+	if !ok || e.Runtime == nil {
+		return ProfiledDevice{}, false
+	}
+	return ProfiledDevice{Profile: e.Runtime.Profile, Device: e.Device}, true
 }
 
 // withEntry is a helper that runs fn while holding the write lock.

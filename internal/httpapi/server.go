@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 	"github.com/sweeney/statehouse/internal/influx"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/mqtt"
+	"github.com/sweeney/statehouse/internal/origin"
 	"github.com/sweeney/statehouse/internal/state"
 )
 
@@ -43,6 +45,20 @@ type Server struct {
 	// ServiceTokens decides what a client_credentials service token may do.
 	// New() sets DefaultServiceTokenPolicy(); main.go overrides it from config.
 	ServiceTokens ServiceTokenPolicy
+
+	// AllowedOrigins lists the browser origins permitted to read this API
+	// cross-origin. Empty means no origin is — which is how the service behaved
+	// before CORS existed, so an unedited config is unchanged by this field.
+	//
+	// Entries are exact origins ("https://app.swee.net"), subdomain wildcards
+	// ("https://*.swee.net", which does not admit the apex), port wildcards
+	// ("http://localhost:*") or the flat "*". See internal/origin.
+	//
+	// This is not access control. A CORS allowlist tells a browser which pages
+	// may read a response with JavaScript; the Bearer token is what protects
+	// the API, and anything that is not a browser ignores this entirely.
+	// Set by main.go from config; tests may leave it nil.
+	AllowedOrigins []string
 
 	// PublicURL is the externally-reachable base URL of this server
 	// (e.g. "https://statehouse.swee.net"). When set it is substituted into
@@ -160,11 +176,30 @@ func (s *Server) authMiddleware() func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler { return requireAuth(a, h) }
 }
 
+// handler builds the full handler chain: the CORS wrapper above the mux, which
+// is above auth. Tests go through this rather than newMux so that they exercise
+// the ordering the running server uses.
+//
+// A malformed allowlist is an error here rather than a silently skipped entry.
+// Config.Validate rejects the same thing earlier for a YAML-loaded config; this
+// is the gate for a Server whose field was set in code.
+func (s *Server) handler() (http.Handler, error) {
+	policy, err := origin.Compile(s.AllowedOrigins)
+	if err != nil {
+		return nil, fmt.Errorf("http.allowed_origins: %w", err)
+	}
+	return withCORS(policy, newMux(s)), nil
+}
+
 // Start runs the HTTP server until the context is cancelled.
 func (s *Server) Start(ctx context.Context) error {
+	h, err := s.handler()
+	if err != nil {
+		return err
+	}
 	s.srv = &http.Server{
 		Addr:              s.Listen,
-		Handler:           newMux(s),
+		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -359,10 +394,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleConfigDevices(w http.ResponseWriter, _ *http.Request) {
-	profiles := s.Store.Profiles()
-	out := make(map[string]DeviceProfileResponse, len(profiles))
-	for id, p := range profiles {
-		out[id] = buildDeviceProfileResponse(p)
+	profiled := s.Store.ProfiledDevices()
+	out := make(map[string]DeviceProfileResponse, len(profiled))
+	for id, pd := range profiled {
+		out[id] = buildDeviceProfileResponse(pd)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -373,13 +408,12 @@ func (s *Server) handleConfigDevice(w http.ResponseWriter, r *http.Request) {
 		s.handleConfigDevices(w, r)
 		return
 	}
-	profiles := s.Store.Profiles()
-	p, ok := profiles[id]
+	pd, ok := s.Store.GetProfiled(id)
 	if !ok {
 		http.Error(w, "device not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, buildDeviceProfileResponse(p))
+	writeJSON(w, http.StatusOK, buildDeviceProfileResponse(pd))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

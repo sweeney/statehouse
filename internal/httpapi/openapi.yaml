@@ -6,6 +6,20 @@ info:
     All endpoints except /healthz and /openapi.json require a Bearer JWT
     issued by the configured identity service — either a user access token
     or a `client_credentials` service token.
+
+
+    Browser clients: cross-origin access is governed by the deployment's
+    http.allowed_origins allowlist, and is off until one is configured.
+    Every path answers an OPTIONS preflight with 204 ahead of
+    authentication, since a browser never attaches credentials to one.
+    Responses to an allowlisted origin carry Access-Control-Allow-Origin,
+    Timing-Allow-Origin and Vary: Origin, on error responses as well as
+    successful ones, so a browser client can read a 401 rather than seeing
+    an opaque network failure. GET /openapi.json and GET /healthz are
+    exempt from the allowlist and always answer
+    Access-Control-Allow-Origin: * — both are unauthenticated, so both are
+    already readable by any non-browser client, and a spec viewer on an
+    arbitrary origin has to be able to fetch the spec.
   version: "1"
 servers:
   - url: __PUBLIC_URL__
@@ -27,7 +41,11 @@ paths:
   /healthz:
     get:
       summary: Health check
-      description: Returns server health, MQTT/Influx status, and remote config fetch status. No auth required.
+      description: >
+        Returns server health, MQTT/Influx status, and remote config fetch
+        status. No auth required, and always served with
+        Access-Control-Allow-Origin "*" regardless of the deployment's
+        allowlist, so a browser on any origin can check liveness.
       operationId: getHealth
       security: []
       tags: [system]
@@ -42,7 +60,10 @@ paths:
   /openapi.json:
     get:
       summary: OpenAPI spec
-      description: This spec document, as JSON. No auth required.
+      description: >
+        This spec document, as JSON. No auth required, and always served
+        with Access-Control-Allow-Origin "*" regardless of the deployment's
+        allowlist, so a spec viewer on any origin can fetch it.
       operationId: getOpenAPISpec
       security: []
       tags: [system]
@@ -645,6 +666,12 @@ components:
           type: string
           description: >
             Floorplan room id this device sits in, e.g. "groundfloor.kitchen".
+        floor:
+          type: string
+          description: >
+            Floor id as DECLARED by the devices namespace, e.g. "groundfloor". Absent
+            when the namespace declares none — never derived from the room id's
+            "<floor>.<slug>" shape, since the floorplan owns that fact.
         covers:
           type: string
           description: >
@@ -847,8 +874,28 @@ components:
           description: Sampling resolution label (e.g. "high", "standard").
         display_name:
           type: string
+        room:
+          type: string
+          description: >
+            Floorplan room id this device sits in, e.g. "groundfloor.kitchen". Same
+            value and same meaning as DeviceResponse.room.
+        floor:
+          type: string
+          description: >
+            Floor id as DECLARED by the devices namespace, e.g. "groundfloor". Absent
+            when the namespace declares none — never derived from the room id's
+            "<floor>.<slug>" shape, since the floorplan owns that fact.
+        covers:
+          type: string
+          description: >
+            What this device's readings describe when that is not its own room:
+            "house", or another room id. Absent means it covers the room it is in.
         location:
           type: string
+          deprecated: true
+          description: >
+            DEPRECATED alias for room, carrying the same value. Removed once the
+            devices namespace is published and consumers have migrated.
         thresholds:
           $ref: "#/components/schemas/ThresholdsResponse"
 

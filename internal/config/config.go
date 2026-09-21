@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/sweeney/statehouse/internal/origin"
 )
 
 // Config is the top-level service configuration loaded from YAML.
@@ -265,6 +267,25 @@ func (i IntercomConfig) IsEnabled() bool {
 type HTTPConfig struct {
 	Listen    string `yaml:"listen"`
 	PublicURL string `yaml:"public_url"`
+
+	// AllowedOrigins lists the browser origins permitted to read this API
+	// cross-origin. Empty means none, which is how the service behaved before
+	// CORS existed — so deploying that change against an unedited config alters
+	// nothing, and turning CORS on is an explicit act.
+	//
+	//	allowed_origins:
+	//	  - "https://*.swee.net"   # any subdomain, but not the apex
+	//	  - "http://localhost:*"   # any port, for development
+	//
+	// See internal/origin for the accepted forms. A malformed entry is refused
+	// by Validate rather than skipped.
+	//
+	// Deliberately local-only: this is the one setting that says which pages
+	// may spend a token the browser already holds, and putting it in a remote
+	// namespace would place it on the far side of a network call that fails
+	// open. A remote widening would be an unreviewed grant, and a remote
+	// tightening would be silently dropped whenever the fetch failed.
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 type RecentLogConfig struct {
@@ -371,6 +392,16 @@ type DeviceConfig struct {
 
 	// Room is the floorplan room id this device sits in.
 	Room string `yaml:"room" json:"room,omitempty"`
+	// Floor is the floor this device sits on, e.g. "basement". The devices namespace
+	// declares it as a first-class property alongside Room, so it is read rather than
+	// derived from the room id's "<floor>.<slug>" shape: the floorplan owns that fact,
+	// and splitting the id here would be a second implementation of someone else's
+	// taxonomy that silently disagrees the moment a room id is spelled unexpectedly.
+	// Countinghouse and greenhouse both relay it on the same argument, so all three
+	// services say the same thing about the same device.
+	//
+	// Empty means the namespace declared none, which is UNKNOWN rather than a guess.
+	Floor string `yaml:"floor" json:"floor,omitempty"`
 	// Covers is what its readings describe when that is not its own room: "house",
 	// or another room id. Absent means it covers the room it sits in.
 	Covers string `yaml:"covers" json:"covers,omitempty"`
@@ -509,6 +540,12 @@ func trimTrailingNewline(b []byte) []byte {
 // fails open onto an empty snapshot, /healthz still reports "ok", and every endpoint
 // honestly serves zero devices. A service that looks healthy and serves nothing is
 // worse than one that refuses to start.
+//
+// A malformed browser origin is the same shape of failure a third time. Skipping the
+// entry would leave an origin unallowlisted that the operator believes is allowlisted,
+// or leave one admitted that the entry meant to replace — and nothing on the server
+// side shows either, because a CORS decision is only ever visible in the browser that
+// made the request.
 func (c Config) Validate() error {
 	if c.Site.ID == "" {
 		return fmt.Errorf("site is not set: add a site block naming the property this " +
@@ -523,6 +560,15 @@ func (c Config) Validate() error {
 			"this used to fall back to has been deleted, and a failed devices fetch is "+
 			"silent — the service would start, report healthy and serve no devices at all",
 			c.Site.ID, c.Site.ID)
+	}
+	if _, err := origin.Compile(c.HTTP.AllowedOrigins); err != nil {
+		return fmt.Errorf("http.allowed_origins: %w\n\nAn entry is an origin — a scheme, a "+
+			"host and an optional port, with no trailing slash or path. Accepted forms are an "+
+			"exact origin (https://app.swee.net), a subdomain wildcard (https://*.swee.net, "+
+			"which does not admit the apex), a port wildcard (http://localhost:*) or \"*\" for "+
+			"every origin. A bad entry is refused rather than skipped because a skipped one "+
+			"fails silently in both directions: an origin the operator believes is allowlisted "+
+			"is not, or one they believe is excluded was never parsed", err)
 	}
 	return c.Auth.ServiceTokens.validate()
 }

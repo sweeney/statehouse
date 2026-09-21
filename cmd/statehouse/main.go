@@ -189,6 +189,7 @@ func main() {
 			"allowed_clients", st.AllowedClients)
 	}
 	api.PublicURL = cfg.HTTP.PublicURL
+	api.AllowedOrigins = cfg.HTTP.AllowedOrigins
 	engine.AddCanonicalSink(api)
 	engine.AddDerivedSink(api)
 
