@@ -70,14 +70,19 @@ const (
 // the header spec.go used to set by hand — same bytes on the wire, one place to
 // reason about it.
 //
-// /healthz is here for the same reason. It is unauthenticated, so anything that
-// is not a browser can already read it, and a browser liveness check is the
-// same request: making it the one unauthenticated route a page cannot read
-// would be a difference with nothing behind it. It does report operational
-// detail about one deployment — version, uptime, goroutine count, which remote
-// namespaces are failing — so the two routes are not quite alike, but a
-// wildlist entry is not what keeps that private; not serving it unauthenticated
-// would be, and that is a separate decision this change does not make.
+// /healthz is here by decision rather than by the same argument. It is
+// unauthenticated, so a browser liveness check needs no allowlist entry — but
+// unlike the spec, which is byte-identical on every statehouse in the world,
+// /healthz describes one deployment: build commit, uptime, MQTT/Influx
+// reachability, goroutine count, per-namespace failure text. The wildcard is
+// what lets a page on any origin read that from a statehouse the viewer's
+// browser can reach, which on a home network is a reach curl does not have.
+//
+// That trade was made deliberately and is not this layer's to re-litigate. If
+// it ever becomes unwelcome, the lever is the payload rather than this entry:
+// trim what /healthz returns to unauthenticated callers, or split a bare
+// {"status":"ok"} liveness route from the diagnostic one. Removing the entry
+// would only take the liveness check away from browsers.
 var publicRoutes = map[string]struct{}{
 	"/openapi.json": {},
 	"/healthz":      {},

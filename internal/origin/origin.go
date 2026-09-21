@@ -218,7 +218,12 @@ func compileRule(raw string) (rule, error) {
 		}
 		// An address has no subdomains, so a wildcard over one is a rule that
 		// could never fire. Refusing beats accepting a silent no-op.
-		if strings.HasPrefix(parent, "[") {
+		//
+		// The ParseIP arm catches the likelier spelling: digits and dots are
+		// valid label characters, so "*.192.168.1.1" would otherwise pass as a
+		// hostname with two labels and match only "a.192.168.1.1" — never the
+		// address someone allowlisting a LAN host meant.
+		if strings.HasPrefix(parent, "[") || net.ParseIP(parent) != nil {
 			return rule{}, errors.New("a wildcard has no meaning over an IP literal: " +
 				"an address has no subdomains")
 		}
@@ -281,6 +286,17 @@ func split(raw string) (scheme, host, port string, err error) {
 		return "", "", "", errNotAnOrigin
 	}
 
+	// Lift a leading wildcard label off before anything else, and put it back
+	// on the host at the end. Without this a bracketed literal behind a "*."
+	// never reaches the IPv6 path below — the bracket is no longer the first
+	// character — so "https://*.[::1]" falls through to the port split and the
+	// colons inside the address get read as a port separator, reporting a bad
+	// port for what is really "an address has no subdomains".
+	wild := ""
+	if parent, isWild := strings.CutPrefix(rest, "*."); isWild {
+		wild, rest = "*.", parent
+	}
+
 	if strings.HasPrefix(rest, "[") {
 		// IPv6 literal: the brackets are part of the host, and the only colon
 		// that separates a port is the one after "]".
@@ -299,7 +315,7 @@ func split(raw string) (scheme, host, port string, err error) {
 		default:
 			return "", "", "", errBadLabel
 		}
-		return scheme, strings.ToLower(host), port, nil
+		return scheme, wild + strings.ToLower(host), port, nil
 	}
 
 	if c := strings.LastIndex(rest, ":"); c >= 0 {
@@ -310,7 +326,7 @@ func split(raw string) (scheme, host, port string, err error) {
 	} else {
 		host = rest
 	}
-	return scheme, strings.ToLower(host), port, nil
+	return scheme, wild + strings.ToLower(host), port, nil
 }
 
 // validateHost accepts a hostname, an IPv4 address or a bracketed IPv6 literal,

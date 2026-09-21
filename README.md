@@ -221,10 +221,19 @@ same argument: a browser liveness check is the same request `curl` already makes
 making it the one unauthenticated route a page cannot read would be a difference with
 nothing behind it.
 
-`/healthz` does report operational detail about one deployment — version, uptime,
-goroutine count, which remote namespaces are failing and why — so the two routes are
-not quite alike. What keeps that private is not a CORS entry, though; it is whether the
-route is served unauthenticated at all, which is a separate decision this does not make.
+The two are not quite alike, and it is worth being straight about the difference. The
+spec is byte-identical on every statehouse in the world, so reading it tells you nothing
+about *this* host. `/healthz` describes one deployment: build commit, uptime,
+MQTT/Influx reachability, goroutine count, and per-namespace failure text. A page on any
+origin can now read that from a statehouse the viewer's browser can reach — which on a
+home network is a reach `curl` does not have from outside, so this is a real grant and
+not just a header.
+
+It is granted on purpose: a browser liveness check is a thing this service wants to
+support without requiring every operator to configure an allowlist first. If the
+diagnostic detail ever makes that unwelcome, the lever is the payload rather than the
+CORS entry — trim what `/healthz` returns to unauthenticated callers, or split a bare
+`{"status":"ok"}` liveness route from the diagnostic one.
 
 `GET /metrics` stays behind auth and inherits the allowlist like every other route. It
 carries counters and runtime stats, no secrets, and a browser ops dashboard is a

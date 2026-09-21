@@ -355,78 +355,48 @@ func TestBracketedIPv4Rejected(t *testing.T) {
 	denied(t, p, "http://[::ffff:127.0.0.1]:8080")
 }
 
-// A wildcard over an IP literal can never match anything — there are no
+// A wildcard over an IP address can never match anything — there are no
 // subdomains of an address — so it is refused rather than accepted as a rule
-// that silently never fires.
+// that silently never fires. "https://*.192.168.1.1" is the likely spelling:
+// digits and dots are valid label characters, so without this it compiles,
+// validates, starts the service, and matches only nonsense hostnames like
+// "a.192.168.1.1" rather than the address the operator wrote it for.
+//
+// Every spelling reaches the same message, including the bracketed forms with
+// no port — those parse through the port split first, so the check has to sit
+// ahead of it rather than behind.
 func TestCompileRejectsAWildcardOverAnIPLiteral(t *testing.T) {
 	for _, pattern := range []string{
+		"https://*.192.168.1.1",
+		"https://*.192.168.1.1:*",
+		"https://*.192.168.1.1:8080",
+		"http://*.[::1]",
 		"http://*.[::1]:3000",
-		"http://*.[2001:db8::1]:*",
+		"https://*.[2001:db8::1]:*",
 	} {
-		if _, err := Compile([]string{pattern}); err == nil {
+		_, err := Compile([]string{pattern})
+		if err == nil {
 			t.Errorf("Compile(%q) = nil error, want a rejection", pattern)
+			continue
+		}
+		if !contains(err.Error(), "IP literal") {
+			t.Errorf("Compile(%q) error = %q, want it to name the IP literal as the problem",
+				pattern, err)
 		}
 	}
 }
 
-// The bracketed-IPv6 parser is the fiddliest code here, because the brackets
-// change which colon separates the port. Every way of getting that wrong is a
-// way of admitting an origin that was not allowlisted, so each is pinned.
-func TestMalformedIPLiteralsDenied(t *testing.T) {
-	p := compile(t, "http://[::1]:3000", "http://[::1]")
-	for _, o := range []string{
-		"http://[::1:3000",    // no closing bracket
-		"http://[::1]x",       // trailing junk where a port should be
-		"http://[::1]:",       // empty port
-		"http://[::1]:abc",    //
-		"http://[notanip]",    // brackets do not make it an address
-		"http://[]",           //
-		"http://[::1]:3000:4", // a second colon is not a second port
-	} {
-		denied(t, p, o)
-	}
+// A hostname that merely looks numeric is still a hostname.
+func TestWildcardOverANumericHostnameIsStillAllowed(t *testing.T) {
+	p := compile(t, "https://*.1.2.3.4.5")
+	allowed(t, p, "https://a.1.2.3.4.5", "https://a.1.2.3.4.5")
 }
 
-// An IPv6 origin with no port is a distinct origin from one with a port, and
-// each matches only the entry that names it.
-func TestIPv6OriginWithoutPort(t *testing.T) {
-	p := compile(t, "http://[::1]")
-	allowed(t, p, "http://[::1]", "http://[::1]")
-	denied(t, p, "http://[::1]:3000")
-}
-
-// Ports a browser never serialises are refused rather than matched loosely: a
-// leading zero and an over-long number are both ways of writing a port that
-// some parser somewhere will read differently from this one.
-func TestUnusualPortFormsDenied(t *testing.T) {
-	p := compile(t, "http://localhost:80", "http://localhost:*")
-	for _, o := range []string{
-		"http://localhost:0080", // leading zero
-		"http://localhost:080",  //
-		"http://localhost:0",    // not a real port
-		"http://localhost:123456",
-		"http://localhost:+80",
-		"http://localhost: 80",
-	} {
-		denied(t, p, o)
-	}
-}
-
-// A wildcard's parent domain is held to the same rules as any other host, so a
-// typo in it is refused at compile time rather than becoming an entry that can
-// never match.
-func TestCompileRejectsAMalformedWildcardParent(t *testing.T) {
-	for _, pattern := range []string{
-		"https://*.-swee.net",
-		"https://*.swee-.net",
-		"https://*.swee .net",
-		"https://*..swee.net",
-		"https://*.",
-	} {
-		if _, err := Compile([]string{pattern}); err == nil {
-			t.Errorf("Compile(%q) = nil error, want a rejection", pattern)
-		}
-	}
+// An IP address named exactly is unaffected — only the wildcard form is refused.
+func TestExactIPAddressesStillCompile(t *testing.T) {
+	p := compile(t, "https://192.168.1.1:8080", "http://[::1]:3000")
+	allowed(t, p, "https://192.168.1.1:8080", "https://192.168.1.1:8080")
+	allowed(t, p, "http://[::1]:3000", "http://[::1]:3000")
 }
 
 // ── Whitespace ───────────────────────────────────────────────────────────────
@@ -567,4 +537,66 @@ func contains(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+// ── Parser edge cases ────────────────────────────────────────────────────────
+
+// The bracketed-IPv6 parser is the fiddliest code here, because the brackets
+// change which colon separates the port. Every way of getting that wrong is a
+// way of admitting an origin that was not allowlisted, so each is pinned.
+func TestMalformedIPLiteralsDenied(t *testing.T) {
+	p := compile(t, "http://[::1]:3000", "http://[::1]")
+	for _, o := range []string{
+		"http://[::1:3000",    // no closing bracket
+		"http://[::1]x",       // trailing junk where a port should be
+		"http://[::1]:",       // empty port
+		"http://[::1]:abc",    //
+		"http://[notanip]",    // brackets do not make it an address
+		"http://[]",           //
+		"http://[::1]:3000:4", // a second colon is not a second port
+	} {
+		denied(t, p, o)
+	}
+}
+
+// An IPv6 origin with no port is a distinct origin from one with a port, and
+// each matches only the entry that names it.
+func TestIPv6OriginWithoutPort(t *testing.T) {
+	p := compile(t, "http://[::1]")
+	allowed(t, p, "http://[::1]", "http://[::1]")
+	denied(t, p, "http://[::1]:3000")
+}
+
+// Ports a browser never serialises are refused rather than matched loosely: a
+// leading zero and an over-long number are both ways of writing a port that
+// some parser somewhere will read differently from this one.
+func TestUnusualPortFormsDenied(t *testing.T) {
+	p := compile(t, "http://localhost:80", "http://localhost:*")
+	for _, o := range []string{
+		"http://localhost:0080", // leading zero
+		"http://localhost:080",  //
+		"http://localhost:0",    // not a real port
+		"http://localhost:123456",
+		"http://localhost:+80",
+		"http://localhost: 80",
+	} {
+		denied(t, p, o)
+	}
+}
+
+// A wildcard's parent domain is held to the same rules as any other host, so a
+// typo in it is refused at compile time rather than becoming an entry that can
+// never match.
+func TestCompileRejectsAMalformedWildcardParent(t *testing.T) {
+	for _, pattern := range []string{
+		"https://*.-swee.net",
+		"https://*.swee-.net",
+		"https://*.swee .net",
+		"https://*..swee.net",
+		"https://*.",
+	} {
+		if _, err := Compile([]string{pattern}); err == nil {
+			t.Errorf("Compile(%q) = nil error, want a rejection", pattern)
+		}
+	}
 }
