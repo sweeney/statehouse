@@ -172,6 +172,22 @@ func main() {
 	api.Publisher = publisher
 	api.RemoteConfig = remoteCfgFetcher
 	api.IdentityURL = cfg.Identity.BaseURL
+	api.ServiceTokens = httpapi.ServiceTokenPolicyFromConfig(cfg.Auth.ServiceTokens)
+	// State the inbound auth posture at startup. Which principals can read
+	// house state is not something an operator should have to infer from the
+	// absence of a config block.
+	if cfg.Identity.BaseURL == "" {
+		logger.Warn("inbound authentication is DISABLED: identity.base_url is not set, " +
+			"so every endpoint is readable without a token")
+	} else {
+		st := cfg.Auth.ServiceTokens
+		logger.Info("inbound authentication enabled",
+			"issuer", cfg.Identity.BaseURL,
+			"service_tokens", st.IsEnabled(),
+			"required_audience", st.RequiredAudience,
+			"required_scope", st.RequiredScope,
+			"allowed_clients", st.AllowedClients)
+	}
 	api.PublicURL = cfg.HTTP.PublicURL
 	api.AllowedOrigins = cfg.HTTP.AllowedOrigins
 	engine.AddCanonicalSink(api)

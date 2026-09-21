@@ -4,7 +4,8 @@ info:
   description: >
     Read-only HTTP API for the statehouse home automation state engine.
     All endpoints except /healthz and /openapi.json require a Bearer JWT
-    issued by the configured identity service.
+    issued by the configured identity service — either a user access token
+    or a `client_credentials` service token.
 
 
     Browser clients: cross-origin access is governed by the deployment's
@@ -89,6 +90,8 @@ paths:
                 $ref: "#/components/schemas/SnapshotResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /state/house:
     get:
@@ -105,6 +108,8 @@ paths:
                 $ref: "#/components/schemas/HouseResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /state/devices:
     get:
@@ -123,6 +128,8 @@ paths:
                   $ref: "#/components/schemas/DeviceResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /state/devices/{id}:
     get:
@@ -146,6 +153,8 @@ paths:
                 $ref: "#/components/schemas/DeviceResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Device not found
 
@@ -164,6 +173,8 @@ paths:
                 $ref: "#/components/schemas/ActivityStateResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /events/recent:
     get:
@@ -192,6 +203,8 @@ paths:
                   type: object
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /metrics:
     get:
@@ -208,6 +221,8 @@ paths:
                 $ref: "#/components/schemas/MetricsResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /config/devices:
     get:
@@ -226,6 +241,8 @@ paths:
                   $ref: "#/components/schemas/DeviceProfileResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /config/devices/{id}:
     get:
@@ -249,6 +266,8 @@ paths:
                 $ref: "#/components/schemas/DeviceProfileResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Device not found
 
@@ -258,10 +277,36 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: >
+        A Bearer JWT issued by the configured identity service. Two kinds are
+        accepted. A **user access token**, obtained by signing in, must belong
+        to an account that is still active. A **service token**, obtained with
+        the OAuth 2.0 `client_credentials` grant, is accepted for the whole
+        API; a deployment may additionally require a matching `aud`, a
+        particular `scope`, or restrict callers to an allowlist of `client_id`s
+        (see docs/service-tokens.md). Both kinds get the same read-only access
+        — there is no per-endpoint distinction between them.
 
   responses:
     Unauthorized:
-      description: Missing or invalid Bearer JWT
+      description: >
+        Missing or invalid Bearer JWT. The WWW-Authenticate header carries an
+        RFC 6750 `error` and `error_description` saying which — an expired
+        token, an audience that does not include this server, or a service
+        token where the deployment does not accept them. A request with no
+        Authorization header at all gets a bare challenge with no error code.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+    Forbidden:
+      description: >
+        The token is valid but the principal is not permitted: a service token
+        whose `client_id` is not on this deployment's allowlist, or which does
+        not carry the required scope. The WWW-Authenticate header carries
+        `error="insufficient_scope"`, and a `scope` parameter naming what is
+        required when a scope is the reason. Retrying with the same token will
+        not help.
       headers:
         WWW-Authenticate:
           schema:
@@ -931,6 +976,69 @@ components:
         jwks_key_count:
           type: integer
 
+    AuthMetrics:
+      type: object
+      description: >
+        Authentication outcomes since start, counted by reason. Counters only —
+        nothing here identifies a caller, so the block is safe to scrape and
+        graph. Present on /metrics only when authentication is configured;
+        its absence means every endpoint is readable without a token.
+      required:
+        - user_tokens_accepted_total
+        - service_tokens_accepted_total
+        - rejected_missing_credentials_total
+        - rejected_invalid_token_total
+        - rejected_inactive_user_total
+        - rejected_service_tokens_disabled_total
+        - rejected_audience_total
+        - rejected_client_not_allowed_total
+        - rejected_insufficient_scope_total
+      properties:
+        user_tokens_accepted_total:
+          type: integer
+          format: int64
+          description: Requests admitted on a user access token.
+        service_tokens_accepted_total:
+          type: integer
+          format: int64
+          description: Requests admitted on a client_credentials service token.
+        rejected_missing_credentials_total:
+          type: integer
+          format: int64
+          description: No Authorization header, or not a Bearer scheme.
+        rejected_invalid_token_total:
+          type: integer
+          format: int64
+          description: >
+            Malformed, expired, wrongly signed, or from another issuer. Covers
+            both token kinds.
+        rejected_inactive_user_total:
+          type: integer
+          format: int64
+          description: Valid user token whose account is no longer active.
+        rejected_service_tokens_disabled_total:
+          type: integer
+          format: int64
+          description: >
+            Service token presented where auth.service_tokens.enabled is false.
+        rejected_audience_total:
+          type: integer
+          format: int64
+          description: >
+            Service token whose aud does not include this server, where
+            auth.service_tokens.required_audience is set.
+        rejected_client_not_allowed_total:
+          type: integer
+          format: int64
+          description: >
+            Service token whose client_id is not in
+            auth.service_tokens.allowed_clients.
+        rejected_insufficient_scope_total:
+          type: integer
+          format: int64
+          description: >
+            Service token missing auth.service_tokens.required_scope.
+
     MetricsResponse:
       type: object
       required:
@@ -991,4 +1099,8 @@ components:
         jwks:
           allOf:
             - $ref: "#/components/schemas/JwksMetrics"
+          description: Present when auth is configured.
+        auth:
+          allOf:
+            - $ref: "#/components/schemas/AuthMetrics"
           description: Present when auth is configured.

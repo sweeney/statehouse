@@ -42,6 +42,10 @@ type Server struct {
 	// When empty, auth is disabled (useful for local development and tests).
 	IdentityURL string
 
+	// ServiceTokens decides what a client_credentials service token may do.
+	// New() sets DefaultServiceTokenPolicy(); main.go overrides it from config.
+	ServiceTokens ServiceTokenPolicy
+
 	// AllowedOrigins lists the browser origins permitted to read this API
 	// cross-origin. Empty means no origin is — which is how the service behaved
 	// before CORS existed, so an unedited config is unchanged by this field.
@@ -77,6 +81,7 @@ type Server struct {
 	srv           *http.Server
 	verifier      *auth.JWKSVerifier
 	specConverter *spec.Converter
+	authm         authMetrics
 
 	canonicalCount uint64
 	derivedCount   uint64
@@ -94,6 +99,7 @@ func New(listen string, store *state.Store, log *history.Log, mqtt mqtt.Client, 
 		Influx:        infl,
 		Logger:        logger,
 		DeviceClasses: deviceClasses,
+		ServiceTokens: DefaultServiceTokenPolicy(),
 		started:       time.Now().UTC(),
 	}
 }
@@ -156,7 +162,18 @@ func (s *Server) authMiddleware() func(http.Handler) http.Handler {
 		panic(err)
 	}
 	s.verifier = verifier
-	return func(h http.Handler) http.Handler { return requireAuth(verifier, h) }
+	logger := s.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	a := &authenticator{
+		parser:  verifier,
+		realm:   verifier.Issuer(),
+		service: s.ServiceTokens,
+		logger:  logger,
+		metrics: &s.authm,
+	}
+	return func(h http.Handler) http.Handler { return requireAuth(a, h) }
 }
 
 // handler builds the full handler chain: the CORS wrapper above the mux, which
@@ -333,6 +350,17 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		RecentLogEvents  int          `json:"recent_log_events"`
 		RecentLogBytes   int64        `json:"recent_log_size_bytes"`
 		JWKS             *jwksMetrics `json:"jwks,omitempty"`
+		// Auth counts authentication outcomes by reason. Counters only —
+		// nothing here identifies a caller.
+		//
+		// A pointer, omitted when auth is not configured, for the same reason
+		// jwks above is: with no identity service the middleware is a no-op and
+		// no counter is ever touched, so a block of zeros would read as "no
+		// rejections, all healthy" on a server where every endpoint is readable
+		// without a token. Absence has to mean "authentication is off" — the
+		// startup warning says so once, at boot, but a dashboard scraping this
+		// endpoint would otherwise see the reassuring version forever.
+		Auth *authMetricsJSON `json:"auth,omitempty"`
 	}
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
@@ -359,6 +387,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		m.RecentLogEvents, m.RecentLogBytes = s.Log.Stats()
 	}
 	if s.verifier != nil {
+		auth := s.authm.snapshot()
+		m.Auth = &auth
 		vm := s.verifier.Metrics()
 		m.JWKS = &jwksMetrics{
 			Fetches:     vm.Fetches,

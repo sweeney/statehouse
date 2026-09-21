@@ -86,6 +86,62 @@ Endpoints:
 - `GET /config/devices` — resolved profile (class, thresholds, strategy) for every known device.
 - `GET /config/devices/{id}` — resolved profile for one device.
 
+## Authentication
+
+Every endpoint except `/healthz` and `/openapi.json` requires a Bearer JWT from
+the identity service named in `identity.base_url`. Leave that unset — as local
+development does — and authentication is off entirely; statehouse says so at
+startup.
+
+Two kinds of token are accepted:
+
+- a **user access token**, from someone signed in through the UI, which must
+  belong to an account that is still active; and
+- a **service token**, from a sibling service using the `client_credentials`
+  grant.
+
+Both reach the whole API. It is read-only, so there is nothing a service can
+change, and splitting read-only endpoints between the two principals would be a
+line drawn on a guess about future consumers.
+
+Service tokens were rejected outright until #69: `requireAuth` called only
+`Parse`, which refuses an `at+jwt` token by design, so no sibling service could
+call statehouse at all — which is why countinghouse and greenhouse read the
+devices namespace directly and each grew their own copy of `DeviceConfig`.
+
+A service principal has no `IsActive` flag and no role, so the check that bounds
+a user token has no equivalent. Three optional restrictions stand in for it,
+all unset by default:
+
+```yaml
+auth:
+  service_tokens:
+    enabled: true
+    required_audience: https://statehouse.example.net
+    required_scope: statehouse:read
+    allowed_clients: [countinghouse, greenhouse]
+```
+
+The default is permissive on purpose: `TokenSource` asks for no audience and no
+scope, so what a token carries is decided by the client's registration on the
+identity side. Requiring either by default would 403 every sibling until
+identity was taught to stamp it — the same outage as the bug, reached by a
+different route. `allowed_clients` is the one restriction that needs nothing new
+from identity, and so the first one worth turning on.
+
+Failures answer with an RFC 6750 challenge: 401 with `error="invalid_token"`
+means fetch a new token; 403 with `error="insufficient_scope"` means this token
+will never work here. A request with no `Authorization` header at all gets a
+bare challenge and no error code.
+
+Cross-origin browser access is a separate axis — see [CORS](#cors) below. The
+preflight is answered ahead of authentication, and `WWW-Authenticate` is
+exposed, so a browser client can read the error code on a 401 rather than
+seeing an opaque failure.
+
+See [`docs/service-tokens.md`](docs/service-tokens.md) for the consumer guide,
+the full response table, and the data-protection notes.
+
 MQTT topics published under `house/`:
 
 - `house/state/snapshot`        (retained)

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -25,6 +26,7 @@ type Config struct {
 	Devices       map[string]DeviceConfig      `yaml:"devices"`
 	Identity      IdentityConfig               `yaml:"identity"`
 	RemoteConfig  RemoteConfigConfig           `yaml:"remote_config"`
+	Auth          AuthConfig                   `yaml:"auth"`
 }
 
 // SiteConfig identifies the property this instance serves and where that property's
@@ -87,6 +89,63 @@ type IdentityConfig struct {
 type RemoteConfigConfig struct {
 	BaseURL string `yaml:"base_url"`
 }
+
+// AuthConfig configures how inbound HTTP callers are authenticated.
+//
+// It governs tokens coming *in* to this service's API. IdentityConfig above is
+// the other direction — the credentials this service uses to call out. The two
+// are separate blocks because they are separate trust relationships: a host may
+// hold client credentials for the config service and still refuse every inbound
+// service token, or the reverse.
+type AuthConfig struct {
+	ServiceTokens ServiceTokenConfig `yaml:"service_tokens"`
+}
+
+// ServiceTokenConfig decides which client_credentials callers reach the API.
+//
+// A service principal has no IsActive flag and no role, so the checks that
+// bound a user token have no equivalent here. These four knobs are what stands
+// in for them, and all four are optional: the default is "any token this
+// instance's identity service signed".
+//
+// That default is deliberate. Statehouse is read-only, sits on a private
+// network, and already requires a signed token from a single issuer; the
+// identity service decides who gets a client registration at all. Requiring a
+// scope by default would have meant every sibling 403ing until identity was
+// taught to stamp one, which is the same outage as the bug this replaces. The
+// tighter settings exist so a deployment can opt in as identity grows the
+// claims to support them.
+type ServiceTokenConfig struct {
+	// Enabled accepts service tokens at all. Absent means true — see the note
+	// above on why the permissive default is the safe one here. Set false to
+	// restore the user-token-only behaviour.
+	Enabled *bool `yaml:"enabled"`
+
+	// RequiredAudience, when set, requires the token's `aud` to include this
+	// value. This is the standard defence against token redirection: without
+	// it, a token minted for a sibling service is accepted here too, so any
+	// service that can obtain a token can read house state.
+	//
+	// It is enforced against the parsed service claims rather than by setting
+	// JWKSVerifierConfig.RequiredAudience, because that field applies to user
+	// tokens as well — and user tokens carry no `aud`, so it would lock every
+	// human caller out.
+	RequiredAudience string `yaml:"required_audience"`
+
+	// RequiredScope, when set, requires the token's space-delimited `scope` to
+	// contain this value. One scope, matched whole.
+	RequiredScope string `yaml:"required_scope"`
+
+	// AllowedClients, when non-empty, restricts callers to these `client_id`s,
+	// matched exactly. It is the one restriction that needs nothing new from
+	// the identity service, so it is the cheapest least-privilege control a
+	// deployment can turn on today.
+	AllowedClients []string `yaml:"allowed_clients"`
+}
+
+// IsEnabled reports whether service tokens are accepted. An absent `enabled`
+// means yes.
+func (s ServiceTokenConfig) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
 
 // MQTTConfig describes broker connectivity. Per-adapter subscription
 // topics are now owned by the adapter blocks below, not by MQTT.
@@ -510,6 +569,61 @@ func (c Config) Validate() error {
 			"every origin. A bad entry is refused rather than skipped because a skipped one "+
 			"fails silently in both directions: an origin the operator believes is allowlisted "+
 			"is not, or one they believe is excluded was never parsed", err)
+	}
+	return c.Auth.ServiceTokens.validate()
+}
+
+// validate rejects service-token settings that would silently match nothing.
+//
+// Each of these is a config that parses, starts, and then turns away every
+// sibling service with a 403 or 401 the operator has no way to explain from the
+// outside — the same shape of silent failure as an unnamed devices namespace,
+// and refused at startup for the same reason.
+func (s ServiceTokenConfig) validate() error {
+	// Surrounding whitespace first, because strings.Fields collapses it: a
+	// padded value looks like a single token to the checks below while the
+	// matchers compare the raw string and match nothing. A trailing space in a
+	// YAML scalar is invisible in review and in a diff, which makes it the more
+	// likely typo of the two.
+	//
+	// Refused rather than trimmed. Trimming would start the service on a config
+	// that does not say what it reads as, and nothing would ever tell the
+	// operator the typo was there.
+	if s.RequiredAudience != strings.TrimSpace(s.RequiredAudience) {
+		return fmt.Errorf("auth.service_tokens.required_audience %q is padded with "+
+			"whitespace: it is matched whole against the token's aud claim, so a padded "+
+			"value can never match and every service token would be refused with a 401. "+
+			"Write it without the surrounding space", s.RequiredAudience)
+	}
+	if s.RequiredScope != strings.TrimSpace(s.RequiredScope) {
+		return fmt.Errorf("auth.service_tokens.required_scope %q is padded with whitespace: "+
+			"it is matched whole against an element of the token's space-delimited scope "+
+			"claim, so a padded value can never match and every service token would be "+
+			"refused with a 403. Write it without the surrounding space", s.RequiredScope)
+	}
+	if f := strings.Fields(s.RequiredAudience); len(f) > 1 {
+		return fmt.Errorf("auth.service_tokens.required_audience %q contains a space: it "+
+			"names one audience, matched whole against the token's aud claim, and a value "+
+			"with a space in it can never match", s.RequiredAudience)
+	}
+	if f := strings.Fields(s.RequiredScope); len(f) > 1 {
+		return fmt.Errorf("auth.service_tokens.required_scope %q contains a space: it names "+
+			"one scope, matched whole against the token's space-delimited scope claim, so "+
+			"%q would match nothing. Require the single scope every permitted caller holds",
+			s.RequiredScope, s.RequiredScope)
+	}
+	for i, c := range s.AllowedClients {
+		if strings.TrimSpace(c) == "" {
+			return fmt.Errorf("auth.service_tokens.allowed_clients[%d] is empty: an empty "+
+				"entry matches no client_id but does switch the allowlist on, so the list "+
+				"reads as \"permit nothing\". Remove the entry, or remove the list to "+
+				"permit any client the identity service issued a token to", i)
+		}
+		if c != strings.TrimSpace(c) {
+			return fmt.Errorf("auth.service_tokens.allowed_clients[%d] %q is padded with "+
+				"whitespace: entries are matched exactly against the token's client_id, so "+
+				"this one permits nobody. Write it without the surrounding space", i, c)
+		}
 	}
 	return nil
 }
