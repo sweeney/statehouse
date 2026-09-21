@@ -53,6 +53,20 @@ func TestFireAlarmIsPassiveSensor(t *testing.T) {
 	}
 }
 
+// TestApplianceProbeIsPassiveSensor verifies the appliance_probe class is
+// treated as a measurement-only passive sensor. A probe reports temperature
+// and battery but never power, so if it is missing from IsPassiveSensor it
+// falls through to the power-based dispatcher and is pinned at "unknown"
+// forever — readings still land, but activity never leaves its zero value.
+func TestApplianceProbeIsPassiveSensor(t *testing.T) {
+	if !IsPassiveSensor(ClassApplianceProbe) {
+		t.Fatalf("appliance_probe must be a passive sensor")
+	}
+	if IsPassiveSensor(ClassContinuous) {
+		t.Fatalf("continuous_power_device must not be passive (fridges cycle)")
+	}
+}
+
 // TestResolve_PerDeviceEnergyStrategyOverride verifies that a device
 // with an explicit energy_strategy field wins over its class default.
 // This exists for devices whose hardware counters tick at too coarse a

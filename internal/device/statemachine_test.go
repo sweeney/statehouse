@@ -273,6 +273,26 @@ func TestSensor_FirstReadingFlipsToReporting(t *testing.T) {
 	}
 }
 
+// An appliance probe carries temperature and battery but never power.
+// It must reach "reporting" exactly as an environmental sensor does,
+// rather than falling through to the power-based dispatcher where the
+// absent PowerW leaves activity at "unknown".
+func TestApplianceProbe_FirstReadingFlipsToReporting(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	rt := mkRuntime(ClassApplianceProbe, config.Thresholds{}, "")
+	temp := -18.2
+	out := rt.OnReading(now, model.Reading{Timestamp: now, TemperatureC: &temp})
+	if out.PrevActivity != model.ActivityUnknown {
+		t.Errorf("expected prev=unknown, got %q", out.PrevActivity)
+	}
+	if out.NewActivity != model.ActivityReporting {
+		t.Errorf("expected new=reporting, got %q", out.NewActivity)
+	}
+	if out.CycleStarted || out.CycleFinished || out.Cycle != nil {
+		t.Errorf("probes must not produce cycle events, got %+v", out)
+	}
+}
+
 func TestSensor_SubsequentReadingDoesNotRetransition(t *testing.T) {
 	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
 	rt := mkRuntime(ClassEnvironmentalSensor, config.Thresholds{}, "")

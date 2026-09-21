@@ -48,17 +48,40 @@ const (
 	// itself rides on the device payload, not on class behaviour. A fire
 	// alarm must NOT be a binary_state_device — that would feed occupancy
 	// and apply debounce semantics that fight the latched re-broadcast.
-	ClassFireAlarm    = "fire_alarm"
-	ClassUnclassified = "unclassified"
+	ClassFireAlarm = "fire_alarm"
+	// ClassApplianceProbe covers temperature probes placed inside another
+	// appliance — a fridge, a freezer, a wine cooler — typically potted in
+	// a thermal ballast so they track contents temperature rather than the
+	// air, and so a door opening does not show up as a spike. Like
+	// ClassEnvironmentalSensor they are measurement-only: no cycles, no
+	// hysteresis, no occupancy contribution.
+	//
+	// It is a separate class rather than an environmental_sensor because a
+	// probe's readings describe an appliance interior, not the room it
+	// stands in. Consumers aggregating ambient conditions by room need to
+	// exclude these, or a freezer interior drags the room average toward
+	// its setpoint. The class is the only handle they currently have for
+	// that — the probe's room is necessarily the appliance's room.
+	ClassApplianceProbe = "appliance_probe"
+	ClassUnclassified   = "unclassified"
 )
 
 // IsPassiveSensor reports whether class is a measurement-only sensor
 // class that has no active/idle state machine — currently
-// ClassEnvironmentalSensor, ClassUPSSensor, ClassEnergyMeter, and
-// ClassFireAlarm.
+// ClassEnvironmentalSensor, ClassUPSSensor, ClassEnergyMeter,
+// ClassFireAlarm and ClassApplianceProbe.
+//
+// A measurement-only class MUST be listed here. Classes are otherwise
+// declared in the remote config namespace, so a new sensor class can be
+// configured, resolved and have its readings stored without any code
+// change — but activity is decided here. A passive class missing from
+// this list falls through to the power-based dispatcher, finds no
+// PowerW, and is pinned at "unknown" with zero confidence for the
+// lifetime of the process.
 func IsPassiveSensor(class string) bool {
 	return class == ClassEnvironmentalSensor || class == ClassUPSSensor ||
-		class == ClassEnergyMeter || class == ClassFireAlarm
+		class == ClassEnergyMeter || class == ClassFireAlarm ||
+		class == ClassApplianceProbe
 }
 
 // Resolution describes which config path classified this device.
