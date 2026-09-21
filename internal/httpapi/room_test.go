@@ -8,6 +8,7 @@ import (
 	"github.com/sweeney/statehouse/internal/device"
 	"github.com/sweeney/statehouse/internal/energy"
 	"github.com/sweeney/statehouse/internal/model"
+	"github.com/sweeney/statehouse/internal/state"
 )
 
 // statehouse is where the phone app reads a device's room from, via /state/devices. Once
@@ -73,27 +74,30 @@ func TestLegacyLocationStillPopulatesRoom(t *testing.T) {
 	}
 }
 
-// The device profile endpoint reads from device.Profile rather than
-// model.Device, so it needs the same room/location fallback. Without it a
-// republished namespace empties the profile's location and leaves nothing in
-// its place.
+// profiled pairs a profile with a device record the way the store does, so a test
+// states both halves explicitly. Placement is read from the device; class, strategy
+// and thresholds from the profile. See state.ProfiledDevice.
+func profiled(p device.Profile, d model.Device) state.ProfiledDevice {
+	return state.ProfiledDevice{Profile: p, Device: d}
+}
+
+// The profile endpoint needs the same room/location fallback as /state. Without it a
+// republished namespace empties location and leaves nothing in its place.
 func TestDeviceProfileResponseResolvesRoom(t *testing.T) {
-	got := buildDeviceProfileResponse(device.Profile{
-		Class:    "continuous_power_device",
-		Room:     "groundfloor.kitchen",
-		Strategy: energy.StrategyCounter,
-	})
+	got := buildDeviceProfileResponse(profiled(
+		device.Profile{Class: "continuous_power_device", Strategy: energy.StrategyCounter},
+		model.Device{Class: "continuous_power_device", Room: "groundfloor.kitchen"},
+	))
 	if got.Location != "groundfloor.kitchen" {
 		t.Errorf("profile location = %q, want the room id", got.Location)
 	}
 }
 
 func TestDeviceProfileResponseKeepsLegacyLocation(t *testing.T) {
-	got := buildDeviceProfileResponse(device.Profile{
-		Class:    "continuous_power_device",
-		Location: "kitchen",
-		Strategy: energy.StrategyCounter,
-	})
+	got := buildDeviceProfileResponse(profiled(
+		device.Profile{Class: "continuous_power_device", Strategy: energy.StrategyCounter},
+		model.Device{Class: "continuous_power_device", Location: "kitchen"},
+	))
 	if got.Location != "kitchen" {
 		t.Errorf("profile location = %q, want the legacy value", got.Location)
 	}
@@ -158,13 +162,13 @@ func TestFloorIsNeverDerivedFromTheRoomID(t *testing.T) {
 // room+covers, so one service answered two vocabularies about the same device. The
 // profile endpoint now says everything /state does.
 func TestDeviceProfileResponseCarriesRoomCoversAndFloor(t *testing.T) {
-	b, err := json.Marshal(buildDeviceProfileResponse(device.Profile{
-		Class:    "energy_meter",
-		Room:     "basement.hallway",
-		Covers:   "house",
-		Floor:    "basement",
-		Strategy: energy.StrategyCounter,
-	}))
+	b, err := json.Marshal(buildDeviceProfileResponse(profiled(
+		device.Profile{Class: "energy_meter", Strategy: energy.StrategyCounter},
+		model.Device{
+			Class: "energy_meter",
+			Room:  "basement.hallway", Floor: "basement", Covers: "house",
+		},
+	)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,12 +196,10 @@ func TestDeviceProfileResponseCarriesRoomCoversAndFloor(t *testing.T) {
 // device sitting in basement.hallway, so a consumer grouping off /config/devices would
 // attribute the entire property's consumption to that room.
 func TestDeviceProfileResponseOmitsCoversWhenDeviceCoversItsOwnRoom(t *testing.T) {
-	b, _ := json.Marshal(buildDeviceProfileResponse(device.Profile{
-		Class:    "cycle_power_device",
-		Room:     "basement.kitchen",
-		Floor:    "basement",
-		Strategy: energy.StrategyCounter,
-	}))
+	b, _ := json.Marshal(buildDeviceProfileResponse(profiled(
+		device.Profile{Class: "cycle_power_device", Strategy: energy.StrategyCounter},
+		model.Device{Class: "cycle_power_device", Room: "basement.kitchen", Floor: "basement"},
+	)))
 	var got map[string]any
 	_ = json.Unmarshal(b, &got)
 
@@ -214,14 +216,12 @@ func TestDeviceProfileResponseOmitsCoversWhenDeviceCoversItsOwnRoom(t *testing.T
 // /state has had this guarantee since the sentinel was fixed; the profile DTO went
 // without it only because it had no room field to get wrong.
 func TestDeviceProfileResponseReportsLegacyHouseAsCoverageNotARoom(t *testing.T) {
-	b, _ := json.Marshal(buildDeviceProfileResponse(device.Profile{
-		Class: "energy_meter",
+	b, _ := json.Marshal(buildDeviceProfileResponse(profiled(
+		device.Profile{Class: "energy_meter", Strategy: energy.StrategyCounter},
 		// Covers arrives already resolved by config.DeviceConfig.Coverage(); the
 		// legacy Location is still carried so the deprecated alias is exercised.
-		Location: "house",
-		Covers:   "house",
-		Strategy: energy.StrategyCounter,
-	}))
+		model.Device{Class: "energy_meter", Location: "house", Covers: "house"},
+	)))
 	var got map[string]any
 	_ = json.Unmarshal(b, &got)
 

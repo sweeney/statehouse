@@ -17,8 +17,21 @@ facts and derives none of them.
 
 Both `/state/devices` (and `/state`) and `/config/devices` carry all three, with the
 same values for the same device. A consumer may join the two endpoints on device id and
-will not get two different answers; `TestStateAndConfigEndpointsAgreeOnPlacement` pins
-that.
+will not get two different answers.
+
+That holds **by construction, not by convention**: both endpoints read placement from
+the same stored device record. `/config/devices` deliberately does not read it from the
+resolved profile, because the two are updated by opposite rules — the device record
+merges so an absent field does not overwrite, while the profile is replaced wholesale on
+every re-resolution, including the one a SIGHUP runs for every known device. Serving
+placement from the profile made the endpoints diverge the moment a republished namespace
+record stopped declaring a key. See `state.ProfiledDevice`, and
+`TestPlacementStillAgreesAfterAReloadDropsTheNamespaceKeys` for the reload case.
+
+One consequence worth relying on: **an absent key in a republished record means "not
+republished", not "no longer in a room".** The last known placement survives. A device
+genuinely moving rooms is expressed by publishing the new room, not by omitting the old
+one.
 
 ### `floor` is declared, never derived
 

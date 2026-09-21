@@ -338,10 +338,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleConfigDevices(w http.ResponseWriter, _ *http.Request) {
-	profiles := s.Store.Profiles()
-	out := make(map[string]DeviceProfileResponse, len(profiles))
-	for id, p := range profiles {
-		out[id] = buildDeviceProfileResponse(p)
+	profiled := s.Store.ProfiledDevices()
+	out := make(map[string]DeviceProfileResponse, len(profiled))
+	for id, pd := range profiled {
+		out[id] = buildDeviceProfileResponse(pd)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -352,13 +352,12 @@ func (s *Server) handleConfigDevice(w http.ResponseWriter, r *http.Request) {
 		s.handleConfigDevices(w, r)
 		return
 	}
-	profiles := s.Store.Profiles()
-	p, ok := profiles[id]
+	pd, ok := s.Store.GetProfiled(id)
 	if !ok {
 		http.Error(w, "device not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, buildDeviceProfileResponse(p))
+	writeJSON(w, http.StatusOK, buildDeviceProfileResponse(pd))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

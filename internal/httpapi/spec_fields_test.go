@@ -10,21 +10,8 @@ import (
 	"testing"
 )
 
-// The path coverage test catches a route that is missing from the spec, but nothing
-// catches a FIELD that is. That is the drift that actually bites a consumer: the
-// endpoint is documented, so a client generates types from the spec, and then finds
-// the response carrying keys its types do not have — or worse, builds against a
-// documented key the server stopped sending.
-//
-// This change is a live example. `room` and `covers` existed on DeviceResponse and
-// were documented, while DeviceProfileResponse carried neither, and the spec agreed
-// with the code that it should not — so the two endpoints drifted for several releases
-// with nothing failing. Pinning fields rather than paths is what makes that visible.
-//
-// Deliberately one-directional: every field the server EMITS must be declared. The
-// reverse (a documented field the struct does not have) is checked separately below,
-// because the two failures mean different things and a reviewer should be able to tell
-// them apart from the test name alone.
+// specSchemaProperties returns the property names declared for one schema in the
+// served OpenAPI document.
 func specSchemaProperties(t *testing.T, body []byte, schema string) map[string]struct{} {
 	t.Helper()
 	var doc struct {
@@ -64,9 +51,20 @@ func jsonFieldNames(t reflect.Type) []string {
 		}
 		name, _, _ := strings.Cut(tag, ",")
 		if name == "" {
+			// encoding/json flattens an embedded struct, and a *T embed the same as
+			// T. Unwrap the pointer before recursing: reflect panics on NumField for
+			// a Ptr kind, and the one file whose job is to fire when a DTO changes
+			// shape should not do it with a stack trace. An embedded non-struct
+			// (a named string, say) is an ordinary field and falls through.
 			if f.Anonymous {
-				out = append(out, jsonFieldNames(f.Type)...)
-				continue
+				ft := f.Type
+				for ft.Kind() == reflect.Ptr {
+					ft = ft.Elem()
+				}
+				if ft.Kind() == reflect.Struct {
+					out = append(out, jsonFieldNames(ft)...)
+					continue
+				}
 			}
 			name = f.Name
 		}
@@ -96,6 +94,20 @@ var documentedSchemas = map[string]any{
 	"DeviceProfileResponse": DeviceProfileResponse{},
 }
 
+// The path coverage test catches a route that is missing from the spec, but nothing
+// catches a FIELD that is. That is the drift that actually bites a consumer: the
+// endpoint is documented, so a client generates types from the spec, and then finds
+// the response carrying keys its types do not have.
+//
+// This change is a live example. `room` and `covers` existed on DeviceResponse and
+// were documented, while DeviceProfileResponse carried neither, and the spec agreed
+// with the code that it should not — so the two endpoints drifted for several releases
+// with nothing failing. Pinning fields rather than paths is what makes that visible.
+//
+// Deliberately one-directional. The reverse — a documented field the struct does not
+// have — is TestSpecDeclaresNoFieldTheServerCannotEmit, kept separate because the two
+// failures mean different things and a reviewer reading a test name off a CI log
+// should be able to tell them apart.
 func TestSpecDocumentsEveryFieldTheServerEmits(t *testing.T) {
 	spec := fetchSpec(t)
 

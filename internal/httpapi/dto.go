@@ -6,6 +6,7 @@ import (
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/device"
 	"github.com/sweeney/statehouse/internal/model"
+	"github.com/sweeney/statehouse/internal/state"
 )
 
 const schemaVersion = "net.swee.statehouse.snapshot.v1"
@@ -669,16 +670,27 @@ type ThresholdsResponse struct {
 	CompressorAboveW     *float64 `json:"compressor_above_w,omitempty"`
 }
 
-func buildDeviceProfileResponse(p device.Profile) DeviceProfileResponse {
+// buildDeviceProfileResponse renders one device's resolved config.
+//
+// Placement comes from the DEVICE record, not the profile, and that is the whole
+// reason this takes both. The two are updated by opposite rules — the device merges
+// so an absent field does not overwrite, the profile is replaced wholesale on every
+// EnsureDiscovered — so reading room, floor and covers off the profile would make
+// this endpoint disagree with /state as soon as a republished namespace record
+// stopped declaring one of them. See state.ProfiledDevice.
+//
+// Everything else comes from the profile, which is the only record that knows it.
+func buildDeviceProfileResponse(pd state.ProfiledDevice) DeviceProfileResponse {
+	p, d := pd.Profile, pd.Device
 	return DeviceProfileResponse{
 		Class:          p.Class,
 		EnergyStrategy: string(p.Strategy),
 		Resolution:     profileResolution(p),
 		DisplayName:    p.DisplayName,
-		Room:           p.Place(),
-		Floor:          p.Floor,
-		Covers:         p.Covers,
-		Location:       p.Place(),
+		Room:           d.Place(),
+		Floor:          d.Floor,
+		Covers:         d.Covers,
+		Location:       d.Place(),
 		Thresholds:     buildThresholdsResponse(p.Thresholds),
 	}
 }
