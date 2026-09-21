@@ -312,6 +312,16 @@ type DeviceConfig struct {
 
 	// Room is the floorplan room id this device sits in.
 	Room string `yaml:"room" json:"room,omitempty"`
+	// Floor is the floor this device sits on, e.g. "basement". The devices namespace
+	// declares it as a first-class property alongside Room, so it is read rather than
+	// derived from the room id's "<floor>.<slug>" shape: the floorplan owns that fact,
+	// and splitting the id here would be a second implementation of someone else's
+	// taxonomy that silently disagrees the moment a room id is spelled unexpectedly.
+	// Countinghouse and greenhouse both relay it on the same argument, so all three
+	// services say the same thing about the same device.
+	//
+	// Empty means the namespace declared none, which is UNKNOWN rather than a guess.
+	Floor string `yaml:"floor" json:"floor,omitempty"`
 	// Covers is what its readings describe when that is not its own room: "house",
 	// or another room id. Absent means it covers the room it sits in.
 	Covers string `yaml:"covers" json:"covers,omitempty"`

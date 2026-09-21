@@ -6,6 +6,7 @@ import (
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/device"
 	"github.com/sweeney/statehouse/internal/model"
+	"github.com/sweeney/statehouse/internal/state"
 )
 
 const schemaVersion = "net.swee.statehouse.snapshot.v1"
@@ -174,6 +175,7 @@ type DeviceResponse struct {
 	DisplayName  string             `json:"display_name,omitempty"`
 	Class        string             `json:"class"`
 	Room         string             `json:"room,omitempty"`
+	Floor        string             `json:"floor,omitempty"`
 	Covers       string             `json:"covers,omitempty"`
 	Location     string             `json:"location,omitempty"`
 	Identity     *IdentityResponse  `json:"identity,omitempty"`
@@ -503,6 +505,7 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int, i
 		DisplayName:  d.DisplayName,
 		Class:        d.Class,
 		Room:         d.Place(),
+		Floor:        d.Floor,
 		Covers:       d.Covers,
 		Location:     d.Place(),
 		Identity:     identity,
@@ -635,13 +638,26 @@ func buildCycleResponse(c *model.Cycle, class string) *CycleResponse {
 }
 
 // DeviceProfileResponse is the resolved runtime config for one device.
+//
+// Room, Floor and Covers mirror DeviceResponse field for field. They were missing
+// here long after /state had them, which left one service answering two vocabularies
+// about the same device: Location alone, fed from Place(), published a floorplan room
+// id under the key the migration exists to retire, and Covers was dropped entirely —
+// so the whole-house meter looked like an ordinary device sitting in basement.hallway
+// and anything grouping off this endpoint attributed the property to that room.
 type DeviceProfileResponse struct {
-	Class          string              `json:"class"`
-	EnergyStrategy string              `json:"energy_strategy"`
-	Resolution     string              `json:"resolution"`
-	DisplayName    string              `json:"display_name,omitempty"`
-	Location       string              `json:"location,omitempty"`
-	Thresholds     *ThresholdsResponse `json:"thresholds,omitempty"`
+	Class          string `json:"class"`
+	EnergyStrategy string `json:"energy_strategy"`
+	Resolution     string `json:"resolution"`
+	DisplayName    string `json:"display_name,omitempty"`
+	Room           string `json:"room,omitempty"`
+	Floor          string `json:"floor,omitempty"`
+	Covers         string `json:"covers,omitempty"`
+	// Location is the DEPRECATED alias for Room, carrying the same value. Kept for
+	// one more release so consumers migrate on their own schedule; removed once the
+	// last of them reads Room.
+	Location   string              `json:"location,omitempty"`
+	Thresholds *ThresholdsResponse `json:"thresholds,omitempty"`
 }
 
 // ThresholdsResponse is the effective activity-detection thresholds.
@@ -654,13 +670,27 @@ type ThresholdsResponse struct {
 	CompressorAboveW     *float64 `json:"compressor_above_w,omitempty"`
 }
 
-func buildDeviceProfileResponse(p device.Profile) DeviceProfileResponse {
+// buildDeviceProfileResponse renders one device's resolved config.
+//
+// Placement comes from the DEVICE record, not the profile, and that is the whole
+// reason this takes both. The two are updated by opposite rules — the device merges
+// so an absent field does not overwrite, the profile is replaced wholesale on every
+// EnsureDiscovered — so reading room, floor and covers off the profile would make
+// this endpoint disagree with /state as soon as a republished namespace record
+// stopped declaring one of them. See state.ProfiledDevice.
+//
+// Everything else comes from the profile, which is the only record that knows it.
+func buildDeviceProfileResponse(pd state.ProfiledDevice) DeviceProfileResponse {
+	p, d := pd.Profile, pd.Device
 	return DeviceProfileResponse{
 		Class:          p.Class,
 		EnergyStrategy: string(p.Strategy),
 		Resolution:     profileResolution(p),
 		DisplayName:    p.DisplayName,
-		Location:       p.Place(),
+		Room:           d.Place(),
+		Floor:          d.Floor,
+		Covers:         d.Covers,
+		Location:       d.Place(),
 		Thresholds:     buildThresholdsResponse(p.Thresholds),
 	}
 }

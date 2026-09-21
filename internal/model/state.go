@@ -162,6 +162,9 @@ type Device struct {
 	Class       string `json:"class"`
 	// Room is the floorplan room id this device sits in, e.g. "groundfloor.kitchen".
 	Room string `json:"room,omitempty"`
+	// Floor is the floor id the devices namespace declares for this device, e.g.
+	// "groundfloor". Declared, never derived from Room — see config.DeviceConfig.Floor.
+	Floor string `json:"floor,omitempty"`
 	// Covers is what the device's readings describe when that is not its own room:
 	// "house", or another room id. Absent means it covers the room it sits in.
 	Covers string `json:"covers,omitempty"`
