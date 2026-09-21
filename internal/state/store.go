@@ -252,9 +252,6 @@ func (s *Store) RecentActivity(limit int) []model.ActivityRecord {
 	return s.actLog.Recent(limit)
 }
 
-// Profiles returns the resolved Profile for every known device that has an
-// initialised runtime. Devices without a runtime (should not occur in normal
-// operation) are omitted.
 // ProfiledDevice pairs a device's resolved runtime profile with its stored device
 // record.
 //
@@ -298,22 +295,6 @@ func (s *Store) GetProfiled(id string) (ProfiledDevice, bool) {
 		return ProfiledDevice{}, false
 	}
 	return ProfiledDevice{Profile: e.Runtime.Profile, Device: e.Device}, true
-}
-
-// Profiles returns the resolved runtime profile for every device that has one.
-//
-// Callers needing PLACEMENT want ProfiledDevices instead — see ProfiledDevice for why
-// a profile's room, floor and covers do not survive a reload that stops declaring them.
-func (s *Store) Profiles() map[string]device.Profile {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make(map[string]device.Profile, len(s.dev))
-	for id, e := range s.dev {
-		if e.Runtime != nil {
-			out[id] = e.Runtime.Profile
-		}
-	}
-	return out
 }
 
 // withEntry is a helper that runs fn while holding the write lock.
