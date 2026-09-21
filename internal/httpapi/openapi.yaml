@@ -976,6 +976,69 @@ components:
         jwks_key_count:
           type: integer
 
+    AuthMetrics:
+      type: object
+      description: >
+        Authentication outcomes since start, counted by reason. Counters only —
+        nothing here identifies a caller, so the block is safe to scrape and
+        graph. Present on /metrics only when authentication is configured;
+        its absence means every endpoint is readable without a token.
+      required:
+        - user_tokens_accepted_total
+        - service_tokens_accepted_total
+        - rejected_missing_credentials_total
+        - rejected_invalid_token_total
+        - rejected_inactive_user_total
+        - rejected_service_tokens_disabled_total
+        - rejected_audience_total
+        - rejected_client_not_allowed_total
+        - rejected_insufficient_scope_total
+      properties:
+        user_tokens_accepted_total:
+          type: integer
+          format: int64
+          description: Requests admitted on a user access token.
+        service_tokens_accepted_total:
+          type: integer
+          format: int64
+          description: Requests admitted on a client_credentials service token.
+        rejected_missing_credentials_total:
+          type: integer
+          format: int64
+          description: No Authorization header, or not a Bearer scheme.
+        rejected_invalid_token_total:
+          type: integer
+          format: int64
+          description: >
+            Malformed, expired, wrongly signed, or from another issuer. Covers
+            both token kinds.
+        rejected_inactive_user_total:
+          type: integer
+          format: int64
+          description: Valid user token whose account is no longer active.
+        rejected_service_tokens_disabled_total:
+          type: integer
+          format: int64
+          description: >
+            Service token presented where auth.service_tokens.enabled is false.
+        rejected_audience_total:
+          type: integer
+          format: int64
+          description: >
+            Service token whose aud does not include this server, where
+            auth.service_tokens.required_audience is set.
+        rejected_client_not_allowed_total:
+          type: integer
+          format: int64
+          description: >
+            Service token whose client_id is not in
+            auth.service_tokens.allowed_clients.
+        rejected_insufficient_scope_total:
+          type: integer
+          format: int64
+          description: >
+            Service token missing auth.service_tokens.required_scope.
+
     MetricsResponse:
       type: object
       required:
@@ -1036,4 +1099,8 @@ components:
         jwks:
           allOf:
             - $ref: "#/components/schemas/JwksMetrics"
+          description: Present when auth is configured.
+        auth:
+          allOf:
+            - $ref: "#/components/schemas/AuthMetrics"
           description: Present when auth is configured.

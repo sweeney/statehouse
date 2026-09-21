@@ -580,6 +580,27 @@ func (c Config) Validate() error {
 // outside — the same shape of silent failure as an unnamed devices namespace,
 // and refused at startup for the same reason.
 func (s ServiceTokenConfig) validate() error {
+	// Surrounding whitespace first, because strings.Fields collapses it: a
+	// padded value looks like a single token to the checks below while the
+	// matchers compare the raw string and match nothing. A trailing space in a
+	// YAML scalar is invisible in review and in a diff, which makes it the more
+	// likely typo of the two.
+	//
+	// Refused rather than trimmed. Trimming would start the service on a config
+	// that does not say what it reads as, and nothing would ever tell the
+	// operator the typo was there.
+	if s.RequiredAudience != strings.TrimSpace(s.RequiredAudience) {
+		return fmt.Errorf("auth.service_tokens.required_audience %q is padded with "+
+			"whitespace: it is matched whole against the token's aud claim, so a padded "+
+			"value can never match and every service token would be refused with a 401. "+
+			"Write it without the surrounding space", s.RequiredAudience)
+	}
+	if s.RequiredScope != strings.TrimSpace(s.RequiredScope) {
+		return fmt.Errorf("auth.service_tokens.required_scope %q is padded with whitespace: "+
+			"it is matched whole against an element of the token's space-delimited scope "+
+			"claim, so a padded value can never match and every service token would be "+
+			"refused with a 403. Write it without the surrounding space", s.RequiredScope)
+	}
 	if f := strings.Fields(s.RequiredAudience); len(f) > 1 {
 		return fmt.Errorf("auth.service_tokens.required_audience %q contains a space: it "+
 			"names one audience, matched whole against the token's aud claim, and a value "+
@@ -597,6 +618,11 @@ func (s ServiceTokenConfig) validate() error {
 				"entry matches no client_id but does switch the allowlist on, so the list "+
 				"reads as \"permit nothing\". Remove the entry, or remove the list to "+
 				"permit any client the identity service issued a token to", i)
+		}
+		if c != strings.TrimSpace(c) {
+			return fmt.Errorf("auth.service_tokens.allowed_clients[%d] %q is padded with "+
+				"whitespace: entries are matched exactly against the token's client_id, so "+
+				"this one permits nobody. Write it without the surrounding space", i, c)
 		}
 	}
 	return nil

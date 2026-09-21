@@ -157,3 +157,80 @@ func TestExampleConfigDocumentsServiceTokens(t *testing.T) {
 		t.Error("example config should document the service_tokens block")
 	}
 }
+
+// Surrounding whitespace is the typo this validator has to catch, because it is
+// the one a reviewer cannot see. strings.Fields collapses it, so every value
+// below looks like a single token to the embedded-space checks above while the
+// matchers downstream compare the raw string and match nothing:
+//
+//   - "statehouse:read " never equals an element of the token's scope list,
+//     so every service token 403s;
+//   - " " is not "", so audienceOK enforces an audience strings.Fields can
+//     never produce, and every service token 401s;
+//   - " countinghouse" is not "countinghouse", so the allowlist permits nobody.
+//
+// Each is the "starts, reports healthy, turns everyone away" failure this
+// function exists to refuse.
+func TestValidate_RejectsSurroundingWhitespace(t *testing.T) {
+	cases := []struct {
+		name  string
+		yaml  string
+		field string
+	}{
+		{"scope trailing space", "    required_scope: \"statehouse:read \"\n", "required_scope"},
+		{"scope leading space", "    required_scope: \" statehouse:read\"\n", "required_scope"},
+		{"scope tab", "    required_scope: \"statehouse:read\\t\"\n", "required_scope"},
+		{"audience all whitespace", "    required_audience: \" \"\n", "required_audience"},
+		{"audience trailing space", "    required_audience: \"https://statehouse.swee.net \"\n", "required_audience"},
+		{"audience leading space", "    required_audience: \" https://statehouse.swee.net\"\n", "required_audience"},
+		{"client leading space", "    allowed_clients:\n      - \" countinghouse\"\n", "allowed_clients"},
+		{"client trailing space", "    allowed_clients:\n      - \"countinghouse \"\n", "allowed_clients"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, siteBlock+"auth:\n  service_tokens:\n"+c.yaml))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			err = cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() accepted a value padded with whitespace")
+			}
+			if !strings.Contains(err.Error(), c.field) {
+				t.Errorf("error should name %s, got %v", c.field, err)
+			}
+		})
+	}
+}
+
+// Refused rather than silently trimmed: trimming would start the service on a
+// config that does not say what it reads as, and the operator would never learn
+// about the typo. The error has to be the thing that surfaces it.
+func TestValidate_DoesNotSilentlyTrim(t *testing.T) {
+	cfg, err := Load(writeConfig(t, siteBlock+"auth:\n  service_tokens:\n    required_scope: \"statehouse:read \"\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted a padded scope")
+	}
+	if got := cfg.Auth.ServiceTokens.RequiredScope; got != "statehouse:read " {
+		t.Errorf("RequiredScope = %q, want the value left exactly as written", got)
+	}
+}
+
+// The unpadded forms stay valid — the new check must not reject a correct config.
+func TestValidate_AcceptsUnpaddedValues(t *testing.T) {
+	cfg, err := Load(writeConfig(t, siteBlock+`auth:
+  service_tokens:
+    required_audience: https://statehouse.swee.net
+    required_scope: statehouse:read
+    allowed_clients: [countinghouse, greenhouse]
+`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() = %v, want nil", err)
+	}
+}

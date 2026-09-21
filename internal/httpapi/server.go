@@ -352,7 +352,15 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		JWKS             *jwksMetrics `json:"jwks,omitempty"`
 		// Auth counts authentication outcomes by reason. Counters only —
 		// nothing here identifies a caller.
-		Auth authMetricsJSON `json:"auth"`
+		//
+		// A pointer, omitted when auth is not configured, for the same reason
+		// jwks above is: with no identity service the middleware is a no-op and
+		// no counter is ever touched, so a block of zeros would read as "no
+		// rejections, all healthy" on a server where every endpoint is readable
+		// without a token. Absence has to mean "authentication is off" — the
+		// startup warning says so once, at boot, but a dashboard scraping this
+		// endpoint would otherwise see the reassuring version forever.
+		Auth *authMetricsJSON `json:"auth,omitempty"`
 	}
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
@@ -365,7 +373,6 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		HeapSysBytes:    ms.HeapSys,
 		GCCycles:        ms.NumGC,
 		LastGCPauseMS:   float64(ms.PauseNs[(ms.NumGC+255)%256]) / 1e6,
-		Auth:            s.authm.snapshot(),
 	}
 	if s.Influx != nil && s.Influx.Enabled {
 		m.InfluxQueued, m.InfluxFailure = s.Influx.Stats()
@@ -380,6 +387,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		m.RecentLogEvents, m.RecentLogBytes = s.Log.Stats()
 	}
 	if s.verifier != nil {
+		auth := s.authm.snapshot()
+		m.Auth = &auth
 		vm := s.verifier.Metrics()
 		m.JWKS = &jwksMetrics{
 			Fetches:     vm.Fetches,

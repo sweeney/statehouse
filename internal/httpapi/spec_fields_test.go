@@ -92,6 +92,11 @@ func fetchSpec(t *testing.T) []byte {
 var documentedSchemas = map[string]any{
 	"DeviceResponse":        DeviceResponse{},
 	"DeviceProfileResponse": DeviceProfileResponse{},
+	// The /metrics auth block. MetricsResponse itself cannot be listed here —
+	// its Go type is an anonymous struct inside handleMetrics — so the nested
+	// object gets the bidirectional check and TestSpecMetricsResponseDocuments-
+	// TheAuthBlock pins that MetricsResponse actually references it.
+	"AuthMetrics": authMetricsJSON{},
 }
 
 // The path coverage test catches a route that is missing from the spec, but nothing
@@ -152,7 +157,9 @@ func TestSpecDeclaresNoFieldTheServerCannotEmit(t *testing.T) {
 // and the spec at once; this says the API is required to answer the question.
 func TestBothDeviceSchemasDocumentTheFloorplanVocabulary(t *testing.T) {
 	spec := fetchSpec(t)
-	for schema := range documentedSchemas {
+	// Named rather than ranged over documentedSchemas: that map now also holds
+	// AuthMetrics, which has no placement vocabulary and never will.
+	for _, schema := range []string{"DeviceResponse", "DeviceProfileResponse"} {
 		declared := specSchemaProperties(t, spec, schema)
 		for _, field := range []string{"room", "floor", "covers", "location"} {
 			if _, ok := declared[field]; !ok {

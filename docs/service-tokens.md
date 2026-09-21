@@ -165,10 +165,20 @@ client that the identity service chose to register.
    whole; `statehouse:readonly` does not satisfy `statehouse:read`.
 
 A config that could never match is refused at startup rather than at request
-time: an audience or scope containing a space, or an empty string in
-`allowed_clients` (which matches no client but does switch the allowlist on, so
-the list reads as "permit nothing"). Each of those would otherwise start
-cleanly, report healthy, and turn away every caller.
+time:
+
+- an audience or scope containing a space — both are matched whole, so a value
+  with a space in it matches nothing;
+- an audience, scope or `allowed_clients` entry padded with leading or trailing
+  whitespace, for the same reason. A trailing space in a YAML scalar is
+  invisible in review and in a diff, which makes it the likelier typo of the
+  two. It is refused rather than silently trimmed, so the operator learns the
+  typo is there instead of running a config that does not say what it reads as;
+- an empty string in `allowed_clients`, which matches no client but does switch
+  the allowlist on, so the list reads as "permit nothing".
+
+Each of those would otherwise start cleanly, report healthy, and turn away every
+caller.
 
 ### One note on audience
 
@@ -242,6 +252,12 @@ counters (`service_tokens_accepted_total`, `rejected_audience_total`, and so
 on). A per-client breakdown there would turn a scrape endpoint into a log of
 which services called and when, growing without bound as clients come and go.
 
+The block is absent, rather than zeroed, when `identity.base_url` is unset —
+matching the `jwks` block beside it. A full set of zeros would otherwise read as
+"no rejections, all healthy" on the one server posture worth alerting on: the
+one where every endpoint is readable without a token. Absence means
+authentication is off; zeros mean it is on and quiet.
+
 **Failures say enough to debug and no more.** The descriptions in the table
 above are fixed constants. Nothing from the presented token, and nothing about
 other principals, is reflected back — a 401 body is the one response an
@@ -286,10 +302,19 @@ identity deployment fails here even though it is perfectly valid. Then check
 clock skew — an `exp` a few seconds in the past reads as expired.
 
 **It worked yesterday and 401s today.** The signing key rotated and the cached
-JWKS went stale, or the client's secret was rotated. `/healthz` and `/metrics`
-both report JWKS state; `jwks_fetch_errors_total` climbing means statehouse
-cannot reach the identity service, and `jwks_stale_served_total` means it is
-serving from a cache it could not refresh.
+JWKS went stale, or the client's secret was rotated. `/metrics` reports JWKS
+state: `jwks_fetch_errors_total` climbing means statehouse cannot reach the
+identity service, and `jwks_stale_served_total` means it is serving from a cache
+it could not refresh. `/healthz` does **not** carry any of this — it reports
+MQTT, Influx and remote-config status only — so reach for `/metrics`, which
+needs a token of its own. A user token works there even while every service
+token is failing, which is usually the quickest way to see what is happening.
+
+**`invalid_token` saying the key is not trusted, on a token that is definitely
+signed correctly.** Check the client's registration carries a `client_id`.
+`ParseServiceToken` returns the same `ErrTokenInvalid` for a missing `client_id`
+as for a bad signature, so statehouse cannot tell the two apart and reports the
+commoner one. That sends you hunting for a key rotation that never happened.
 
 **403 with `insufficient_scope` and no scope in the challenge.** That is the
 allowlist, not scope: this deployment sets `allowed_clients` and the caller's
