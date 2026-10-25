@@ -205,9 +205,14 @@ Statehouse answers failures with the RFC 6750 challenge, so a client can tell
 | Service token, audience does not include this server | 401 | `error="invalid_token"`, `error_description="token audience does not include this server"` |
 | Service token, `client_id` not on the allowlist | 403 | `error="insufficient_scope"`, `error_description="client is not permitted to call this API"` |
 | Service token, missing the required scope | 403 | `error="insufficient_scope"`, `scope="<required>"` |
+| Identity's signing keys unavailable, either token kind | 503 | none; `Retry-After: 30` instead |
 
 401 means *try again with a better token*. 403 means *this token will never
-work here*; retrying is wasted.
+work here*; retrying is wasted. 503 means *statehouse could not check any token
+just now*. The identity service's JWKS endpoint is unreachable, and statehouse
+either holds no keys or holds keys more than 30 minutes stale. Keep the token,
+and retry after `Retry-After`. Discarding it, or signing a user out, would
+turn one identity outage into every client re-authenticating at once.
 
 RFC 6750 defines only three error codes — `invalid_request`, `invalid_token` and
 `insufficient_scope` — so a client that is not on the allowlist gets

@@ -40,6 +40,9 @@ func fakeJWKSServer(t *testing.T, pub *ecdsa.PublicKey, kid string) *httptest.Se
 			http.NotFound(w, r)
 			return
 		}
+		// identity/common refuses a key set served as anything else, as
+		// id.swee.net's real one is.
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 			"keys": []map[string]any{{
 				"kty": "EC", "use": "sig", "alg": "ES256",

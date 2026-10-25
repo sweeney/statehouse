@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// /metrics gained a nine-field `auth` object, and the spec is the thing a
+// /metrics carries an `auth` object of outcome counters, and the spec is the thing a
 // consumer generates a client from. These pin the two halves of that: the
 // schema exists and agrees with the struct (via documentedSchemas, which drives
 // the bidirectional checks in spec_fields_test.go), and the block is present or
