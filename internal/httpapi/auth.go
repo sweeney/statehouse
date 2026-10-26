@@ -80,20 +80,16 @@ func ServiceTokenPolicyFromConfig(c config.ServiceTokenConfig) ServiceTokenPolic
 	}
 }
 
-// audienceOK reports whether aud satisfies the policy. aud is the space-joined
-// form identity/common returns for a possibly multi-valued `aud` claim, and
-// each value is matched whole — a prefix of the required audience is not a
-// match, or "https://statehouse.swee.net.evil.example" would pass.
-func (p ServiceTokenPolicy) audienceOK(aud string) bool {
+// audienceOK reports whether the token's audience satisfies the policy. Each
+// `aud` value is matched whole — a prefix of the required audience is not a
+// match, or "https://statehouse.swee.net.evil.example" would pass. identity/common
+// hands the claim over as a list since v0.4.0, so there is no joined string to
+// split and get wrong.
+func (p ServiceTokenPolicy) audienceOK(claims *auth.ServiceTokenClaims) bool {
 	if p.RequiredAudience == "" {
 		return true
 	}
-	for _, a := range strings.Fields(aud) {
-		if a == p.RequiredAudience {
-			return true
-		}
-	}
-	return false
+	return claims.HasAudience(p.RequiredAudience)
 }
 
 // clientAllowed reports whether clientID is permitted. An empty allowlist
@@ -122,6 +118,7 @@ type authMetrics struct {
 	rejectedAudience        atomic.Uint64
 	rejectedClient          atomic.Uint64
 	rejectedScope           atomic.Uint64
+	keysUnavailable         atomic.Uint64
 }
 
 // authMetricsJSON is the /metrics view of authMetrics.
@@ -140,6 +137,7 @@ type authMetricsJSON struct {
 	RejectedAudience              uint64 `json:"rejected_audience_total"`
 	RejectedClientNotAllowed      uint64 `json:"rejected_client_not_allowed_total"`
 	RejectedInsufficientScope     uint64 `json:"rejected_insufficient_scope_total"`
+	KeysUnavailable               uint64 `json:"keys_unavailable_total"`
 }
 
 func (m *authMetrics) snapshot() authMetricsJSON {
@@ -153,6 +151,7 @@ func (m *authMetrics) snapshot() authMetricsJSON {
 		RejectedAudience:              m.rejectedAudience.Load(),
 		RejectedClientNotAllowed:      m.rejectedClient.Load(),
 		RejectedInsufficientScope:     m.rejectedScope.Load(),
+		KeysUnavailable:               m.keysUnavailable.Load(),
 	}
 }
 
@@ -199,8 +198,7 @@ func requireAuth(a *authenticator, next http.Handler) http.Handler {
 func (a *authenticator) serveUser(w http.ResponseWriter, r *http.Request, token string, next http.Handler) {
 	claims, err := a.parser.Parse(r.Context(), token)
 	if err != nil {
-		a.metrics.rejectedInvalid.Add(1)
-		a.rejectInvalid(w, err)
+		a.rejectParseError(w, err)
 		return
 	}
 	if !claims.IsActive {
@@ -229,12 +227,11 @@ func (a *authenticator) serveService(w http.ResponseWriter, r *http.Request, tok
 
 	claims, err := a.parser.ParseServiceToken(r.Context(), token)
 	if err != nil {
-		a.metrics.rejectedInvalid.Add(1)
-		a.rejectInvalid(w, err)
+		a.rejectParseError(w, err)
 		return
 	}
 
-	if !a.service.audienceOK(claims.Audience) {
+	if !a.service.audienceOK(claims) {
 		a.metrics.rejectedAudience.Add(1)
 		// Logged as a policy rejection: reaching here needs a token this
 		// issuer signed, so it means a real client is misconfigured — or a
@@ -272,6 +269,40 @@ func (a *authenticator) serveService(w http.ResponseWriter, r *http.Request, tok
 	a.metrics.serviceAccepted.Add(1)
 	a.logger.Debug("service token accepted", "client_id", claims.ClientID, "jti", claims.JTI)
 	next.ServeHTTP(w, r)
+}
+
+// keysUnavailableRetryAfter is the Retry-After on a 503 for unverifiable
+// tokens. The verifier rate-limits its own refetches, so a client retrying
+// sooner than this would mostly be answered from the same failed state.
+const keysUnavailableRetryAfter = "30"
+
+// rejectParseError answers a token the parser refused, separating "this server
+// cannot check tokens right now" from "this token is bad".
+//
+// The difference decides what the client does next. A 401 tells it to discard
+// its credentials, so answering one during an identity outage would sign every
+// user out at the same moment, over tokens nobody examined. identity/common
+// reports that case as ErrKeysUnavailable: the JWKS endpoint is unreachable and
+// the cached keys are either absent or older than its MaxStaleAge.
+func (a *authenticator) rejectParseError(w http.ResponseWriter, err error) {
+	if errors.Is(err, auth.ErrKeysUnavailable) {
+		a.metrics.keysUnavailable.Add(1)
+		a.unavailable(w)
+		return
+	}
+	a.metrics.rejectedInvalid.Add(1)
+	a.rejectInvalid(w, err)
+}
+
+// unavailable answers a request whose token could not be checked at all.
+//
+// No WWW-Authenticate: the client's credentials are not in question, and a
+// challenge invites it to go and get new ones. Not logged here either, because
+// the verifier already logs each failed fetch, and a line per request would
+// multiply one outage by the request rate.
+func (a *authenticator) unavailable(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", keysUnavailableRetryAfter)
+	http.Error(w, "authentication temporarily unavailable", http.StatusServiceUnavailable)
 }
 
 // rejectInvalid answers a token that failed parsing, distinguishing expiry
