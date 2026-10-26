@@ -92,6 +92,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
 
   /state/house:
     get:
@@ -110,6 +112,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
 
   /state/devices:
     get:
@@ -130,6 +134,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
 
   /state/devices/{id}:
     get:
@@ -155,6 +161,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
         "404":
           description: Device not found
 
@@ -175,6 +183,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
 
   /events/recent:
     get:
@@ -205,6 +215,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
 
   /metrics:
     get:
@@ -223,6 +235,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
 
   /config/devices:
     get:
@@ -243,6 +257,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
 
   /config/devices/{id}:
     get:
@@ -268,6 +284,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthUnavailable"
         "404":
           description: Device not found
 
@@ -299,6 +317,19 @@ components:
         WWW-Authenticate:
           schema:
             type: string
+    AuthUnavailable:
+      description: >
+        The token could not be checked because the identity service's signing
+        keys are unavailable: its JWKS endpoint is unreachable, and this server
+        either holds no keys or holds keys too old to keep trusting (30 minutes).
+        This says nothing about the token itself, so do NOT discard it or sign
+        the user out. Retry after the Retry-After interval. There is no
+        WWW-Authenticate challenge.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
     Forbidden:
       description: >
         The token is valid but the principal is not permitted: a service token
@@ -993,6 +1024,7 @@ components:
         - rejected_audience_total
         - rejected_client_not_allowed_total
         - rejected_insufficient_scope_total
+        - keys_unavailable_total
       properties:
         user_tokens_accepted_total:
           type: integer
@@ -1038,6 +1070,13 @@ components:
           format: int64
           description: >
             Service token missing auth.service_tokens.required_scope.
+        keys_unavailable_total:
+          type: integer
+          format: int64
+          description: >
+            Requests answered 503 because the identity service's signing keys
+            were unavailable. Counted separately from rejections, so an identity
+            outage does not graph as a flood of bad tokens.
 
     MetricsResponse:
       type: object
