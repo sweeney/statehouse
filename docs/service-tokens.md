@@ -274,8 +274,9 @@ issuer — operator input. A quote in it would silently end the realm and let th
 rest of the string pose as further auth-params, so quotes, backslashes and
 control characters are dropped before the header is written.
 
-**Rate limiting is not done here.** `identity/common` ships a `ratelimit`
-package and statehouse does not use it. Statehouse listens on a private network,
+**Rate limiting is not done here.** `github.com/sweeney/common/web` ships a
+`ratelimit` package (it lived in `identity/common` until v0.7.0) and statehouse
+does not use it. Statehouse listens on a private network,
 every endpoint is read-only, and JWKS keys are cached in memory so a flood of
 bad tokens costs signature verification rather than a fetch per request. If it
 is ever exposed more widely, per-IP limiting on the 401 path is the first thing

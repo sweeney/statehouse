@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sweeney/common/web/spec"
 	"github.com/sweeney/identity/common/auth"
-	"github.com/sweeney/identity/common/spec"
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/history"
 	"github.com/sweeney/statehouse/internal/influx"
