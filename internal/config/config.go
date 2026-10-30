@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/sweeney/common/remoteconfig"
 	"github.com/sweeney/statehouse/internal/origin"
 )
 
@@ -560,6 +561,14 @@ func (c Config) Validate() error {
 			"this used to fall back to has been deleted, and a failed devices fetch is "+
 			"silent — the service would start, report healthy and serve no devices at all",
 			c.Site.ID, c.Site.ID)
+	}
+	// A name config would refuse is refused here. remoteconfig rejects it without
+	// sending a request, so left to run it would be one more warning while the
+	// service ran on local devices alone.
+	if err := remoteconfig.ValidName(c.Site.DevicesNamespace); err != nil {
+		return fmt.Errorf("site.devices_namespace %q is not a name the config service "+
+			"accepts (lowercase letters, digits, _ and -, at most 64), so it could never "+
+			"be fetched: %w", c.Site.DevicesNamespace, err)
 	}
 	if _, err := origin.Compile(c.HTTP.AllowedOrigins); err != nil {
 		return fmt.Errorf("http.allowed_origins: %w\n\nAn entry is an origin — a scheme, a "+

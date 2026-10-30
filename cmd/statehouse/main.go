@@ -65,7 +65,8 @@ func main() {
 				ClientID:     cfg.Identity.ClientID,
 				ClientSecret: cfg.Identity.ClientSecret,
 			},
-			Logger: logger,
+			Logger:    logger,
+			UserAgent: "statehouse/" + version,
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		remoteCfgFetcher.ApplyRemote(ctx, &cfg)

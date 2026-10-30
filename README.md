@@ -428,7 +428,8 @@ managed through a remote config service rather than the local YAML file.
 On startup the daemon fetches three namespaces from the URL set in
 `remote_config.base_url` (authenticated via the identity service):
 
-- `statehouse_devices` — per-device overrides (class, thresholds,
+- the site's devices namespace, named by `site.devices_namespace` (e.g.
+  `devices_home`) — per-device overrides (class, thresholds,
   `energy_strategy`, `display_name`, `location`).
 - `statehouse_classes` — device class definitions (name hints, default
   thresholds, energy strategy).
@@ -437,7 +438,16 @@ On startup the daemon fetches three namespaces from the URL set in
 
 Remote values win over local config on overlap. A namespace that fails
 to fetch is skipped non-fatally; the local config value is preserved.
-The `/healthz` endpoint reports the fetch status of each namespace.
+The `/healthz` endpoint reports the fetch status of each namespace,
+including a failure to get an identity token, which is recorded against
+all three.
+
+The transport is `github.com/sweeney/common/remoteconfig`, shared with
+countinghouse and greenhouse. A `401` is retried once with a fresh token;
+a body that is not a JSON object is refused rather than merged as empty;
+requests carry `User-Agent: statehouse/<version>`. `site.devices_namespace`
+must be a name the config service accepts (`^[a-z0-9_-]{1,64}$`) or the
+daemon refuses to start.
 
 To update device config (e.g. override a device's energy strategy),
 edit the remote config service — not the local YAML.
