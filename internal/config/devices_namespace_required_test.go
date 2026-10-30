@@ -2,10 +2,13 @@ package config
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sweeney/common/remoteconfig"
 )
 
 // `statehouse_devices` was deleted from the config service once every service read
@@ -116,6 +119,9 @@ func TestValidateRejectsADevicesNamespaceConfigCannotServe(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "devices_namespace") {
 			t.Errorf("error %q does not name the key, so it cannot be acted on", err)
+		}
+		if !errors.Is(err, remoteconfig.ErrInvalidName) {
+			t.Errorf("error %q does not wrap remoteconfig.ErrInvalidName", err)
 		}
 	}
 }

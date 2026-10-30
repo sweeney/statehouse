@@ -568,7 +568,7 @@ func (c Config) Validate() error {
 	if err := remoteconfig.ValidName(c.Site.DevicesNamespace); err != nil {
 		return fmt.Errorf("site.devices_namespace %q is not a name the config service "+
 			"accepts (lowercase letters, digits, _ and -, at most 64), so it could never "+
-			"be fetched", c.Site.DevicesNamespace)
+			"be fetched: %w", c.Site.DevicesNamespace, err)
 	}
 	if _, err := origin.Compile(c.HTTP.AllowedOrigins); err != nil {
 		return fmt.Errorf("http.allowed_origins: %w\n\nAn entry is an origin — a scheme, a "+
