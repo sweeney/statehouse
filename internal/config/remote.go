@@ -2,32 +2,22 @@ package config
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
-	"time"
+
+	"github.com/sweeney/common/remoteconfig"
 )
 
-// TokenSource is satisfied by identity.TokenSource.
-type TokenSource interface {
-	Token(ctx context.Context) (string, error)
-	// Invalidate clears any cached token. Called by Fetcher when the config
-	// service responds with 401, so the next Token() call fetches a fresh one
-	// rather than replaying the rejected credential for its full TTL.
-	Invalidate()
-}
+// TokenSource is satisfied by identity.TokenSource. remoteconfig uses it to
+// obtain a Bearer token for the config service, and invalidates that token on a
+// 401 before retrying once with a fresh credential.
+type TokenSource = remoteconfig.TokenSource
 
 // NamespaceStatus records the outcome of the most recent fetch attempt for
 // a single config namespace.
-type NamespaceStatus struct {
-	OK        bool      `json:"ok"`
-	FetchedAt time.Time `json:"fetched_at"`
-	Error     string    `json:"error,omitempty"`
-}
+type NamespaceStatus = remoteconfig.Status
 
 // Fetcher fetches the three statehouse config namespaces from the remote
 // config service and merges them into a local Config. Errors are per-namespace
@@ -38,26 +28,16 @@ type Fetcher struct {
 	Tokens     TokenSource
 	HTTPClient *http.Client
 	Logger     *slog.Logger
+	// UserAgent is sent to the config service, conventionally
+	// "statehouse/<version>". Empty sends remoteconfig's default.
+	UserAgent string
 
-	mu       sync.RWMutex
-	statuses map[string]NamespaceStatus
+	tracker remoteconfig.Tracker
 }
-
-// defaultFetchClient is used when Fetcher.HTTPClient is nil.
-var defaultFetchClient = &http.Client{Timeout: 10 * time.Second}
-
-// maxConfigBytes is the maximum response body size accepted from the config service.
-const maxConfigBytes = 1 << 20 // 1 MiB
 
 // Statuses returns a snapshot of the last fetch result for each namespace.
 func (f *Fetcher) Statuses() map[string]NamespaceStatus {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	out := make(map[string]NamespaceStatus, len(f.statuses))
-	for k, v := range f.statuses {
-		out[k] = v
-	}
-	return out
+	return f.tracker.Statuses()
 }
 
 // behaviourDoc mirrors the JSON structure of the statehouse_behaviour
@@ -73,28 +53,60 @@ type behaviourDoc struct {
 // ApplyRemote fetches the three statehouse namespaces and merges them into
 // cfg. Remote values win over local on overlap. Each namespace is fetched
 // independently; a failure on one does not prevent the others from applying.
+//
+// An empty BaseURL is explicit local mode: nothing is fetched, no token is
+// asked for, and no status is recorded.
 func (f *Fetcher) ApplyRemote(ctx context.Context, cfg *Config) {
+	if f.BaseURL == "" {
+		return
+	}
 	if !strings.HasPrefix(f.BaseURL, "https://") {
 		f.warn("remote config: base_url is not https — bearer token will be transmitted in cleartext", "url", f.BaseURL)
 	}
-	token, err := f.Tokens.Token(ctx)
-	if err != nil {
-		f.warn("remote config: identity token fetch failed, using local config only", "error", err)
-		return
+	if f.Tokens != nil {
+		// One token serves every namespace: remoteconfig asks for it per request,
+		// and the TokenSource answers from its cache. Asking here first means a
+		// token that cannot be had costs identity one call rather than three, and
+		// that every namespace records the real cause on /healthz. It used to
+		// record nothing, so /healthz kept the previous fetch's ok:true while
+		// statehouse ran on local config alone.
+		if _, err := f.Tokens.Token(ctx); err != nil {
+			f.warn("remote config: identity token fetch failed, using local config only", "error", err)
+			err = fmt.Errorf("remote config token: %w", err)
+			for _, ns := range []string{nsClasses, cfg.Site.DevicesNamespace, nsBehaviour} {
+				if ns != "" {
+					f.tracker.Record(ns, err)
+				}
+			}
+			return
+		}
 	}
-	f.applyClasses(ctx, cfg, token)
-	f.applyDevices(ctx, cfg, token)
-	f.applyBehaviour(ctx, cfg, token)
+	// Built once per ApplyRemote, so one reload reads every namespace with the
+	// same settings.
+	c := &remoteconfig.Client{
+		BaseURL:    f.BaseURL,
+		Tokens:     f.Tokens,
+		UserAgent:  f.UserAgent,
+		HTTPClient: f.HTTPClient,
+	}
+	f.applyClasses(ctx, cfg, c)
+	f.applyDevices(ctx, cfg, c)
+	f.applyBehaviour(ctx, cfg, c)
 }
 
-func (f *Fetcher) applyClasses(ctx context.Context, cfg *Config, token string) {
+const (
+	nsClasses   = "statehouse_classes"
+	nsBehaviour = "statehouse_behaviour"
+)
+
+func (f *Fetcher) applyClasses(ctx context.Context, cfg *Config, c *remoteconfig.Client) {
 	var remote map[string]DeviceClassConfig
-	if err := f.fetch(ctx, token, "statehouse_classes", &remote); err != nil {
+	if err := c.Get(ctx, nsClasses, &remote); err != nil {
 		f.warn("remote config: statehouse_classes unavailable, using local", "error", err)
-		f.recordStatus("statehouse_classes", err)
+		f.tracker.Record(nsClasses, err)
 		return
 	}
-	f.recordStatus("statehouse_classes", nil)
+	f.tracker.Record(nsClasses, nil)
 	if cfg.DeviceClasses == nil {
 		cfg.DeviceClasses = make(map[string]DeviceClassConfig)
 	}
@@ -103,7 +115,7 @@ func (f *Fetcher) applyClasses(ctx context.Context, cfg *Config, token string) {
 	}
 }
 
-func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, token string) {
+func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, c *remoteconfig.Client) {
 	// Named by config, not hardcoded: devices are per-site, so the namespace a site
 	// reads is a property of that site. There is no fallback — Validate refuses to
 	// start an unnamed config, and guessing here would ask the service for a
@@ -116,13 +128,13 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, token string) {
 	}
 
 	var remote map[string]DeviceConfig
-	if err := f.fetch(ctx, token, ns, &remote); err != nil {
+	if err := c.Get(ctx, ns, &remote); err != nil {
 		f.warn("remote config: devices namespace unavailable, using local",
 			"namespace", ns, "error", err)
-		f.recordStatus(ns, err)
+		f.tracker.Record(ns, err)
 		return
 	}
-	f.recordStatus(ns, nil)
+	f.tracker.Record(ns, nil)
 	if cfg.Devices == nil {
 		cfg.Devices = make(map[string]DeviceConfig)
 	}
@@ -132,14 +144,14 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, token string) {
 	normaliseDevices(cfg.Devices)
 }
 
-func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, token string) {
+func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconfig.Client) {
 	var b behaviourDoc
-	if err := f.fetch(ctx, token, "statehouse_behaviour", &b); err != nil {
+	if err := c.Get(ctx, nsBehaviour, &b); err != nil {
 		f.warn("remote config: statehouse_behaviour unavailable, using local", "error", err)
-		f.recordStatus("statehouse_behaviour", err)
+		f.tracker.Record(nsBehaviour, err)
 		return
 	}
-	f.recordStatus("statehouse_behaviour", nil)
+	f.tracker.Record(nsBehaviour, nil)
 	if b.Energy != nil {
 		cfg.Energy = *b.Energy
 	}
@@ -152,60 +164,6 @@ func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, token string)
 	if b.Adapters != nil {
 		cfg.Adapters = *b.Adapters
 	}
-}
-
-func (f *Fetcher) recordStatus(ns string, err error) {
-	s := NamespaceStatus{OK: err == nil, FetchedAt: time.Now()}
-	if err != nil {
-		s.Error = err.Error()
-	}
-	f.mu.Lock()
-	if f.statuses == nil {
-		f.statuses = make(map[string]NamespaceStatus)
-	}
-	f.statuses[ns] = s
-	f.mu.Unlock()
-}
-
-func (f *Fetcher) fetch(ctx context.Context, token, ns string, dst any) error {
-	client := f.HTTPClient
-	if client == nil {
-		client = defaultFetchClient
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		f.BaseURL+"/api/v1/config/"+ns, nil)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("http: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		f.Tokens.Invalidate()
-		return fmt.Errorf("unauthorized: token may be stale, invalidated for next retry")
-	}
-	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		return fmt.Errorf("unexpected status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxConfigBytes+1))
-	if err != nil {
-		return fmt.Errorf("read body: %w", err)
-	}
-	if int64(len(body)) > maxConfigBytes {
-		return fmt.Errorf("config response exceeds %d bytes", maxConfigBytes)
-	}
-	if err := json.Unmarshal(body, dst); err != nil {
-		return fmt.Errorf("unmarshal: %w", err)
-	}
-	return nil
 }
 
 func (f *Fetcher) warn(msg string, args ...any) {

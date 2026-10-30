@@ -101,3 +101,21 @@ func TestApplyRemoteRequestsNoDevicesNamespaceWhenUnnamed(t *testing.T) {
 		}
 	}
 }
+
+// A name config would refuse never reaches it: remoteconfig rejects it locally and
+// sends nothing, so at runtime it is only a warning while the service runs on
+// local devices alone. Validate refuses it instead, naming the key.
+func TestValidateRejectsADevicesNamespaceConfigCannotServe(t *testing.T) {
+	for _, ns := range []string{"Devices.Home", "devices home", strings.Repeat("d", 65)} {
+		cfg := Default()
+		cfg.Site = SiteConfig{ID: "home", DevicesNamespace: ns}
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("Validate() = nil for devices_namespace %q; want an error", ns)
+			continue
+		}
+		if !strings.Contains(err.Error(), "devices_namespace") {
+			t.Errorf("error %q does not name the key, so it cannot be acted on", err)
+		}
+	}
+}
