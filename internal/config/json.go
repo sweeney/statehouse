@@ -85,4 +85,3 @@ func (h *HouseConfig) UnmarshalJSON(b []byte) error {
 	}
 	return nil
 }
-
