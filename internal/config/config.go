@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/sweeney/common/devices"
 	"github.com/sweeney/common/remoteconfig"
 	"github.com/sweeney/statehouse/internal/origin"
 )
@@ -347,18 +348,9 @@ func (h HouseConfig) Location() *time.Location {
 	return loc
 }
 
-// Thresholds describes the per-class activity detection thresholds.
-// All fields are pointers so that an explicitly-set zero value is
-// honoured and not silently overridden by the class default.
-type Thresholds struct {
-	IdleBelowW           *float64       `yaml:"idle_below_w"            json:"-"`
-	ActiveAboveW         *float64       `yaml:"active_above_w"          json:"-"`
-	ActiveSustainedFor   *time.Duration `yaml:"active_sustained_for"    json:"-"`
-	InactiveSustainedFor *time.Duration `yaml:"inactive_sustained_for"  json:"-"`
-	// CompressorAboveW is used by continuous_power_device. When set, an
-	// active cycle begins when power exceeds this value.
-	CompressorAboveW *float64 `yaml:"compressor_above_w" json:"-"`
-}
+// Thresholds are per-device activity-detection thresholds. The type, and its
+// JSON form, belong to the shared devices schema.
+type Thresholds = devices.Thresholds
 
 // DeviceClassConfig describes one device class profile.
 type DeviceClassConfig struct {
@@ -370,55 +362,9 @@ type DeviceClassConfig struct {
 	StalenessSeconds *int `yaml:"staleness_seconds" json:"staleness_seconds,omitempty"`
 }
 
-// DeviceConfig overrides classification for a specific known device.
-// The canonical fields are Scheme + Primary (and Display). The legacy
-// `ieee_address` / `friendly_name` fields are kept as Z2M-shorthand so
-// existing YAML keeps working — Load() normalises them.
-type DeviceConfig struct {
-	// Canonical identity fields. Scheme names the adapter that owns
-	// the device ("zigbee", "tasmota", "shelly", ...). Primary is the
-	// adapter's stable identifier. Display is the human-readable name.
-	Scheme  string `yaml:"scheme"   json:"scheme,omitempty"`
-	Primary string `yaml:"primary"  json:"primary,omitempty"`
-	Display string `yaml:"display"  json:"display,omitempty"`
-
-	// Legacy Z2M shorthand. Load() converts these to scheme=zigbee +
-	// primary=ieee_address / display=friendly_name.
-	IEEEAddress  string `yaml:"ieee_address"   json:"ieee_address,omitempty"`
-	FriendlyName string `yaml:"friendly_name"  json:"friendly_name,omitempty"`
-
-	Class       string      `yaml:"class"            json:"class,omitempty"`
-	DisplayName string      `yaml:"display_name"     json:"display_name,omitempty"`
-	Thresholds  *Thresholds `yaml:"thresholds"       json:"thresholds,omitempty"`
-
-	// Room is the floorplan room id this device sits in.
-	Room string `yaml:"room" json:"room,omitempty"`
-	// Floor is the floor this device sits on, e.g. "basement". The devices namespace
-	// declares it as a first-class property alongside Room, so it is read rather than
-	// derived from the room id's "<floor>.<slug>" shape: the floorplan owns that fact,
-	// and splitting the id here would be a second implementation of someone else's
-	// taxonomy that silently disagrees the moment a room id is spelled unexpectedly.
-	// Countinghouse and greenhouse both relay it on the same argument, so all three
-	// services say the same thing about the same device.
-	//
-	// Empty means the namespace declared none, which is UNKNOWN rather than a guess.
-	Floor string `yaml:"floor" json:"floor,omitempty"`
-	// Covers is what its readings describe when that is not its own room: "house",
-	// or another room id. Absent means it covers the room it sits in.
-	Covers string `yaml:"covers" json:"covers,omitempty"`
-	// Location is the deprecated free-text place. Still decoded because the devices
-	// namespace and its consumers migrate on separate schedules.
-	Location string `yaml:"location" json:"location,omitempty"`
-
-	// EnergyStrategy overrides the class-level energy_strategy for this
-	// specific device. Use "integration" when the device's counter ticks
-	// at too coarse a resolution for its typical cycle size (e.g. a
-	// cycle_power_device whose plug reports in 100 Wh increments but
-	// whose cycles complete in 20–30 Wh). Without this override such
-	// devices raise a stale_counter warning every cycle because the
-	// counter never ticks. See config.example.yaml for diagnosis steps.
-	EnergyStrategy string `yaml:"energy_strategy" json:"energy_strategy,omitempty"`
-}
+// DeviceConfig is one device in a devices_<site> namespace, or in local YAML:
+// the shared schema, whose Place, Coverage and Normalise statehouse uses as is.
+type DeviceConfig = devices.Device
 
 // Default returns a config populated with safe defaults; YAML values
 // override these.
@@ -504,18 +450,10 @@ func Load(path string) (Config, error) {
 // normaliseDevices converts legacy ieee_address/friendly_name shorthands
 // into the canonical scheme/primary/display fields. Called by both Load
 // (for local YAML) and the remote config fetcher.
-func normaliseDevices(devices map[string]DeviceConfig) {
-	for id, d := range devices {
-		if d.Scheme == "" && (d.IEEEAddress != "" || d.FriendlyName != "") {
-			d.Scheme = "zigbee"
-		}
-		if d.Primary == "" && d.IEEEAddress != "" {
-			d.Primary = d.IEEEAddress
-		}
-		if d.Display == "" && d.FriendlyName != "" {
-			d.Display = d.FriendlyName
-		}
-		devices[id] = d
+func normaliseDevices(m map[string]DeviceConfig) {
+	for id, d := range m {
+		d.Normalise()
+		m[id] = d
 	}
 }
 
@@ -639,44 +577,4 @@ func (s ServiceTokenConfig) validate() error {
 
 // CoverageHouse is the sentinel meaning a device's readings describe the whole
 // property rather than the room it sits in.
-//
-// It is also a legacy `location` value. That field carried two different facts —
-// usually a place, but `house` was always a scope — which is the conflation this
-// migration exists to remove. Resolving it as a room would publish `house` as a room
-// id, which the floorplan taxonomy forbids outright: it is a reserved series key.
-const CoverageHouse = "house"
-
-// Place returns the room this device sits in: its Room when the devices namespace has
-// been republished, otherwise its deprecated Location — unless that Location is the
-// `house` sentinel, which names no room at all.
-func (d DeviceConfig) Place() string {
-	if d.Room != "" {
-		return d.Room
-	}
-	if d.Location == CoverageHouse {
-		return ""
-	}
-	return d.Location
-}
-
-// Coverage returns what this device's readings describe when that is not its own
-// room, resolving the legacy `location: house` spelling to the same answer as an
-// explicit `covers`.
-//
-// This is the one place the two spellings are reconciled. Profiles are built with the
-// resolved value, so everything downstream reads a Covers that is already correct
-// rather than each reader having to remember the legacy form — which is how this
-// codebase has repeatedly ended up resolving a value in some paths and not others.
-//
-// The legacy spelling is honoured even once Room is set. A namespace mid-migration
-// may publish `room` before it publishes `covers`, and dropping the coverage fact in
-// that window would make republishing order load-bearing with nothing enforcing it.
-func (d DeviceConfig) Coverage() string {
-	if d.Covers != "" {
-		return d.Covers
-	}
-	if d.Location == CoverageHouse {
-		return CoverageHouse
-	}
-	return ""
-}
+const CoverageHouse = devices.CoverageHouse

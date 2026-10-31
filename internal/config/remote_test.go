@@ -138,6 +138,53 @@ func TestFetcher_ApplyDevices(t *testing.T) {
 	}
 }
 
+// One bad threshold costs only itself: the device keeps its other thresholds,
+// and every other remote device stays. Before the shared devices schema, it
+// dropped every remote device and left statehouse on local YAML alone.
+func TestFetcher_BadThresholdCostsOnlyItself(t *testing.T) {
+	mux := http.NewServeMux()
+	serveNamespace(mux, "statehouse_classes", map[string]any{})
+	serveNamespace(mux, "devices_test", map[string]any{
+		"heater": map[string]any{
+			"ieee_address": "0x01",
+			"class":        "cycle_power_device",
+			"display_name": "Heater",
+			"room":         "ground.office",
+			"thresholds":   map[string]any{"idle_below_w": 5, "active_sustained_for": "soon"},
+		},
+		"kettle": map[string]any{
+			"ieee_address": "0x02",
+			"class":        "short_burst_power_device",
+			"thresholds":   map[string]any{"active_above_w": 1500},
+		},
+	})
+	serveNamespace(mux, "statehouse_behaviour", map[string]any{})
+
+	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
+	f := newTestFetcher(t, mux)
+	f.ApplyRemote(context.Background(), &cfg)
+
+	if st := f.Statuses()["devices_test"]; !st.OK {
+		t.Errorf("devices_test status = %+v, want ok", st)
+	}
+	heater, ok := cfg.Devices["heater"]
+	if !ok {
+		t.Fatal("heater missing: the bad threshold cost the device")
+	}
+	if th := heater.Thresholds; th == nil || th.ActiveSustainedFor != nil ||
+		th.IdleBelowW == nil || *th.IdleBelowW != 5 {
+		t.Errorf("heater thresholds = %+v, want idle_below_w 5 kept and the bad duration dropped", th)
+	}
+	if heater.Class != "cycle_power_device" || heater.Room != "ground.office" || heater.Primary != "0x01" {
+		t.Errorf("heater lost more than its bad threshold: %+v", heater)
+	}
+	kettle, ok := cfg.Devices["kettle"]
+	if !ok || kettle.Thresholds == nil || kettle.Thresholds.ActiveAboveW == nil || *kettle.Thresholds.ActiveAboveW != 1500 {
+		t.Errorf("kettle = %+v, want its thresholds intact", kettle)
+	}
+}
+
 func TestFetcher_RemoteDeviceOverridesLocal(t *testing.T) {
 	mux := http.NewServeMux()
 	serveNamespace(mux, "statehouse_classes", map[string]any{})
