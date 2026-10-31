@@ -2,11 +2,13 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/sweeney/common/devices"
 	"github.com/sweeney/common/remoteconfig"
 )
 
@@ -127,8 +129,16 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, c *remoteconfig
 		return
 	}
 
+	// Decoded by the shared schema, field by field: a value that does not fit
+	// costs that field (a bad threshold, say), not the whole document.
+	var raw json.RawMessage
+	err := c.Get(ctx, ns, &raw)
 	var remote map[string]DeviceConfig
-	if err := c.Get(ctx, ns, &remote); err != nil {
+	var problems []devices.Problem
+	if err == nil {
+		remote, problems, err = devices.Decode(raw)
+	}
+	if err != nil {
 		f.warn("remote config: devices namespace unavailable, using local",
 			"namespace", ns, "error", err)
 		f.tracker.Record(ns, err)
@@ -142,6 +152,10 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, c *remoteconfig
 		cfg.Devices[k] = v
 	}
 	normaliseDevices(cfg.Devices)
+	for _, p := range append(problems, devices.Check(cfg.Devices)...) {
+		f.warn("remote config: devices problem", "namespace", ns, "device", p.ID,
+			"field", p.Field, "code", p.Code, "problem", p.Message)
+	}
 }
 
 func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconfig.Client) {

@@ -85,37 +85,3 @@ func (h *HouseConfig) UnmarshalJSON(b []byte) error {
 	}
 	return nil
 }
-
-func (t *Thresholds) UnmarshalJSON(b []byte) error {
-	var raw struct {
-		IdleBelowW           *float64 `json:"idle_below_w"`
-		ActiveAboveW         *float64 `json:"active_above_w"`
-		CompressorAboveW     *float64 `json:"compressor_above_w"`
-		ActiveSustainedFor   *string  `json:"active_sustained_for"`
-		InactiveSustainedFor *string  `json:"inactive_sustained_for"`
-	}
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return err
-	}
-	t.IdleBelowW = raw.IdleBelowW
-	t.ActiveAboveW = raw.ActiveAboveW
-	t.CompressorAboveW = raw.CompressorAboveW
-	for _, f := range []struct {
-		dst  **time.Duration
-		src  *string
-		name string
-	}{
-		{&t.ActiveSustainedFor, raw.ActiveSustainedFor, "active_sustained_for"},
-		{&t.InactiveSustainedFor, raw.InactiveSustainedFor, "inactive_sustained_for"},
-	} {
-		if f.src == nil {
-			continue
-		}
-		d, err := parseDuration(f.src, f.name)
-		if err != nil {
-			return err
-		}
-		*f.dst = &d
-	}
-	return nil
-}

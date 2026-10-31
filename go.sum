@@ -27,6 +27,8 @@ github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+github.com/sweeney/common/devices v0.1.0 h1:HPDUBNpR492vxizDiutEeHiskvEpr6fU7NMKvdbfL20=
+github.com/sweeney/common/devices v0.1.0/go.mod h1:Ogule86b7wTSvQ2Sf9X84w7DiVTVf+D9Llj+Xkn9iBE=
 github.com/sweeney/common/remoteconfig v0.2.0 h1:g4UIT5dM2rXAi2US72CwaUGmcGKNgouYi3Fs28bkMXo=
 github.com/sweeney/common/remoteconfig v0.2.0/go.mod h1:3dPRbqk07XHF+GboSSM/k+cynJ3DS/H5YnMqLrMXfaQ=
 github.com/sweeney/common/web v0.2.0 h1:LnlX9fpg/hMpVMDjqcttWMh6lN4uFzVsdk6vu8IQpBI=
