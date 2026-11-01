@@ -180,7 +180,7 @@ func (a *API) deleteSub(w http.ResponseWriter, r *http.Request) {
 func (a *API) test(w http.ResponseWriter, r *http.Request) {
 	p := who(r)
 	n := Notification{
-		Kind: KindExternal, Title: "Test from bellhouse",
+		Kind: KindExternal, Title: "Test notification",
 		Body: "If you can read this on your lock screen, push works.",
 		URL:  a.abs("/"), Topic: "test", Urgency: UrgencyHigh, TTL: 5 * time.Minute,
 	}

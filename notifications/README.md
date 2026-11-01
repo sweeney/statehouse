@@ -1,4 +1,4 @@
-# bellhouse (prototype)
+# notifications (prototype)
 
 Household push notifications for the swee.net ecosystem, with no native app
 and no Apple Developer Program fee. Doorbell, power cuts, appliance cycles —
@@ -6,7 +6,7 @@ per user, per device, with quiet hours.
 
 > **Staging location.** This lives in a statehouse branch only because the
 > session that wrote it could not create repositories. It is its own Go module
-> (`github.com/sweeney/bellhouse`) and is meant to move to `sweeney/bellhouse`
+> (`github.com/sweeney/notifications`) and is meant to move to `sweeney/notifications`
 > with `git mv`/`git filter-repo` — statehouse's `go build ./...` and
 > `go test ./...` do not see it.
 
@@ -16,10 +16,10 @@ Since iOS 16.4, a site added to the Home Screen can receive standard Web Push
 (VAPID, self-generated keys — no Apple account, no certificates). Since iOS
 18.4, **Declarative Web Push** lets Safari display a notification straight from
 a JSON payload with no service worker involved, which removes the main cause of
-early iOS web push flakiness. Every message bellhouse sends is declarative:
+early iOS web push flakiness. Every message the service sends is declarative:
 
 ```json
-{"web_push":8030,"notification":{"title":"Doorbell","body":"Front door is ringing","navigate":"https://bells.swee.net/","tag":"doorbell","lang":"en-GB"}}
+{"web_push":8030,"notification":{"title":"Doorbell","body":"Front door is ringing","navigate":"https://notifications.swee.net/","tag":"doorbell","lang":"en-GB"}}
 ```
 
 Browsers without declarative support (Chrome, Firefox, Android, iOS < 18.4)
@@ -29,7 +29,7 @@ hand the same payload to `web/sw.js`, which renders it. One payload, both paths.
 
 ```
 statehouse ── house/events/derived ─┐
-ups-mqtt ──── ups/+/outage ─────────┼─► bellhouse ─► rules ─► dedupe ─► per-user prefs ─► Web Push ─► Apple / Google / Mozilla
+ups-mqtt ──── ups/+/outage ─────────┼─► notifications ─► rules ─► dedupe ─► per-user prefs ─► Web Push ─► Apple / Google / Mozilla
 ups-mqtt ──── ups/+/last_outage ────┘        ▲
 binday etc ── POST /api/notify (service token)┘
 PWA ───────── /api/me/* (user token, PKCE via id.swee.net)
@@ -65,7 +65,7 @@ PWA ───────── /api/me/* (user token, PKCE via id.swee.net)
 ## Known limits
 
 - Assume no Time-Sensitive / Critical interruption level for web push: a Focus
-  mode silences Bells unless the user allows it in that Focus.
+  mode silences the Notifications web app unless the user allows it in that Focus.
 - iOS has been seen to revoke subscriptions silently and never fires
   `pushsubscriptionchange` ([WebKit 273063](https://bugs.webkit.org/show_bug.cgi?id=273063)).
   The app re-posts its subscription on every open/resume; the device list shows
@@ -77,7 +77,7 @@ PWA ───────── /api/me/* (user token, PKCE via id.swee.net)
 
 ```
 go test ./...
-go run . -config bellhouse.example.yaml   # auth off, MQTT off, http://localhost:8787
+go run . -config notifications.example.yaml   # auth off, MQTT off, http://localhost:8787
 ```
 
 Chrome treats `http://localhost` as secure; Safari does not, so test on iPhone
@@ -85,12 +85,12 @@ via the real HTTPS hostname.
 
 ## Going live
 
-1. Register a public PKCE client `bellhouse` in identity, redirect `https://bells.swee.net/`.
-2. Route `bells.swee.net → :8787` through the Cloudflare Tunnel on garibaldi.
-3. Fill in the commented production block in `bellhouse.example.yaml`
+1. Register a public PKCE client `notifications` in identity, redirect `https://notifications.swee.net/`.
+2. Route `notifications.swee.net → :8787` through the Cloudflare Tunnel on garibaldi.
+3. Fill in the commented production block in `notifications.example.yaml`
    (`door_extensions` especially).
 4. On each iPhone: open the site in Safari → Share → Add to Home Screen → open
-   **Bells** from the Home Screen → Enable → Send test.
+   the **Notifications** icon from the Home Screen → Enable → Send test.
 
 ## Status
 

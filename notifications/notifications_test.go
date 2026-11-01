@@ -20,7 +20,7 @@ import (
 var now = time.Date(2026, 10, 31, 21, 0, 0, 0, time.UTC)
 
 func rules() *Rules {
-	return NewRules(RulesConfig{PublicURL: "https://bells.example", DoorExtensions: []string{"100"},
+	return NewRules(RulesConfig{PublicURL: "https://notifications.example", DoorExtensions: []string{"100"},
 		DisplayName: map[string]string{"office-ups": "Office UPS"}})
 }
 
@@ -168,7 +168,7 @@ func TestDispatchEndToEnd(t *testing.T) {
 	s.SetPrefs("u2", guest.Prefs)
 
 	priv, pub, _ := webpush.GenerateVAPIDKeys()
-	p := &Pusher{Store: s, VAPIDPub: pub, VAPIDPriv: priv, Subscriber: "https://bells.example",
+	p := &Pusher{Store: s, VAPIDPub: pub, VAPIDPriv: priv, Subscriber: "https://notifications.example",
 		HTTPClient: srv.Client(), Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return now }}
 
 	n := rules().Translate("house/events/derived", []byte(`{"type":"intercom_ringing","evidence":{"call_id":"c1","from_extension":"100"}}`), now)[0]
@@ -194,8 +194,8 @@ func TestDispatchEndToEnd(t *testing.T) {
 }
 
 func TestPayloadIsDeclarative(t *testing.T) {
-	b, _ := payloadFor(Notification{Title: "Doorbell", Body: "Front door", URL: "https://bells.example/", Topic: "doorbell"})
-	want := `{"web_push":8030,"notification":{"title":"Doorbell","body":"Front door","navigate":"https://bells.example/","tag":"doorbell","lang":"en-GB"}}`
+	b, _ := payloadFor(Notification{Title: "Doorbell", Body: "Front door", URL: "https://notifications.example/", Topic: "doorbell"})
+	want := `{"web_push":8030,"notification":{"title":"Doorbell","body":"Front door","navigate":"https://notifications.example/","tag":"doorbell","lang":"en-GB"}}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}

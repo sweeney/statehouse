@@ -7,10 +7,10 @@ self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('push', (event) => {
   let msg = {};
   try { msg = event.data ? event.data.json() : {}; } catch { /* not JSON */ }
-  const n = msg.notification || { title: 'Bellhouse', body: event.data ? event.data.text() : '' };
+  const n = msg.notification || { title: 'Notifications', body: event.data ? event.data.text() : '' };
   // Must always show something: a push with no notification counts against
   // the origin, and Safari revokes subscriptions that do it repeatedly.
-  event.waitUntil(self.registration.showNotification(n.title || 'Bellhouse', {
+  event.waitUntil(self.registration.showNotification(n.title || 'Notifications', {
     body: n.body || '',
     tag: n.tag || undefined,
     renotify: !!n.tag,

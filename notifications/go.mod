@@ -1,4 +1,4 @@
-module github.com/sweeney/bellhouse
+module github.com/sweeney/notifications
 
 go 1.25.0
 

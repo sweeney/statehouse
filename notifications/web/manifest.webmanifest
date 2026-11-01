@@ -1,6 +1,6 @@
 {
-  "name": "Bellhouse",
-  "short_name": "Bells",
+  "name": "Notifications",
+  "short_name": "Notifications",
   "description": "Household notifications: doorbell, power, appliances.",
   "start_url": "/",
   "scope": "/",

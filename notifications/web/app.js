@@ -1,7 +1,7 @@
-// Bellhouse PWA. Sign-in mirrors binday's auth.js (PKCE against id.swee.net);
+// Notifications PWA. Sign-in mirrors binday's auth.js (PKCE against id.swee.net);
 // trimmed here for the prototype.
 const $ = (id) => document.getElementById(id);
-const TOK = 'bellhouse.tokens';
+const TOK = 'notifications.tokens';
 let cfg, me;
 
 // ── auth ────────────────────────────────────────────────────────────────
@@ -82,14 +82,14 @@ async function syncSubscription() {
   let sub = await reg.pushManager.getSubscription();
   if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(cfg.vapid_public_key) });
   const saved = await api('POST', '/api/me/subscriptions', { ...sub.toJSON(), label: deviceLabel() });
-  localStorage.setItem('bellhouse.sub', saved.id);
+  localStorage.setItem('notifications.sub', saved.id);
   return saved;
 }
 
 async function enable() {
   // Must run inside the tap handler: iOS only prompts from a user gesture.
   const perm = await Notification.requestPermission();
-  if (perm !== 'granted') { showError('Notifications were not allowed. Enable them in Settings → Notifications → Bells.'); return; }
+  if (perm !== 'granted') { showError('Notifications were not allowed. Enable them in Settings → Notifications → Notifications.'); return; }
   await syncSubscription();
   await refresh();
 }
@@ -128,7 +128,7 @@ function renderKinds() {
 
 function renderSubs() {
   const box = $('subs'); box.replaceChildren();
-  const mine = localStorage.getItem('bellhouse.sub');
+  const mine = localStorage.getItem('notifications.sub');
   if (!me.subs?.length) box.append(el('div', { className: 'row sub' }, 'No devices yet.'));
   for (const s of me.subs || []) {
     box.append(el('div', { className: 'row' },
@@ -147,7 +147,7 @@ async function renderDevice() {
     try { await syncSubscription(); state.innerHTML = '<span class="ok">Notifications on</span>'; testBtn.hidden = false; }
     catch (e) { state.textContent = 'Could not subscribe'; sub.textContent = e.message; enableBtn.hidden = false; }
   } else if (Notification.permission === 'denied') {
-    state.textContent = 'Notifications blocked'; sub.textContent = 'Re-allow them in Settings → Notifications → Bells';
+    state.textContent = 'Notifications blocked'; sub.textContent = 'Re-allow them in Settings → Notifications → Notifications';
   } else { state.textContent = 'Notifications off'; enableBtn.hidden = false; }
 }
 

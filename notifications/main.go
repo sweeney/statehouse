@@ -1,4 +1,4 @@
-// bellhouse: household push notifications for the swee.net ecosystem, with no
+// Command notifications: household push notifications for the swee.net ecosystem, with no
 // native app. MQTT in (statehouse, ups-mqtt), Web Push out (Apple, Google,
 // Mozilla push services), per-user preferences, a PWA to manage it.
 package main
@@ -23,7 +23,7 @@ import (
 
 type Config struct {
 	Listen    string `yaml:"listen"`
-	PublicURL string `yaml:"public_url"` // https://bells.swee.net — must be https for iOS
+	PublicURL string `yaml:"public_url"` // https://notifications.swee.net — must be https for iOS
 	DataDir   string `yaml:"data_dir"`
 	MQTT      struct {
 		Broker   string `yaml:"broker"`
@@ -40,7 +40,7 @@ type Config struct {
 }
 
 func main() {
-	cfgPath := flag.String("config", "bellhouse.yaml", "config file")
+	cfgPath := flag.String("config", "notifications.yaml", "config file")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
@@ -58,7 +58,7 @@ func main() {
 		cfg.Listen = ":8787"
 	}
 	if cfg.DataDir == "" {
-		cfg.DataDir = "/var/lib/bellhouse"
+		cfg.DataDir = "/var/lib/notifications"
 	}
 	if cfg.PublicURL == "" {
 		log.Error("public_url is required: it is the push 'navigate' origin and the VAPID subject")
@@ -123,7 +123,7 @@ func startMQTT(ctx context.Context, cfg Config, rules *Rules, store *Store, push
 	}()
 
 	opts := mqtt.NewClientOptions().AddBroker(cfg.MQTT.Broker).
-		SetClientID(orDefault(cfg.MQTT.ClientID, "bellhouse")).
+		SetClientID(orDefault(cfg.MQTT.ClientID, "notifications")).
 		SetUsername(cfg.MQTT.Username).SetPassword(cfg.MQTT.Password).
 		SetAutoReconnect(true).SetConnectRetry(true)
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
