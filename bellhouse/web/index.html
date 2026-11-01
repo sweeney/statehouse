@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bellhouse</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-512.png">
+<meta name="apple-mobile-web-app-title" content="Bells">
+<meta name="theme-color" content="#8a5a1f">
+<style>
+  :root { --bg:#f4f1ea; --card:#fff; --ink:#2a241c; --mute:#7a6f60; --accent:#8a5a1f; --ok:#2f7d4a; --bad:#b23b2a; --line:#e4ddd0; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1b1814; --card:#26221c; --ink:#efe8dc; --mute:#a59a89; --accent:#d9a45b; --line:#3a342b; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font: 16px/1.45 -apple-system, system-ui, sans-serif;
+         padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom)); }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 20px 0 4px; } h2 { font-size: 15px; text-transform: uppercase; letter-spacing:.06em; color:var(--mute); margin: 28px 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:4px 14px; }
+  .row { display:flex; align-items:center; gap:12px; padding:12px 0; border-top:1px solid var(--line); }
+  .row:first-child { border-top:0; } .grow { flex:1; min-width:0; } .sub { color:var(--mute); font-size:13px; overflow-wrap:anywhere; }
+  button { font:inherit; border:0; border-radius:10px; padding:10px 14px; background:var(--accent); color:#fff; font-weight:600; }
+  button.ghost { background:transparent; color:var(--accent); padding:6px 8px; }
+  input[type=text], input[type=time] { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); width:100%; }
+  input[type=time] { width:auto; }
+  .switch { appearance:none; width:46px; height:28px; border-radius:14px; background:var(--line); position:relative; flex:none; transition:.2s; }
+  .switch::after { content:''; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition:.2s; }
+  .switch:checked { background:var(--ok); } .switch:checked::after { left:21px; }
+  .banner { border-radius:12px; padding:12px 14px; margin:12px 0; background:#fff4dc; color:#5a4310; border:1px solid #ecd9a8; }
+  @media (prefers-color-scheme: dark) { .banner { background:#3a2f17; color:#f1dcae; border-color:#5a4a26; } }
+  .bad { color:var(--bad); } .ok { color:var(--ok); } [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bellhouse</h1>
+  <div class="sub" id="who"></div>
+
+  <div class="banner" id="install" hidden>
+    <strong>Add to Home Screen first.</strong> iPhone only allows notifications from web apps on the Home Screen:
+    tap <b>Share</b> → <b>Add to Home Screen</b>, then open Bells from there.
+  </div>
+  <div class="banner" id="error" hidden></div>
+
+  <section id="signin" hidden><button id="login">Sign in with swee.net</button></section>
+
+  <section id="app" hidden>
+    <h2>This device</h2>
+    <div class="card"><div class="row">
+      <div class="grow"><div id="devstate">Checking…</div><div class="sub" id="devsub"></div></div>
+      <button id="enable" hidden>Enable</button>
+      <button class="ghost" id="test" hidden>Send test</button>
+    </div></div>
+
+    <h2>Tell me about</h2>
+    <div class="card" id="kinds"></div>
+
+    <h2>Quiet hours</h2>
+    <div class="card">
+      <div class="row"><div class="grow">Quiet hours<div class="sub">Only power alarms come through</div></div>
+        <input type="checkbox" class="switch" id="quietOn"></div>
+      <div class="row" id="quietTimes" hidden>
+        <div class="grow">From <input type="time" id="qs" value="22:30"> to <input type="time" id="qe" value="07:00"></div>
+      </div>
+    </div>
+
+    <h2>My devices</h2>
+    <div class="card" id="subs"></div>
+  </section>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

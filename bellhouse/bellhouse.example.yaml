@@ -1,0 +1,15 @@
+listen: 127.0.0.1:8787
+public_url: http://localhost:8787
+data_dir: ./data
+# --- production shape (garibaldi, behind Cloudflare Tunnel like id/config) ---
+# public_url: https://bells.swee.net
+# data_dir: /var/lib/bellhouse          # vapid.json + state.json — back these up; losing vapid.json orphans every device
+# identity:
+#   base_url: https://id.swee.net
+#   client_id: bellhouse                # public PKCE client, redirect https://bells.swee.net/
+# notify_clients: [binday]              # service tokens allowed to POST /api/notify
+# mqtt:
+#   broker: tcp://localhost:1883
+# rules:
+#   door_extensions: ["100"]            # asterisk extension(s) of the door station
+#   display_names: { office-ups: Office UPS, kitchen_dishwasher: Dishwasher }
