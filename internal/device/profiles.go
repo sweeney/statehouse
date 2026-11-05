@@ -66,7 +66,7 @@ const (
 	// appliance's room, so the class is the only handle consumers currently
 	// have for this.
 	//
-	// TODO: part_of (github.com/sweeney/common/devices v0.2.0) names the
+	// TODO(#83): part_of (github.com/sweeney/common/devices v0.2.0) names the
 	// appliance a probe is inside. Statehouse decodes it but does not yet
 	// relay or act on it. When it does, part_of becomes a second handle: it
 	// says which appliance a probe belongs to, while the class still says

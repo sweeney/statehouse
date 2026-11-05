@@ -1,6 +1,8 @@
 package state
 
 import (
+	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -54,20 +56,12 @@ func TestEngine_TelemetryFalseEntryNeverEntersStore(t *testing.T) {
 	}
 	got, ok := devs["probe_hot-water-cylinder_top"]
 	if !ok {
-		t.Fatalf("probe not stored under its configured id; have %v", keys(devs))
+		t.Fatalf("probe not stored under its configured id; have %v", slices.Sorted(maps.Keys(devs)))
 	}
 	if got.Class != device.ClassApplianceProbe {
 		t.Errorf("probe class = %q, want %q", got.Class, device.ClassApplianceProbe)
 	}
 	if len(devs) != 1 {
-		t.Errorf("store holds %d devices, want only the probe: %v", len(devs), keys(devs))
+		t.Errorf("store holds %d devices, want only the probe: %v", len(devs), slices.Sorted(maps.Keys(devs)))
 	}
-}
-
-func keys(m map[string]model.Device) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }

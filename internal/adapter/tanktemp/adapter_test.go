@@ -21,14 +21,15 @@ import (
 // internal/payload/testdata, which pins the wire contract.
 
 const (
-	base       = "energy/hot_water"
-	stateTopic = base + "/hot-water-cylinder/state"
-	statusTop  = base + "/status"
+	base        = "energy/hot_water"
+	stateTopic  = base + "/hot-water-cylinder/state"
+	statusTopic = base + "/status"
 )
 
 // Sweep times in the goldens.
 var (
-	okSweep = time.Date(2026, 11, 2, 21, 6, 26, 0, time.UTC)
+	okSweep       = time.Date(2026, 11, 2, 21, 6, 26, 0, time.UTC) // state-ok
+	failuresSweep = time.Date(2026, 11, 2, 21, 6, 56, 0, time.UTC) // state-failures
 )
 
 func cfg() config.Config {
@@ -145,7 +146,9 @@ func TestStateOK_OneDevicePerProbe(t *testing.T) {
 // state-failures: a crc failure, a not_present probe, a suspect 85 °C and
 // clock_synced false.
 func TestStateFailures_WritesOnlyValues(t *testing.T) {
-	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	// Received well after the published sweep, so the receive time is
+	// distinguishable from it.
+	now := failuresSweep.Add(10 * time.Minute)
 	a, _, store, col, _ := mk(t, now)
 	a.HandleMessage(stateTopic, golden(t, "state-failures"), false)
 
@@ -210,7 +213,8 @@ func TestRetainedState(t *testing.T) {
 }
 
 func TestRetainedUnsyncedStateDropped(t *testing.T) {
-	a, _, _, col, _ := mk(t, time.Date(2026, 11, 2, 21, 7, 0, 0, time.UTC))
+	// Four seconds after the sweep: fresh, were its clock trusted.
+	a, _, _, col, _ := mk(t, failuresSweep.Add(4*time.Second))
 	a.HandleMessage(stateTopic, golden(t, "state-failures"), true)
 	if len(col.canonical) != 0 {
 		t.Fatalf("a retained state with an unsynced clock has no trustworthy age; wrote %v", col.temps())
@@ -219,21 +223,52 @@ func TestRetainedUnsyncedStateDropped(t *testing.T) {
 
 func TestRejects(t *testing.T) {
 	ok := string(golden(t, "state-ok"))
-	cases := []struct{ name, topic, payload string }{
-		{"device_id differs from topic", base + "/other/state", ok},
-		{"bad device_id in topic", base + "/Bad.Id/state", ok},
-		{"other prefix", "test/energy/hot_water/hot-water-cylinder/state", ok},
-		{"deeper topic", base + "/hot-water-cylinder/x/state", ok},
-		{"not json", stateTopic, "{"},
-		{"out of range", stateTopic, `{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:26Z","clock_synced":true,"sensors":[{"position":"top","temp_c":300,"error":null}]}`},
-		{"bad position", stateTopic, `{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:26Z","clock_synced":true,"sensors":[{"position":"Top.x","temp_c":60,"error":null}]}`},
+	one := func(position, temp string) string {
+		return `{"device_id":"hot-water-cylinder","timestamp":"2026-11-02T21:06:26Z","clock_synced":true,"sensors":[{"position":"` +
+			position + `","temp_c":` + temp + `,"error":null}]}`
+	}
+	cases := []struct {
+		name, topic, payload string
+		// registers: the message still names a valid probe, so it is
+		// registered even though nothing is written.
+		registers bool
+	}{
+		{"device_id differs from topic", base + "/other/state", ok, false},
+		{"bad device_id in topic", base + "/Bad.Id/state", ok, false},
+		{"other prefix", "test/energy/hot_water/hot-water-cylinder/state", ok, false},
+		{"deeper topic", base + "/hot-water-cylinder/x/state", ok, false},
+		{"not json", stateTopic, "{", false},
+		{"bad position", stateTopic, one("Top.x", "60"), false},
+		{"far out of range", stateTopic, one("top", "300"), true},
+		{"just below the DS18B20 range", stateTopic, one("top", "-55.0625"), true},
+		{"just above the DS18B20 range", stateTopic, one("top", "125.0625"), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a, _, _, col, _ := mk(t, okSweep.Add(5*time.Second))
+			a, _, store, col, _ := mk(t, okSweep.Add(5*time.Second))
 			a.HandleMessage(tc.topic, []byte(tc.payload), false)
 			if len(col.canonical) != 0 {
 				t.Fatalf("wrote %v", col.temps())
+			}
+			want := 0
+			if tc.registers {
+				want = 1
+			}
+			if n := len(store.Devices()); n != want {
+				t.Errorf("registered %d devices, want %d", n, want)
+			}
+		})
+	}
+}
+
+// The DS18B20's rated range is inclusive at both ends.
+func TestRangeEdgesAccepted(t *testing.T) {
+	for _, v := range []string{"-55", "125"} {
+		t.Run(v, func(t *testing.T) {
+			a, _, _, col, _ := mk(t, okSweep.Add(5*time.Second))
+			a.HandleMessage(stateTopic, sweepMsg(okSweep, "true", "28-a", v), false)
+			if n := len(col.temps()[topID]); n != 1 {
+				t.Fatalf("%s °C: %d readings, want 1", v, n)
 			}
 		})
 	}
@@ -244,7 +279,7 @@ func TestOfflineMarksProbesOffline(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			a, engine, store, _, clock := mk(t, okSweep.Add(5*time.Second))
 			a.HandleMessage(stateTopic, golden(t, "state-ok"), false)
-			a.HandleMessage(statusTop, golden(t, name), true)
+			a.HandleMessage(statusTopic, golden(t, name), true)
 			clock.Advance(31 * time.Second)
 			engine.Tick()
 			for id, d := range store.Devices() {
@@ -260,7 +295,7 @@ func TestOnlineStatusChangesNothing(t *testing.T) {
 	for _, name := range []string{"status-startup", "status-heartbeat"} {
 		t.Run(name, func(t *testing.T) {
 			a, _, store, col, _ := mk(t, okSweep.Add(5*time.Second))
-			a.HandleMessage(statusTop, golden(t, name), true)
+			a.HandleMessage(statusTopic, golden(t, name), true)
 			// Publisher health (unexpected ROMs, startup problems) never
 			// creates devices.
 			if n := len(store.Devices()); n != 0 {
@@ -276,6 +311,9 @@ func TestOnlineStatusChangesNothing(t *testing.T) {
 // The data-line fault from tanktemp's STATEHOUSE.md: good, bus_low,
 // not_present, good. Only the two good sweeps write anything.
 func TestDataLineFault(t *testing.T) {
+	// cyl.left, cyl.middle and cyl.right are not in cfg(), so they resolve
+	// as unclassified. That doesn't matter here: this is about what gets
+	// written, not how the probes are classified.
 	start := time.Date(2026, 11, 2, 16, 51, 0, 0, time.UTC)
 	a, _, _, col, clock := mk(t, start)
 	sweep := func(i int, vals [3]string, errCode string) {
@@ -300,19 +338,21 @@ func TestDataLineFault(t *testing.T) {
 	sweep(2, [3]string{"null", "null", "null"}, "not_present")
 	sweep(3, [3]string{"20.5625", "20.25", "20.1875"}, "")
 
-	temps := col.temps()
-	if len(temps) != 3 {
-		t.Fatalf("probes with readings = %d, want 3: %v", len(temps), temps)
+	// Exactly the two good sweeps' values, in order: nothing for the bad
+	// ones, never 0.
+	want := map[string][]float64{
+		"cyl.left":   {20.5625, 20.5625},
+		"cyl.middle": {20.3125, 20.25},
+		"cyl.right":  {20.25, 20.1875},
 	}
-	for id, vs := range temps {
-		if len(vs) != 2 {
-			t.Errorf("%s: %v, want two readings (the good sweeps)", id, vs)
+	got := map[string][]float64{}
+	for _, ev := range col.canonical {
+		if ev.Attribute == "temperature_c" {
+			got[ev.Identity.Primary] = append(got[ev.Identity.Primary], ev.Value.(float64))
 		}
-		for _, v := range vs {
-			if v == 0 {
-				t.Errorf("%s: a 0 was written for a failed read", id)
-			}
-		}
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("written = %v, want %v", got, want)
 	}
 }
 
@@ -415,14 +455,14 @@ func TestBackOnlineOnlyFromReadings(t *testing.T) {
 		t.Fatalf("after state-ok: %q, want online", got)
 	}
 
-	a.HandleMessage(statusTop, golden(t, "status-shutdown"), true)
+	a.HandleMessage(statusTopic, golden(t, "status-shutdown"), true)
 	clock.Advance(31 * time.Second)
 	engine.Tick()
 	if got := availability(t, store, topID); got != model.AvailabilityOffline {
 		t.Fatalf("after shutdown: %q, want offline", got)
 	}
 
-	a.HandleMessage(statusTop, golden(t, "status-heartbeat"), false)
+	a.HandleMessage(statusTopic, golden(t, "status-heartbeat"), false)
 	engine.Tick()
 	if got := availability(t, store, topID); got != model.AvailabilityOffline {
 		t.Fatalf("after heartbeat: %q, want still offline (HEARTBEAT is the publisher, not a probe)", got)
@@ -439,7 +479,7 @@ func TestBackOnlineOnlyFromReadings(t *testing.T) {
 // (stale) state. The probes must still end up offline, not unknown.
 func TestRetainedLWTBeforeStaleState(t *testing.T) {
 	a, engine, store, col, clock := mk(t, okSweep.Add(24*time.Hour))
-	a.HandleMessage(statusTop, golden(t, "lwt"), true)
+	a.HandleMessage(statusTopic, golden(t, "lwt"), true)
 	a.HandleMessage(stateTopic, golden(t, "state-ok"), true)
 	clock.Advance(31 * time.Second)
 	engine.Tick()

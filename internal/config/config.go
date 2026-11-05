@@ -277,6 +277,7 @@ type TanktempConfig struct {
 	BaseTopic string `yaml:"base_topic" json:"base_topic,omitempty"`
 }
 
+// IsEnabled reports whether the adapter is on. It defaults to false.
 func (t TanktempConfig) IsEnabled() bool {
 	if t.Enabled == nil {
 		return false

@@ -235,7 +235,7 @@ func (a *Adapter) handleState(deviceID, topic string, payload []byte, retained b
 		if s.Suspect != nil {
 			// Published, and probably real (a cylinder can reach 85 °C).
 			// Statehouse has no per-reading quality to carry it, so the value
-			// is written and the flag logged.
+			// is written and the flag logged. TODO(#82): carry it.
 			a.debug("tanktemp probe value is suspect", "probe", pr.id.Primary, "suspect", *s.Suspect)
 		}
 		v := *s.TempC
