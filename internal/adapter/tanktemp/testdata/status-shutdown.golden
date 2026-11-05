@@ -1,0 +1,1 @@
+{"online":false,"event":"SHUTDOWN","timestamp":"2026-11-03T21:00:05Z","version":"4aba4d5","ready":true,"uptime_s":86405,"tanks":["hot-water-cylinder"],"sensors_ok":10,"sensors_failed":0,"unexpected":[],"startup_problems":[],"reason":"SIGTERM"}

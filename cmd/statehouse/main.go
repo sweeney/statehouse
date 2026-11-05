@@ -16,6 +16,7 @@ import (
 	"github.com/sweeney/statehouse/internal/adapter/climate"
 	"github.com/sweeney/statehouse/internal/adapter/intercom"
 	"github.com/sweeney/statehouse/internal/adapter/meter"
+	"github.com/sweeney/statehouse/internal/adapter/tanktemp"
 	"github.com/sweeney/statehouse/internal/adapter/ups"
 	"github.com/sweeney/statehouse/internal/adapter/zigbee2mqtt"
 	"github.com/sweeney/statehouse/internal/config"
@@ -119,6 +120,9 @@ func main() {
 	}
 	if cfg.Adapters.Intercom.IsEnabled() {
 		adapters = append(adapters, intercom.New(engine, cfg.Adapters.Intercom.BaseTopic, logger))
+	}
+	if cfg.Adapters.Tanktemp.IsEnabled() {
+		adapters = append(adapters, tanktemp.New(engine, cfg.Adapters.Tanktemp.BaseTopic, logger))
 	}
 	for _, a := range adapters {
 		for _, filter := range a.Subscriptions() {

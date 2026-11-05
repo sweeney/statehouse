@@ -50,6 +50,13 @@ adapters:
   intercom:
     enabled: false
     base_topic: asterisk
+  # sweeney/tanktemp — 1-Wire probes on a hot water cylinder. Subscribes
+  # to {base}/+/state and {base}/status; one device per probe, identity
+  # scheme tanktemp, primary <cylinder id>.<position>. Off by default:
+  # the cylinder and probe entries must be in the devices namespace first.
+  tanktemp:
+    enabled: false
+    base_topic: energy/hot_water
 
 http:
   listen: :8383
