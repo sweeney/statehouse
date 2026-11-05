@@ -460,6 +460,7 @@ func Load(path string) (Config, error) {
 	if cfg.Adapters.Intercom.BaseTopic == "" {
 		cfg.Adapters.Intercom.BaseTopic = "asterisk"
 	}
+	// Mirrors tanktemp.DefaultBase; config must not import an adapter.
 	if cfg.Adapters.Tanktemp.BaseTopic == "" {
 		cfg.Adapters.Tanktemp.BaseTopic = "energy/hot_water"
 	}

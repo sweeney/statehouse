@@ -1,9 +1,12 @@
 package tanktemp
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -311,4 +314,195 @@ func TestDataLineFault(t *testing.T) {
 			}
 		}
 	}
+}
+
+// sweepMsg builds a one-cylinder state message. synced is the raw JSON for
+// clock_synced ("true", "false"), or "" to leave the key out.
+func sweepMsg(ts time.Time, synced string, rom string, tempC string) []byte {
+	p := `{"device_id":"hot-water-cylinder","timestamp":"` + ts.Format(time.RFC3339) + `",`
+	if synced != "" {
+		p += `"clock_synced":` + synced + `,`
+	}
+	p += `"sweep_ms":4000,"sensors":[{"position":"top","order":1,"height_mm":1500,"rom":"` + rom +
+		`","temp_c":` + tempC + `,"raw_c":` + tempC + `,"offset_c":0,"error":null,"suspect":null}]}`
+	return []byte(p)
+}
+
+const topID = "probe_hot-water-cylinder_top"
+
+func availability(t *testing.T, store *state.Store, id string) model.Availability {
+	t.Helper()
+	d, ok := store.Devices()[id]
+	if !ok {
+		t.Fatalf("%s not registered", id)
+	}
+	return d.Availability
+}
+
+// A clock that jumped forward and was then corrected must not stop the
+// cylinder's readings: the future sweep is re-stamped, and the corrected
+// sweeps after it are written.
+func TestFutureTimestampDoesNotPoisonReplayGuard(t *testing.T) {
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	a, _, _, col, clock := mk(t, now)
+	a.HandleMessage(stateTopic, sweepMsg(now.Add(6*time.Hour), "true", "28-a", "60"), false)
+	clock.Advance(30 * time.Second)
+	a.HandleMessage(stateTopic, sweepMsg(clock.Now(), "true", "28-a", "61"), false)
+
+	if got := col.temps()[topID]; len(got) != 2 {
+		t.Fatalf("top = %v, want both sweeps written", got)
+	}
+	if ts := col.canonical[0].Timestamp; !ts.Equal(now) {
+		t.Errorf("future sweep stamped %v, want the receive time %v", ts, now)
+	}
+}
+
+// A sweep older than the last one written is still new: only an exact
+// repeat is a replay.
+func TestOlderSweepIsNotAReplay(t *testing.T) {
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	a, _, _, col, _ := mk(t, now)
+	a.HandleMessage(stateTopic, sweepMsg(now.Add(60*time.Second), "true", "28-a", "60"), false)
+	a.HandleMessage(stateTopic, sweepMsg(now, "true", "28-a", "61"), false)
+	if got := col.temps()[topID]; len(got) != 2 {
+		t.Fatalf("top = %v, want both sweeps written", got)
+	}
+}
+
+// WIRE.md has every key always present; a missing clock_synced is treated
+// as unsynced.
+func TestClockSyncedAbsent(t *testing.T) {
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	sweep := now.Add(-10 * time.Second)
+
+	t.Run("live takes the receive time", func(t *testing.T) {
+		a, _, _, col, _ := mk(t, now)
+		a.HandleMessage(stateTopic, sweepMsg(sweep, "", "28-a", "60"), false)
+		if len(col.canonical) != 1 || !col.canonical[0].Timestamp.Equal(now) {
+			t.Fatalf("got %v, want one reading at %v", col.canonical, now)
+		}
+	})
+	t.Run("retained is dropped", func(t *testing.T) {
+		a, _, _, col, _ := mk(t, now)
+		a.HandleMessage(stateTopic, sweepMsg(sweep, "", "28-a", "60"), true)
+		if len(col.canonical) != 0 {
+			t.Fatalf("wrote %v", col.temps())
+		}
+	})
+}
+
+func TestUnparseableSyncedTimestamp(t *testing.T) {
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	msg := []byte(`{"device_id":"hot-water-cylinder","timestamp":"yesterday","clock_synced":true,"sensors":[{"position":"top","rom":"28-a","temp_c":60,"error":null}]}`)
+
+	a, _, _, col, _ := mk(t, now)
+	a.HandleMessage(stateTopic, msg, false)
+	if len(col.canonical) != 1 || !col.canonical[0].Timestamp.Equal(now) {
+		t.Fatalf("live: got %v, want one reading at the receive time", col.canonical)
+	}
+	a, _, _, col, _ = mk(t, now)
+	a.HandleMessage(stateTopic, msg, true)
+	if len(col.canonical) != 0 {
+		t.Fatalf("retained: wrote %v", col.temps())
+	}
+}
+
+// Probes come back online from readings, never from HEARTBEAT.
+func TestBackOnlineOnlyFromReadings(t *testing.T) {
+	a, engine, store, _, clock := mk(t, okSweep.Add(5*time.Second))
+	a.HandleMessage(stateTopic, golden(t, "state-ok"), false)
+	if got := availability(t, store, topID); got != model.AvailabilityOnline {
+		t.Fatalf("after state-ok: %q, want online", got)
+	}
+
+	a.HandleMessage(statusTop, golden(t, "status-shutdown"), true)
+	clock.Advance(31 * time.Second)
+	engine.Tick()
+	if got := availability(t, store, topID); got != model.AvailabilityOffline {
+		t.Fatalf("after shutdown: %q, want offline", got)
+	}
+
+	a.HandleMessage(statusTop, golden(t, "status-heartbeat"), false)
+	engine.Tick()
+	if got := availability(t, store, topID); got != model.AvailabilityOffline {
+		t.Fatalf("after heartbeat: %q, want still offline (HEARTBEAT is the publisher, not a probe)", got)
+	}
+
+	clock.Advance(30 * time.Second)
+	a.HandleMessage(stateTopic, sweepMsg(clock.Now(), "true", "28-0000117287e6", "60"), false)
+	if got := availability(t, store, topID); got != model.AvailabilityOnline {
+		t.Fatalf("after a fresh sweep: %q, want online", got)
+	}
+}
+
+// On a statehouse restart the retained LWT can arrive before the retained
+// (stale) state. The probes must still end up offline, not unknown.
+func TestRetainedLWTBeforeStaleState(t *testing.T) {
+	a, engine, store, col, clock := mk(t, okSweep.Add(24*time.Hour))
+	a.HandleMessage(statusTop, golden(t, "lwt"), true)
+	a.HandleMessage(stateTopic, golden(t, "state-ok"), true)
+	clock.Advance(31 * time.Second)
+	engine.Tick()
+
+	if len(col.canonical) != 0 {
+		t.Fatalf("a day-old retained state wrote %v", col.temps())
+	}
+	for _, id := range []string{topID, "probe_hot-water-cylinder_bottom"} {
+		if got := availability(t, store, id); got != model.AvailabilityOffline {
+			t.Errorf("%s: %q, want offline", id, got)
+		}
+	}
+}
+
+// The identity is the position, not the ROM: a probe replaced in place
+// continues its series, and the swap is logged.
+func TestROMSwapKeepsIdentity(t *testing.T) {
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(now)
+	engine := state.NewEngine(cfg(), store, clock)
+	col := &collector{}
+	engine.AddCanonicalSink(col)
+	logs := &captureHandler{}
+	a := New(engine, base, slog.New(logs))
+
+	a.HandleMessage(stateTopic, sweepMsg(now, "true", "28-old", "60"), false)
+	clock.Advance(30 * time.Second)
+	a.HandleMessage(stateTopic, sweepMsg(clock.Now(), "true", "28-new", "61"), false)
+
+	if got := col.temps()[topID]; len(got) != 2 {
+		t.Fatalf("top = %v, want both readings under the same device", got)
+	}
+	if n := len(store.Devices()); n != 1 {
+		t.Errorf("devices = %d, want 1", n)
+	}
+	if !logs.has("tanktemp probe replaced") {
+		t.Error("ROM swap was not logged")
+	}
+}
+
+type captureHandler struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (h *captureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.msgs = append(h.msgs, r.Message)
+	return nil
+}
+func (h *captureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *captureHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *captureHandler) has(msg string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range h.msgs {
+		if m == msg {
+			return true
+		}
+	}
+	return false
 }

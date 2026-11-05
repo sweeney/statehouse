@@ -234,6 +234,12 @@ func TestAdapterIsEnabled_DefaultMatrix(t *testing.T) {
 	if adapters.Meter.IsEnabled() {
 		t.Error("Meter.IsEnabled() should default to false")
 	}
+	if adapters.Intercom.IsEnabled() {
+		t.Error("Intercom.IsEnabled() should default to false")
+	}
+	if adapters.Tanktemp.IsEnabled() {
+		t.Error("Tanktemp.IsEnabled() should default to false")
+	}
 }
 
 // TestLoadFillsAdapterBaseTopicDefaults verifies that Load sets each adapter's
@@ -261,6 +267,8 @@ mqtt:
 		{"UPS", cfg.Adapters.UPS.BaseTopic, "ups"},
 		{"Climate", cfg.Adapters.Climate.BaseTopic, "climate"},
 		{"Meter", cfg.Adapters.Meter.BaseTopic, "energy"},
+		{"Intercom", cfg.Adapters.Intercom.BaseTopic, "asterisk"},
+		{"Tanktemp", cfg.Adapters.Tanktemp.BaseTopic, "energy/hot_water"},
 	}
 	for _, c := range checks {
 		if c.got != c.exp {

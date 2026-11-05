@@ -21,9 +21,14 @@
 //   - write anything for a null temp_c (never 0);
 //   - accept a retained state older than staleAfter, or one whose clock was
 //     unsynced, since the retained flag says nothing about age;
-//   - write the same sweep twice (a repeated timestamp is a replay);
+//   - write the same sweep twice: a timestamp equal to the cylinder's last
+//     written sweep is a replay. An older timestamp is still a new sweep,
+//     because the publisher's clock may have been corrected;
+//   - trust a synced timestamp more than staleAfter in the future;
 //   - create devices from the status topic's publisher health (sensors_ok,
-//     unexpected, startup_problems).
+//     unexpected, startup_problems);
+//   - mark probes online from a HEARTBEAT. Probes come back online only
+//     when a reading is written.
 //
 // Per-probe liveness comes from the state messages, not the status topic: a
 // probe that keeps reporting an error stops producing readings and goes
@@ -47,11 +52,13 @@ import (
 // SchemeName is the canonical scheme this adapter stamps on identities.
 const SchemeName = "tanktemp"
 
-// DefaultBase is tanktemp's production topic prefix.
+// DefaultBase is tanktemp's production topic prefix. config.Load fills the
+// same default for adapters.tanktemp.base_topic; keep the two in step.
 const DefaultBase = "energy/hot_water"
 
 // staleAfter is how old a retained state may be and still be taken as the
-// current value: three of tanktemp's 30 s sweeps.
+// current value: three of tanktemp's 30 s sweeps. It is also how far ahead
+// of statehouse's clock a synced timestamp may be before it is distrusted.
 const staleAfter = 90 * time.Second
 
 // The DS18B20's rated range. A value outside it is not a reading.
@@ -72,14 +79,23 @@ type Adapter struct {
 	logger *slog.Logger
 
 	mu sync.Mutex
-	// lastSweep is the newest sweep timestamp accepted per cylinder, so a
-	// replayed message is never written twice.
+	// lastSweep is the timestamp of the last sweep written per cylinder, so
+	// a replayed message is never written twice.
 	lastSweep map[string]time.Time
 	// probes is every probe identity seen, keyed by primary, so the status
-	// topic can mark them all offline.
+	// topic can mark them all offline. Entries are never removed: the set is
+	// bounded by tanktemp's configured probes, and a probe dropped from that
+	// config is still marked offline on each SHUTDOWN, which is harmless.
 	probes map[string]model.DeviceIdentity
-	// roms is the ROM last seen under each primary, to notice a swap.
+	// roms is the ROM last seen under each primary, to notice a swap. Never
+	// pruned, for the same reason as probes.
 	roms map[string]string
+	// publisherOffline is true after an offline status (SHUTDOWN or LWT)
+	// until a later online status or a written sweep. It lets a state
+	// message that arrives after the status, typically the retained pair
+	// delivered on a statehouse restart, register its probes as offline
+	// rather than unknown.
+	publisherOffline bool
 }
 
 // New returns an Adapter for the given base topic (typically
@@ -149,6 +165,12 @@ type sensor struct {
 	Suspect  *string  `json:"suspect"`
 }
 
+// probe is a sensor with a valid position, paired with its identity.
+type probe struct {
+	id model.DeviceIdentity
+	s  sensor
+}
+
 func (a *Adapter) handleState(deviceID, topic string, payload []byte, retained bool) {
 	var p statePayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -165,73 +187,96 @@ func (a *Adapter) handleState(deviceID, topic string, payload []byte, retained b
 	// time base with the engine state derived from it.
 	now := a.engine.Now()
 	ts, ok := a.sweepTime(p, now, retained, topic)
+	write := ok && a.newSweep(deviceID, ts)
 
 	// Register every probe, readable or not, so a probe that has never read
-	// still shows up (as unknown) rather than being invisible.
-	idents := make([]model.DeviceIdentity, 0, len(p.Sensors))
+	// still shows up rather than being invisible.
+	probes := make([]probe, 0, len(p.Sensors))
 	for _, s := range p.Sensors {
 		if !rePosition.MatchString(s.Position) {
 			a.debug("tanktemp sensor with bad position skipped", "topic", topic, "position", s.Position)
-			idents = append(idents, model.DeviceIdentity{})
 			continue
 		}
-		id := a.remember(deviceID, s)
-		a.engine.EnsureDiscovered(id, topic)
-		idents = append(idents, id)
+		probes = append(probes, probe{id: a.remember(deviceID, s), s: s})
 	}
-	if !ok || !a.newSweep(deviceID, ts) {
+
+	a.mu.Lock()
+	if write {
+		// A sweep worth writing means tanktemp is alive.
+		a.publisherOffline = false
+	}
+	offline := a.publisherOffline
+	a.mu.Unlock()
+
+	for _, pr := range probes {
+		a.engine.EnsureDiscovered(pr.id, topic)
+		if offline {
+			// tanktemp is known to be down and this sweep is not current:
+			// the probe is offline, not unknown.
+			a.engine.SetAvailability(pr.id, topic, model.AvailabilityOffline)
+		}
+	}
+	if !write {
 		return
 	}
 
-	for i, s := range p.Sensors {
-		id := idents[i]
-		if id.Primary == "" {
-			continue
-		}
+	for _, pr := range probes {
+		s := pr.s
 		if s.TempC == nil {
 			// Write nothing, never 0. The probe goes stale if this persists.
-			a.debug("tanktemp probe has no value", "probe", id.Primary, "error", deref(s.Error))
+			a.debug("tanktemp probe has no value", "probe", pr.id.Primary, "error", deref(s.Error))
 			continue
 		}
 		if !validate.FiniteInRange(*s.TempC, minTempC, maxTempC) {
 			a.warn("adapter: rejected out-of-range field", "field", "temperature_c",
-				"value", *s.TempC, "probe", id.Primary, "topic", topic)
+				"value", *s.TempC, "probe", pr.id.Primary, "topic", topic)
 			continue
 		}
 		if s.Suspect != nil {
 			// Published, and probably real (a cylinder can reach 85 °C).
 			// Statehouse has no per-reading quality to carry it, so the value
 			// is written and the flag logged.
-			a.debug("tanktemp probe value is suspect", "probe", id.Primary, "suspect", *s.Suspect)
+			a.debug("tanktemp probe value is suspect", "probe", pr.id.Primary, "suspect", *s.Suspect)
 		}
 		v := *s.TempC
-		a.engine.IngestReading(id, topic, model.Reading{Timestamp: ts, TemperatureC: &v})
+		a.engine.IngestReading(pr.id, topic, model.Reading{Timestamp: ts, TemperatureC: &v})
 	}
 }
 
 // sweepTime decides the reading time for a state message, and whether its
 // readings may be written at all.
+//
+// A live message whose timestamp can't be trusted takes the receive time; a
+// retained one is dropped, because its age is then unknown.
 func (a *Adapter) sweepTime(p statePayload, now time.Time, retained bool, topic string) (time.Time, bool) {
-	synced := p.ClockSynced == nil || *p.ClockSynced
-	if !synced {
-		// The Pi has no real-time clock: the timestamp may be wrong. A live
-		// message takes the receive time; a retained one has no trustworthy
-		// age at all, so it is dropped.
+	untrusted := func() (time.Time, bool) {
 		if retained {
-			a.debug("tanktemp retained state with unsynced clock dropped", "topic", topic)
 			return time.Time{}, false
 		}
 		return now, true
+	}
+	// WIRE.md says every key is always present, so an absent clock_synced is
+	// a contract violation. Treat it as unsynced: wrongly trusting a
+	// timestamp is worse than re-stamping one.
+	if p.ClockSynced == nil || !*p.ClockSynced {
+		// The Pi has no real-time clock, so the timestamp may be wrong.
+		a.debug("tanktemp state clock not synced", "topic", topic, "retained", retained)
+		return untrusted()
 	}
 	parsed, err := time.Parse(time.RFC3339, p.Timestamp)
 	if err != nil {
-		a.debug("tanktemp state timestamp unparseable", "topic", topic, "timestamp", p.Timestamp)
-		if retained {
-			return time.Time{}, false
-		}
-		return now, true
+		a.warn("tanktemp synced state has an unparseable timestamp",
+			"topic", topic, "timestamp", p.Timestamp)
+		return untrusted()
 	}
 	ts := timeutil.Sanitise(parsed.UTC(), now)
+	if ts.Sub(now) > staleAfter {
+		// A clock that jumped forward. Trusting it would date every reading
+		// in the future.
+		a.warn("tanktemp synced state timestamp is in the future",
+			"topic", topic, "timestamp", p.Timestamp, "now", now.Format(time.RFC3339))
+		return untrusted()
+	}
 	if retained && now.Sub(ts) > staleAfter {
 		a.debug("tanktemp retained state too old to be current; waiting for the next sweep",
 			"topic", topic, "timestamp", p.Timestamp)
@@ -240,13 +285,14 @@ func (a *Adapter) sweepTime(p statePayload, now time.Time, retained bool, topic 
 	return ts, true
 }
 
-// newSweep reports whether ts is newer than the last sweep accepted for this
-// cylinder, and records it if so. tanktemp republishes every 30 s, so a
-// repeated timestamp is a replay of a retained message.
+// newSweep reports whether ts is a sweep not yet written for this cylinder,
+// and records it if so. A replay (the retained message redelivered on
+// reconnect) repeats the last timestamp exactly. Anything else is new, even
+// if older, since the publisher's clock may have been corrected.
 func (a *Adapter) newSweep(deviceID string, ts time.Time) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if last, ok := a.lastSweep[deviceID]; ok && !ts.After(last) {
+	if last, ok := a.lastSweep[deviceID]; ok && ts.Equal(last) {
 		return false
 	}
 	a.lastSweep[deviceID] = ts
@@ -271,6 +317,9 @@ func (a *Adapter) remember(deviceID string, s sensor) model.DeviceIdentity {
 	return id
 }
 
+// statusPayload ignores tanks. One tanktemp serves one base topic (WIRE.md:
+// a second would need its own prefix), so every probe this adapter has seen
+// belongs to the publisher whose status this is.
 type statusPayload struct {
 	Online *bool  `json:"online"`
 	Event  string `json:"event"`
@@ -278,7 +327,8 @@ type statusPayload struct {
 
 // handleStatus follows the publisher's lifecycle. Only going offline
 // (SHUTDOWN, or the broker's LWT) changes probes: every known probe is
-// marked offline. Coming back online is left to the state messages, since a
+// marked offline, and probes registered later stay offline until a sweep is
+// written. Coming back online is left to the state messages, since a
 // HEARTBEAT says tanktemp is alive, not that any one probe reads.
 func (a *Adapter) handleStatus(topic string, payload []byte) {
 	var s statusPayload
@@ -286,10 +336,15 @@ func (a *Adapter) handleStatus(topic string, payload []byte) {
 		a.debug("tanktemp status parse failed", "topic", topic, "error", err)
 		return
 	}
-	if s.Online == nil || *s.Online {
+	if s.Online == nil {
 		return
 	}
 	a.mu.Lock()
+	a.publisherOffline = !*s.Online
+	if *s.Online {
+		a.mu.Unlock()
+		return
+	}
 	ids := make([]model.DeviceIdentity, 0, len(a.probes))
 	for _, id := range a.probes {
 		ids = append(ids, id)
