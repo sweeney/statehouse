@@ -61,10 +61,10 @@ const (
 	// It is a separate class rather than an environmental_sensor because a
 	// probe's readings describe an appliance interior, not the room it
 	// stands in. Consumers aggregating ambient conditions by room need to
-	// exclude these, or a freezer interior drags the room average toward
-	// its setpoint and a cylinder drags it far above ambient. The probe's room
-	// is necessarily the appliance's room. The class is the only handle
-	// consumers currently have for this.
+	// exclude these, or a freezer interior drags the room average down and
+	// a hot water cylinder drags it up. The probe's room is necessarily the
+	// appliance's room, so the class is the only handle consumers currently
+	// have for this.
 	//
 	// TODO: github.com/sweeney/common/devices v0.2.0 adds part_of, which
 	// names the appliance a probe is inside. Once statehouse moves off
