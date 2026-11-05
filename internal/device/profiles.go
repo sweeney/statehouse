@@ -49,19 +49,28 @@ const (
 	// alarm must NOT be a binary_state_device — that would feed occupancy
 	// and apply debounce semantics that fight the latched re-broadcast.
 	ClassFireAlarm = "fire_alarm"
-	// ClassApplianceProbe covers temperature probes placed inside another
-	// appliance — a fridge, a freezer, a wine cooler — typically potted in
-	// a thermal ballast so they track contents temperature rather than the
-	// air, and so a door opening does not show up as a spike. Like
-	// ClassEnvironmentalSensor they are measurement-only: no cycles, no
-	// hysteresis, no occupancy contribution.
+	// ClassApplianceProbe covers temperature probes that measure the inside
+	// of another appliance: a fridge, a freezer or a wine cooler, or a hot
+	// water cylinder. How the probe is mounted does not matter. A fridge
+	// probe may be potted in a thermal ballast, so that it tracks the
+	// contents rather than the air and a door opening does not show as a
+	// spike. A cylinder probe sits in a dry pocket, or on the surface under
+	// the insulation. Like ClassEnvironmentalSensor they are
+	// measurement-only: no cycles, no hysteresis, no occupancy contribution.
 	//
 	// It is a separate class rather than an environmental_sensor because a
 	// probe's readings describe an appliance interior, not the room it
 	// stands in. Consumers aggregating ambient conditions by room need to
 	// exclude these, or a freezer interior drags the room average toward
-	// its setpoint. The class is the only handle they currently have for
-	// that — the probe's room is necessarily the appliance's room.
+	// its setpoint and a cylinder drags it far above ambient. The probe's room
+	// is necessarily the appliance's room. The class is the only handle
+	// consumers currently have for this.
+	//
+	// TODO: github.com/sweeney/common/devices v0.2.0 adds part_of, which
+	// names the appliance a probe is inside. Once statehouse moves off
+	// v0.1.0 and reads it, part_of becomes a second handle: it says which
+	// appliance a probe belongs to, while the class still says the reading
+	// is not ambient.
 	ClassApplianceProbe = "appliance_probe"
 	ClassUnclassified   = "unclassified"
 )
