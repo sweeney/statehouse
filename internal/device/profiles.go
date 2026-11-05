@@ -66,11 +66,11 @@ const (
 	// appliance's room, so the class is the only handle consumers currently
 	// have for this.
 	//
-	// TODO: github.com/sweeney/common/devices v0.2.0 adds part_of, which
-	// names the appliance a probe is inside. Once statehouse moves off
-	// v0.1.0 and reads it, part_of becomes a second handle: it says which
-	// appliance a probe belongs to, while the class still says the reading
-	// is not ambient.
+	// TODO: part_of (github.com/sweeney/common/devices v0.2.0) names the
+	// appliance a probe is inside. Statehouse decodes it but does not yet
+	// relay or act on it. When it does, part_of becomes a second handle: it
+	// says which appliance a probe belongs to, while the class still says
+	// the reading is not ambient.
 	ClassApplianceProbe = "appliance_probe"
 	ClassUnclassified   = "unclassified"
 )
