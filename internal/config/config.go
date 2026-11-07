@@ -170,6 +170,7 @@ type AdaptersConfig struct {
 	Climate     ClimateConfig     `yaml:"climate"     json:"climate,omitempty"`
 	Meter       MeterConfig       `yaml:"meter"       json:"meter,omitempty"`
 	Intercom    IntercomConfig    `yaml:"intercom"    json:"intercom,omitempty"`
+	Tanktemp    TanktempConfig    `yaml:"tanktemp"    json:"tanktemp,omitempty"`
 }
 
 // Zigbee2MQTTConfig configures the Zigbee2MQTT adapter.
@@ -264,6 +265,24 @@ func (i IntercomConfig) IsEnabled() bool {
 		return false
 	}
 	return *i.Enabled
+}
+
+// TanktempConfig configures the sweeney/tanktemp adapter for hot water
+// cylinder probes. It subscribes to {base}/+/state and {base}/status.
+// BaseTopic defaults to "energy/hot_water". Off by default: enable it only
+// once the devices namespace has entries for the cylinder and its probes,
+// or the probes resolve as unclassified.
+type TanktempConfig struct {
+	Enabled   *bool  `yaml:"enabled"    json:"enabled,omitempty"`
+	BaseTopic string `yaml:"base_topic" json:"base_topic,omitempty"`
+}
+
+// IsEnabled reports whether the adapter is on. It defaults to false.
+func (t TanktempConfig) IsEnabled() bool {
+	if t.Enabled == nil {
+		return false
+	}
+	return *t.Enabled
 }
 
 type HTTPConfig struct {
@@ -441,6 +460,10 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Adapters.Intercom.BaseTopic == "" {
 		cfg.Adapters.Intercom.BaseTopic = "asterisk"
+	}
+	// Mirrors tanktemp.DefaultBase; config must not import an adapter.
+	if cfg.Adapters.Tanktemp.BaseTopic == "" {
+		cfg.Adapters.Tanktemp.BaseTopic = "energy/hot_water"
 	}
 	// Normalise legacy Z2M shorthand on device entries.
 	normaliseDevices(cfg.Devices)

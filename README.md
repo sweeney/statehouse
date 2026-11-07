@@ -372,6 +372,11 @@ Available adapters today:
 - `internal/adapter/intercom` — Asterisk-via-MQTT phone system. Tracks
   in-flight calls as activity signals (`intercom_ringing`,
   `intercom_answered`, `intercom_hungup`). Off by default.
+- `internal/adapter/tanktemp` — [sweeney/tanktemp](https://github.com/sweeney/tanktemp)
+  hot water cylinder probes on `{base}/+/state` and `{base}/status`. One
+  `appliance_probe` device per probe (`primary` = `<cylinder id>.<position>`);
+  the cylinder itself is a `telemetry: false` devices entry and never an
+  engine device. Off by default.
 
 Device classes today:
 
@@ -393,6 +398,9 @@ Device classes today:
 - `energy_meter` — whole-home electricity meters and IHD devices. Reports
   cumulative kWh and instantaneous power. No cycles, no occupancy
   contribution.
+- `appliance_probe` — temperature probes inside another appliance: a
+  fridge, freezer or wine cooler, or a hot water cylinder. Measurement-only,
+  and never ambient: consumers leave them out of room averages.
 
 ## Layout
 
@@ -405,6 +413,7 @@ Device classes today:
 - `internal/adapter/climate` — weather station adapter.
 - `internal/adapter/meter` — Glow/SMETS2 smart meter adapter.
 - `internal/adapter/intercom` — Asterisk-via-MQTT intercom adapter.
+- `internal/adapter/tanktemp` — sweeney/tanktemp hot water cylinder adapter.
 - `internal/config` — YAML config + defaults.
 - `internal/origin` — browser-origin allowlist: compiling and matching.
 - `internal/model` — canonical data types (Reading, Device, Event,

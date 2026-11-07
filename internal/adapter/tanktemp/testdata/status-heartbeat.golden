@@ -1,0 +1,1 @@
+{"online":true,"event":"HEARTBEAT","timestamp":"2026-11-03T21:00:00Z","version":"4aba4d5","ready":true,"uptime_s":86400,"tanks":["hot-water-cylinder"],"sensors_ok":9,"sensors_failed":1,"unexpected":["28-000011721aa5"],"startup_problems":[]}
