@@ -260,8 +260,9 @@ devices:
   #           "house" for whole-house devices, or another room id
   # Leave a field out when it is unknown. "house" is never a room.
   #
-  # location: is deprecated. It is still decoded, but only for namespaces
-  # that have not been republished; do not use it in new config.
+  # location: is deprecated. It is still decoded, from this file and from
+  # namespaces that have not been republished, and read as the room when
+  # room is absent; do not use it in new config.
   #
   # The Glow/SMETS2 meter is recognised by the meter adapter regardless
   # of whether you list it here — its scheme is "meter" and the
@@ -346,25 +347,27 @@ devices:
     floor: ground
     covers: house
 
-  # Sonoff SNZB-02 climate sensors, one per floor. room is the room each
-  # one sits in; floor is a separate field, not a room. Each is its own
-  # Zigbee device with an IEEE address; the legacy ieee_address
-  # shorthand still works under the hood.
-  ground_floor_climate:
+  # Sonoff SNZB-02 climate sensors. Each reports on the room it sits in.
+  # The vocabulary has no floor-wide coverage (covers is "house" or a
+  # room), so a sensor placed to stand for a whole floor is still just
+  # in its room: consumers group it under that room, not as the floor's
+  # figure. Each is its own Zigbee device with an IEEE address; the
+  # legacy ieee_address shorthand still works under the hood.
+  hallway_climate:
     ieee_address: "0x00158d0000000010"
     class: environmental_sensor
-    display_name: Ground floor climate
+    display_name: Hallway climate
     room: ground.hallway
     floor: ground
-  first_floor_climate:
+  landing_climate:
     ieee_address: "0x00158d0000000011"
     class: environmental_sensor
-    display_name: First floor climate
+    display_name: Landing climate
     room: first.landing
     floor: first
-  loft_climate:
+  loft_bedroom_climate:
     ieee_address: "0x00158d0000000012"
     class: environmental_sensor
-    display_name: Loft climate
+    display_name: Loft bedroom climate
     room: loft.bedroom
     floor: loft
