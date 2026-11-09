@@ -253,6 +253,16 @@ device_classes:
     name_hints: [firealarm]
 
 devices:
+  # Placement uses the floorplan vocabulary (docs/floorplan-vocabulary.md):
+  #   room:   the floorplan room id the device sits in, "<floor>.<room>"
+  #   floor:  the floor it sits on, declared alongside room, never derived
+  #   covers: what its readings describe when that is not its own room:
+  #           "house" for whole-house devices, or another room id
+  # Leave a field out when it is unknown. "house" is never a room.
+  #
+  # location: is deprecated. It is still decoded, but only for namespaces
+  # that have not been republished; do not use it in new config.
+  #
   # The Glow/SMETS2 meter is recognised by the meter adapter regardless
   # of whether you list it here — its scheme is "meter" and the
   # whole-house electricity aggregator picks it up. Listing it explicitly
@@ -267,19 +277,22 @@ devices:
     ieee_address: "0x00158d0000000001"
     class: cycle_power_device
     display_name: Kitchen dishwasher
-    location: kitchen
+    room: ground.kitchen
+    floor: ground
 
   utility_dishwasher:
     ieee_address: "0x00158d0000000002"
     class: cycle_power_device
     display_name: Utility dishwasher
-    location: utility
+    room: ground.utility
+    floor: ground
 
   garage_freezer:
     ieee_address: "0x00158d0000000003"
     class: continuous_power_device
     display_name: Garage freezer
-    location: garage
+    room: ground.garage
+    floor: ground
 
   # --- Per-device energy_strategy override ---
   #
@@ -308,39 +321,50 @@ devices:
   #   ieee_address: "0x00158d0000000004"
   #   class: cycle_power_device
   #   display_name: Office heater
-  #   location: office
+  #   room: first.office
+  #   floor: first
   #   energy_strategy: integration   # plug counter ticks at 100 Wh; cycles ~25 Wh
 
   # boiler-sensor devices — Scheme/Primary identify the channels
   # the adapter emits. Display name is what /state/devices shows.
+  # The boiler sits in one room, but its readings describe the whole
+  # house, so room says where it is and covers says what it reports on.
   central_heating:
     scheme: boiler
     primary: ch
     class: binary_state_device
     display_name: Central heating
-    location: house
+    room: ground.utility
+    floor: ground
+    covers: house
   hot_water:
     scheme: boiler
     primary: hw
     class: binary_state_device
     display_name: Hot water
-    location: house
+    room: ground.utility
+    floor: ground
+    covers: house
 
-  # Sonoff SNZB-02 climate sensors, one per floor. Each is its own
+  # Sonoff SNZB-02 climate sensors, one per floor. room is the room each
+  # one sits in; floor is a separate field, not a room. Each is its own
   # Zigbee device with an IEEE address; the legacy ieee_address
   # shorthand still works under the hood.
   ground_floor_climate:
     ieee_address: "0x00158d0000000010"
     class: environmental_sensor
     display_name: Ground floor climate
-    location: ground_floor
+    room: ground.hallway
+    floor: ground
   first_floor_climate:
     ieee_address: "0x00158d0000000011"
     class: environmental_sensor
     display_name: First floor climate
-    location: first_floor
+    room: first.landing
+    floor: first
   loft_climate:
     ieee_address: "0x00158d0000000012"
     class: environmental_sensor
     display_name: Loft climate
-    location: loft
+    room: loft.bedroom
+    floor: loft
