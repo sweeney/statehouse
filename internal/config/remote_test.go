@@ -272,18 +272,63 @@ func TestFetcher_BehaviourAbsentSectionsPreserveLocal(t *testing.T) {
 
 // --- failure / fail-open ---
 
-func TestFetcher_TokenFailurePreservesLocalConfig(t *testing.T) {
+// A token failure is returned, and leaves cfg as it was: the caller discards
+// it (startup exits, a SIGHUP reload keeps the running config).
+func TestFetcher_TokenFailureLeavesConfigUntouched(t *testing.T) {
 	cfg := Default()
-	cfg.Devices = map[string]DeviceConfig{"local": {Class: "binary_state_device"}}
+	cfg.Site.DevicesNamespace = "devices_test"
+	cfg.Devices = map[string]DeviceConfig{"existing": {Class: "binary_state_device"}}
 
 	f := &Fetcher{
 		BaseURL: "http://127.0.0.1:1",
 		Tokens:  &errorTokenSource{},
 	}
-	f.ApplyRemote(context.Background(), &cfg)
+	if err := f.ApplyRemote(context.Background(), &cfg); err == nil {
+		t.Error("ApplyRemote() = nil after a token failure, want an error")
+	}
+	if _, ok := cfg.Devices["existing"]; !ok {
+		t.Error("existing device was removed after token failure")
+	}
+}
 
-	if _, ok := cfg.Devices["local"]; !ok {
-		t.Error("local device was removed after token failure")
+// Device entries are normalised as they are applied: the legacy
+// ieee_address/friendly_name shorthand becomes scheme/primary/display, an
+// explicit scheme and primary win over it, and a per-device energy_strategy
+// is kept for the resolver to override the class default with.
+func TestFetcher_DevicesAreNormalised(t *testing.T) {
+	mux := http.NewServeMux()
+	serveNamespace(mux, "statehouse_classes", map[string]any{})
+	serveNamespace(mux, "statehouse_behaviour", map[string]any{})
+	serveNamespace(mux, "devices_test", map[string]any{
+		"toaster": map[string]any{
+			"ieee_address": "0x1234567890abcdef", "friendly_name": "Kitchen Toaster",
+			"class": "short_burst_power_device",
+		},
+		"my_device": map[string]any{
+			"scheme": "tasmota", "primary": "explicit_primary", "ieee_address": "0xlegacy",
+		},
+		"officeheater": map[string]any{
+			"ieee_address": "0x20a716fffed18230", "class": "cycle_power_device",
+			"energy_strategy": "integration",
+		},
+	})
+	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
+	if err := newTestFetcher(t, mux).ApplyRemote(context.Background(), &cfg); err != nil {
+		t.Fatalf("ApplyRemote() = %v", err)
+	}
+
+	toaster := cfg.Devices["toaster"]
+	if toaster.Scheme != "zigbee" || toaster.Primary != "0x1234567890abcdef" || toaster.Display != "Kitchen Toaster" {
+		t.Errorf("toaster = %s/%s %q, want zigbee/0x1234567890abcdef \"Kitchen Toaster\"",
+			toaster.Scheme, toaster.Primary, toaster.Display)
+	}
+	explicit := cfg.Devices["my_device"]
+	if explicit.Scheme != "tasmota" || explicit.Primary != "explicit_primary" {
+		t.Errorf("my_device = %s/%s, want the explicit tasmota/explicit_primary", explicit.Scheme, explicit.Primary)
+	}
+	if got := cfg.Devices["officeheater"].EnergyStrategy; got != "integration" {
+		t.Errorf("officeheater energy_strategy = %q, want integration", got)
 	}
 }
 

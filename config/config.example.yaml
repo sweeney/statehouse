@@ -1,3 +1,19 @@
+# statehouse local configuration.
+#
+# This file holds only what this host needs to start and to reach everything
+# else: site, mqtt, identity, remote_config, http, auth, recent_log and influx.
+#
+# Everything else comes only from the config service (remote_config.base_url),
+# never from this file:
+#
+#   adapters, energy, availability, house   statehouse_behaviour
+#   device_classes                          statehouse_classes
+#   devices                                 the site's devices namespace
+#
+# statehouse refuses to start if this file sets any of those, or if the config
+# service cannot be reached. See docs/remote-config.md, and config/remote/ for
+# example namespace documents.
+
 # The property this instance serves.
 #
 #   id                 must match an id in the `sites` namespace. Supplies the `site`
@@ -19,44 +35,20 @@ mqtt:
   client_id: statehouse
   publish_prefix: house
 
-# Adapters translate protocol-specific MQTT traffic into engine calls.
-# The engine itself is protocol-agnostic — to add Tasmota / Shelly /
-# Homie / raw-topic sensors, add an adapter block here once those
-# adapters exist.
-adapters:
-  zigbee2mqtt:
-    enabled: true
-    base_topic: zigbee2mqtt
-  # sweeney/boiler-sensor — publishes CH/HW relay state on
-  # energy/boiler/sensor/{events,system}. Off by default; enable
-  # explicitly because the publisher targets specific hardware.
-  boiler:
-    enabled: false
-    base_topic: energy/boiler/sensor
-  # NUT-via-MQTT UPS adapter. Subscribes to ups/{upsname}/state.
-  ups:
-    enabled: false
-    base_topic: ups
-  # Weather station adapter. Subscribes to {base}/{location}/observation.
-  climate:
-    enabled: false
-    base_topic: climate
-  # Glow/SMETS2 smart meter adapter. Subscribes to energy/{serial}/SENSOR/...
-  meter:
-    enabled: false
-    base_topic: energy
-  # Asterisk-via-MQTT intercom adapter. Tracks in-flight calls as
-  # activity signals. Subscribes to {base}/call/... and {base}/status.
-  intercom:
-    enabled: false
-    base_topic: asterisk
-  # sweeney/tanktemp — 1-Wire probes on a hot water cylinder. Subscribes
-  # to {base}/+/state and {base}/status; one device per probe, identity
-  # scheme tanktemp, primary <cylinder id>.<position>. Off by default:
-  # the cylinder and probe entries must be in the devices namespace first.
-  tanktemp:
-    enabled: false
-    base_topic: energy/hot_water
+# Credentials statehouse uses to call out: a client_credentials client at the
+# identity service, used for the Bearer token sent to the config service.
+# Required. (auth, below, is the other direction: tokens coming in.)
+identity:
+  base_url: https://id.example.net
+  client_id: statehouse
+  client_secret: change-me
+
+# The config service holding statehouse_behaviour, statehouse_classes and the
+# site's devices namespace. Required: there is no local mode. Read at startup
+# and again on SIGHUP; a failed read at startup stops the service, and a failed
+# SIGHUP reload keeps the running config.
+remote_config:
+  base_url: https://config.example.net
 
 http:
   listen: :8383
@@ -148,226 +140,3 @@ influx:
   bucket: house
   token_file: /etc/statehouse/influx-token
 
-energy:
-  divergence_warning_pct: 20
-  max_integration_gap: 30m
-  electricity:
-    # staleness_active: how long a non-idle per-device power reading is
-    # trusted before it's dropped from the whole-house monitored sum.
-    staleness_active: 90s
-    # staleness_idle: how long a 0W reading is trusted. Change-reporting
-    # plugs (Aqara, IKEA) can legitimately go many minutes silent at
-    # idle; we don't want them flagged stale.
-    staleness_idle: 30m
-    # idle_below_w: a Latest.PowerW at or below this threshold uses the
-    # idle staleness window. Plugs reading above it use the active one.
-    idle_below_w: 5
-
-availability:
-  offline_debounce: 30s
-
-house:
-  quiet_after: 30m
-  empty_after: 6h
-  # Timezone used to bucket the mode dimension's night/day hours.
-  # Empty (or omitted) means UTC. Set to your local tz (e.g.
-  # "Europe/London", "America/Los_Angeles", or "Local") so the
-  # Mode=Night / Mode=Day window matches the operator's wall clock.
-  timezone: Local
-
-device_classes:
-  short_burst_power_device:
-    name_hints: [kettle, toaster, microwave]
-    default_thresholds:
-      idle_below_w: 5
-      active_above_w: 50
-      active_sustained_for: 3s
-      inactive_sustained_for: 10s
-    energy_strategy: counter
-
-  cycle_power_device:
-    name_hints: [dishwasher, washing_machine, washer, tumble_dryer, dryer]
-    default_thresholds:
-      idle_below_w: 5
-      active_above_w: 20
-      active_sustained_for: 10s
-      inactive_sustained_for: 5m
-    energy_strategy: counter
-
-  continuous_power_device:
-    name_hints: [fridge, freezer, dehumidifier]
-    default_thresholds:
-      idle_below_w: 5
-      active_above_w: 25
-      compressor_above_w: 25
-      active_sustained_for: 10s
-      inactive_sustained_for: 30s
-    energy_strategy: integration
-
-  media_power_device:
-    name_hints: [tv, television, av, amplifier, receiver, apple_tv, speakers]
-    default_thresholds:
-      idle_below_w: 5
-      active_above_w: 20
-      active_sustained_for: 10s
-      inactive_sustained_for: 60s
-    energy_strategy: integration
-
-  # State-only devices: boiler relays, contact sensors, motion
-  # sensors, smart switches that report state without power. The
-  # sustained-for windows debounce short blips; sensors that
-  # already debounce upstream (like boiler-sensor) can use 0.
-  binary_state_device:
-    default_thresholds:
-      active_sustained_for: 0s
-      inactive_sustained_for: 0s
-
-  # Measurement-only environmental devices: climate sensors (Sonoff
-  # SNZB-02 etc.), air-quality, illuminance. No cycle, no activity
-  # machine — activity stays "reporting" while the device transmits.
-  # Latest values (temp / humidity / battery) flow into the device
-  # record and into Influx as device_environment / device_battery.
-  environmental_sensor:
-    name_hints: [climate, thsensor, snzb]
-
-  # UPS devices. Like environmental_sensor they are measurement-only
-  # (no cycles, no occupancy contribution) but carry UPS-specific
-  # fields: on_battery, low_battery, battery_runtime_mins.
-  ups_sensor:
-    name_hints: [ups]
-
-  # Whole-home electricity meters and IHD devices. Measurement-only:
-  # reports cumulative kWh, import/export, instantaneous power.
-  # No cycles, no occupancy contribution.
-  energy_meter:
-    name_hints: [electricitymeter, meter]
-
-  # Zigbee smoke/heat detectors (HEIMAN HS1SA-E-PLUS etc.). A thin alias
-  # of environmental_sensor: measurement-only passive behaviour so the
-  # onboard temperature/battery flow into Influx and the change-driven
-  # idle gaps (30-45+ min between reports) are never flagged stale. Its
-  # own class only so safety alarms tag distinctly from TH sensors. Do
-  # not classify these as binary_state_device — that would feed occupancy
-  # and debounce the latched alarm re-broadcast.
-  fire_alarm:
-    name_hints: [firealarm]
-
-devices:
-  # Placement uses the floorplan vocabulary (docs/floorplan-vocabulary.md):
-  #   room:   the floorplan room id the device sits in, "<floor>.<room>"
-  #   floor:  the floor it sits on, declared alongside room, never derived
-  #   covers: what its readings describe when that is not its own room:
-  #           "house" for whole-house devices, or another room id
-  # Leave a field out when it is unknown. "house" is never a room.
-  #
-  # location: is deprecated. It is still decoded, from this file and from
-  # namespaces that have not been republished, and read as the room when
-  # room is absent; do not use it in new config.
-  #
-  # The Glow/SMETS2 meter is recognised by the meter adapter regardless
-  # of whether you list it here — its scheme is "meter" and the
-  # whole-house electricity aggregator picks it up. Listing it explicitly
-  # gives the device a nicer display name and a stable engine id.
-  house_meter:
-    scheme: meter
-    primary: "001122AABBCC"
-    class: energy_meter
-    display_name: House meter
-
-  kitchen_dishwasher:
-    ieee_address: "0x00158d0000000001"
-    class: cycle_power_device
-    display_name: Kitchen dishwasher
-    room: ground.kitchen
-    floor: ground
-
-  utility_dishwasher:
-    ieee_address: "0x00158d0000000002"
-    class: cycle_power_device
-    display_name: Utility dishwasher
-    room: ground.utility
-    floor: ground
-
-  garage_freezer:
-    ieee_address: "0x00158d0000000003"
-    class: continuous_power_device
-    display_name: Garage freezer
-    room: ground.garage
-    floor: ground
-
-  # --- Per-device energy_strategy override ---
-  #
-  # Some Zigbee smart plugs report energy counters in coarse increments
-  # (commonly 10 Wh or 100 Wh depending on firmware). When a device's
-  # typical cycle completes below the counter's tick size, the counter
-  # never moves, and the engine raises a stale_counter warning every
-  # cycle because it expected the counter to advance.
-  #
-  # Diagnosis: look for a device with:
-  #   - warnings: ["stale_counter"]
-  #   - cycle.energy.reported_kwh_delta == 0
-  #   - cycle.energy.integrated_kwh > 0 (real work happened)
-  #
-  # Fix: set energy_strategy: integration on that specific device. The
-  # engine will trust the finer-grained integrated value and stop
-  # raising stale_counter. Other devices in the same class keep using
-  # the class default (counter), which is correct when their cycles are
-  # large enough for the counter to tick.
-  #
-  # Do NOT raise the stale_counter detection threshold instead: that
-  # would silently hide genuinely broken counters on any device whose
-  # cycle happens to be small.
-  #
-  # office_heater:
-  #   ieee_address: "0x00158d0000000004"
-  #   class: cycle_power_device
-  #   display_name: Office heater
-  #   room: first.office
-  #   floor: first
-  #   energy_strategy: integration   # plug counter ticks at 100 Wh; cycles ~25 Wh
-
-  # boiler-sensor devices — Scheme/Primary identify the channels
-  # the adapter emits. Display name is what /state/devices shows.
-  # The boiler sits in one room, but its readings describe the whole
-  # house, so room says where it is and covers says what it reports on.
-  central_heating:
-    scheme: boiler
-    primary: ch
-    class: binary_state_device
-    display_name: Central heating
-    room: ground.utility
-    floor: ground
-    covers: house
-  hot_water:
-    scheme: boiler
-    primary: hw
-    class: binary_state_device
-    display_name: Hot water
-    room: ground.utility
-    floor: ground
-    covers: house
-
-  # Sonoff SNZB-02 climate sensors. Each reports on the room it sits in.
-  # The vocabulary has no floor-wide coverage (covers is "house" or a
-  # room), so a sensor placed to stand for a whole floor is still just
-  # in its room: consumers group it under that room, not as the floor's
-  # figure. Each is its own Zigbee device with an IEEE address; the
-  # legacy ieee_address shorthand still works under the hood.
-  hallway_climate:
-    ieee_address: "0x00158d0000000010"
-    class: environmental_sensor
-    display_name: Hallway climate
-    room: ground.hallway
-    floor: ground
-  landing_climate:
-    ieee_address: "0x00158d0000000011"
-    class: environmental_sensor
-    display_name: Landing climate
-    room: first.landing
-    floor: first
-  loft_bedroom_climate:
-    ieee_address: "0x00158d0000000012"
-    class: environmental_sensor
-    display_name: Loft bedroom climate
-    room: loft.bedroom
-    floor: loft

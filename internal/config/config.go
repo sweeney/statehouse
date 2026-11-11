@@ -13,22 +13,52 @@ import (
 	"github.com/sweeney/statehouse/internal/origin"
 )
 
-// Config is the top-level service configuration loaded from YAML.
+// Config is the service configuration. It has two sources, and each field
+// has exactly one of them:
+//
+//   - The local YAML file (Load) holds only what this host needs to start and
+//     to reach everything else: site, mqtt, http, recent_log, influx,
+//     identity, remote_config and auth.
+//   - The config service (Fetcher.ApplyRemote) supplies everything else:
+//     adapters, energy, availability and house from statehouse_behaviour,
+//     device_classes from statehouse_classes, and devices from the site's
+//     devices namespace. These fields are yaml:"-", and Load refuses a local
+//     file that sets them (remoteOnlySections), so a local copy can never be
+//     silently overridden.
+//
+// Defaults (Default) fill both halves before either source is applied.
 type Config struct {
-	Site          SiteConfig                   `yaml:"site"`
-	MQTT          MQTTConfig                   `yaml:"mqtt"`
-	HTTP          HTTPConfig                   `yaml:"http"`
-	RecentLog     RecentLogConfig              `yaml:"recent_log"`
-	Influx        InfluxConfig                 `yaml:"influx"`
-	Energy        EnergyConfig                 `yaml:"energy"`
-	Availability  AvailabilityConfig           `yaml:"availability"`
-	House         HouseConfig                  `yaml:"house"`
-	Adapters      AdaptersConfig               `yaml:"adapters"`
-	DeviceClasses map[string]DeviceClassConfig `yaml:"device_classes"`
-	Devices       map[string]DeviceConfig      `yaml:"devices"`
-	Identity      IdentityConfig               `yaml:"identity"`
-	RemoteConfig  RemoteConfigConfig           `yaml:"remote_config"`
-	Auth          AuthConfig                   `yaml:"auth"`
+	// Local: read from the YAML file.
+	Site         SiteConfig         `yaml:"site"`
+	MQTT         MQTTConfig         `yaml:"mqtt"`
+	HTTP         HTTPConfig         `yaml:"http"`
+	RecentLog    RecentLogConfig    `yaml:"recent_log"`
+	Influx       InfluxConfig       `yaml:"influx"`
+	Identity     IdentityConfig     `yaml:"identity"`
+	RemoteConfig RemoteConfigConfig `yaml:"remote_config"`
+	Auth         AuthConfig         `yaml:"auth"`
+
+	// Remote: from the config service only, never the YAML file.
+	Energy        EnergyConfig                 `yaml:"-"` // statehouse_behaviour
+	Availability  AvailabilityConfig           `yaml:"-"` // statehouse_behaviour
+	House         HouseConfig                  `yaml:"-"` // statehouse_behaviour
+	Adapters      AdaptersConfig               `yaml:"-"` // statehouse_behaviour
+	DeviceClasses map[string]DeviceClassConfig `yaml:"-"` // statehouse_classes
+	Devices       map[string]DeviceConfig      `yaml:"-"` // site.devices_namespace
+}
+
+// remoteOnlySections are the top-level YAML keys that belong to the config
+// service, with the namespace each one lives in. Load refuses them: they used
+// to be read locally and then replaced by the remote copy, so a local edit
+// could do nothing at all, with no sign why. An empty namespace means the
+// site's devices namespace (site.devices_namespace).
+var remoteOnlySections = []struct{ key, namespace string }{
+	{"adapters", nsBehaviour},
+	{"energy", nsBehaviour},
+	{"availability", nsBehaviour},
+	{"house", nsBehaviour},
+	{"device_classes", nsClasses},
+	{"devices", ""},
 }
 
 // SiteConfig identifies the property this instance serves and where that property's
@@ -381,14 +411,14 @@ type DeviceClassConfig struct {
 	StalenessSeconds *int `yaml:"staleness_seconds" json:"staleness_seconds,omitempty"`
 }
 
-// DeviceConfig is one device in a devices_<site> namespace, or in local YAML:
+// DeviceConfig is one device in a devices_<site> namespace:
 // the shared schema, whose Place, Coverage and Normalise statehouse uses as is.
 type DeviceConfig = devices.Device
 
-// Default returns a config populated with safe defaults; YAML values
-// override these.
+// Default returns a config populated with safe defaults. The local YAML
+// overrides the local fields, and the config service the remote ones.
 func Default() Config {
-	return Config{
+	cfg := Config{
 		MQTT: MQTTConfig{
 			Broker:        "tcp://localhost:1883",
 			ClientID:      "statehouse",
@@ -399,9 +429,6 @@ func Default() Config {
 			Path:           "/var/lib/statehouse/events.jsonl",
 			RetentionHours: 72,
 			MaxSizeMB:      256,
-		},
-		Adapters: AdaptersConfig{
-			Zigbee2MQTT: Zigbee2MQTTConfig{BaseTopic: "zigbee2mqtt"},
 		},
 		Energy: EnergyConfig{
 			DivergenceWarningPct: 20,
@@ -416,14 +443,44 @@ func Default() Config {
 			SleepingAfter: 2 * time.Hour,
 		},
 	}
+	cfg.Adapters.fillDefaults()
+	return cfg
 }
 
-// Load reads and parses YAML from path on top of the defaults.
+// fillDefaults gives every adapter with no base_topic its protocol's default.
+// It runs on Default and again after the remote adapters block is applied,
+// since that block replaces the whole section.
+func (a *AdaptersConfig) fillDefaults() {
+	for _, f := range []struct {
+		topic *string
+		def   string
+	}{
+		{&a.Zigbee2MQTT.BaseTopic, "zigbee2mqtt"},
+		{&a.Boiler.BaseTopic, "energy/boiler/sensor"},
+		{&a.UPS.BaseTopic, "ups"},
+		{&a.Climate.BaseTopic, "climate"},
+		{&a.Meter.BaseTopic, "energy"},
+		{&a.Intercom.BaseTopic, "asterisk"},
+		// Mirrors tanktemp.DefaultBase; config must not import an adapter.
+		{&a.Tanktemp.BaseTopic, "energy/hot_water"},
+	} {
+		if *f.topic == "" {
+			*f.topic = f.def
+		}
+	}
+}
+
+// Load reads the local YAML file from path on top of the defaults. It reads
+// only the local fields (see Config); the remote ones are filled later by
+// Fetcher.ApplyRemote, and a file that sets one is refused.
 func Load(path string) (Config, error) {
 	cfg := Default()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, fmt.Errorf("read config: %w", err)
+	}
+	if err := rejectRemoteOnlySections(raw, path); err != nil {
+		return cfg, err
 	}
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config: %w", err)
@@ -438,41 +495,40 @@ func Load(path string) (Config, error) {
 	if cfg.MQTT.PublishPrefix == "" {
 		cfg.MQTT.PublishPrefix = "house"
 	}
-	if cfg.House.Timezone != "" {
-		if _, err := time.LoadLocation(cfg.House.Timezone); err != nil {
-			return cfg, fmt.Errorf("parse house.timezone %q: %w", cfg.House.Timezone, err)
-		}
-	}
-	if cfg.Adapters.Zigbee2MQTT.BaseTopic == "" {
-		cfg.Adapters.Zigbee2MQTT.BaseTopic = "zigbee2mqtt"
-	}
-	if cfg.Adapters.Boiler.BaseTopic == "" {
-		cfg.Adapters.Boiler.BaseTopic = "energy/boiler/sensor"
-	}
-	if cfg.Adapters.UPS.BaseTopic == "" {
-		cfg.Adapters.UPS.BaseTopic = "ups"
-	}
-	if cfg.Adapters.Climate.BaseTopic == "" {
-		cfg.Adapters.Climate.BaseTopic = "climate"
-	}
-	if cfg.Adapters.Meter.BaseTopic == "" {
-		cfg.Adapters.Meter.BaseTopic = "energy"
-	}
-	if cfg.Adapters.Intercom.BaseTopic == "" {
-		cfg.Adapters.Intercom.BaseTopic = "asterisk"
-	}
-	// Mirrors tanktemp.DefaultBase; config must not import an adapter.
-	if cfg.Adapters.Tanktemp.BaseTopic == "" {
-		cfg.Adapters.Tanktemp.BaseTopic = "energy/hot_water"
-	}
-	// Normalise legacy Z2M shorthand on device entries.
-	normaliseDevices(cfg.Devices)
 	return cfg, nil
 }
 
+// rejectRemoteOnlySections refuses a local file that sets any section the
+// config service owns, naming every one at once and where each now lives.
+func rejectRemoteOnlySections(raw []byte, path string) error {
+	var top map[string]yaml.Node
+	if err := yaml.Unmarshal(raw, &top); err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+	var found []string
+	for _, s := range remoteOnlySections {
+		if _, ok := top[s.key]; !ok {
+			continue
+		}
+		ns := s.namespace
+		if ns == "" {
+			ns = "the site's devices namespace (site.devices_namespace, e.g. devices_home)"
+		}
+		found = append(found, fmt.Sprintf("  %s: lives in %s", s.key, ns))
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s sets sections that come only from the config service "+
+		"(remote_config.base_url), never from the local file:\n\n%s\n\nMove them to "+
+		"those namespaces and delete them from %s. They used to be read locally and "+
+		"then silently replaced by the remote copy, so a local edit could have no "+
+		"effect. See docs/remote-config.md", path, strings.Join(found, "\n"), path)
+}
+
 // normaliseDevices converts legacy ieee_address/friendly_name shorthands
-// into the canonical scheme/primary/display fields. Called by both Load
-// (for local YAML) and the remote config fetcher.
+// into the canonical scheme/primary/display fields. Called by the remote
+// config fetcher for every devices namespace it applies.
 func normaliseDevices(m map[string]DeviceConfig) {
 	for id, d := range m {
 		d.Normalise()
@@ -530,6 +586,22 @@ func (c Config) Validate() error {
 		return fmt.Errorf("site.devices_namespace %q is not a name the config service "+
 			"accepts (lowercase letters, digits, _ and -, at most 64), so it could never "+
 			"be fetched: %w", c.Site.DevicesNamespace, err)
+	}
+	// Devices, classes, adapters and behaviour come only from the config
+	// service, so without it the service would start, report healthy and do
+	// nothing. There is no local mode.
+	for _, f := range []struct{ value, key string }{
+		{c.RemoteConfig.BaseURL, "remote_config.base_url"},
+		{c.Identity.BaseURL, "identity.base_url"},
+		{c.Identity.ClientID, "identity.client_id"},
+		{c.Identity.ClientSecret, "identity.client_secret"},
+	} {
+		if f.value == "" {
+			return fmt.Errorf("%s is not set: statehouse reads its devices, classes, "+
+				"adapters and behaviour only from the config service, and needs "+
+				"remote_config.base_url and identity credentials to fetch them. See "+
+				"docs/remote-config.md", f.key)
+		}
 	}
 	if _, err := origin.Compile(c.HTTP.AllowedOrigins); err != nil {
 		return fmt.Errorf("http.allowed_origins: %w\n\nAn entry is an origin — a scheme, a "+

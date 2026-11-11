@@ -1,0 +1,68 @@
+{
+  "central_heating": {
+    "class": "binary_state_device",
+    "covers": "house",
+    "display_name": "Central heating",
+    "floor": "ground",
+    "primary": "ch",
+    "room": "ground.utility",
+    "scheme": "boiler"
+  },
+  "garage_freezer": {
+    "class": "continuous_power_device",
+    "display_name": "Garage freezer",
+    "floor": "ground",
+    "ieee_address": "0x00158d0000000003",
+    "room": "ground.garage"
+  },
+  "hallway_climate": {
+    "class": "environmental_sensor",
+    "display_name": "Hallway climate",
+    "floor": "ground",
+    "ieee_address": "0x00158d0000000010",
+    "room": "ground.hallway"
+  },
+  "hot_water": {
+    "class": "binary_state_device",
+    "covers": "house",
+    "display_name": "Hot water",
+    "floor": "ground",
+    "primary": "hw",
+    "room": "ground.utility",
+    "scheme": "boiler"
+  },
+  "house_meter": {
+    "class": "energy_meter",
+    "display_name": "House meter",
+    "primary": "001122AABBCC",
+    "scheme": "meter"
+  },
+  "kitchen_dishwasher": {
+    "class": "cycle_power_device",
+    "display_name": "Kitchen dishwasher",
+    "floor": "ground",
+    "ieee_address": "0x00158d0000000001",
+    "room": "ground.kitchen"
+  },
+  "landing_climate": {
+    "class": "environmental_sensor",
+    "display_name": "Landing climate",
+    "floor": "first",
+    "ieee_address": "0x00158d0000000011",
+    "room": "first.landing"
+  },
+  "loft_bedroom_climate": {
+    "class": "environmental_sensor",
+    "display_name": "Loft bedroom climate",
+    "floor": "loft",
+    "ieee_address": "0x00158d0000000012",
+    "room": "loft.bedroom"
+  },
+  "utility_dishwasher": {
+    "class": "cycle_power_device",
+    "display_name": "Utility dishwasher",
+    "floor": "ground",
+    "ieee_address": "0x00158d0000000002",
+    "room": "ground.utility"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "binary_state_device": {
+    "default_thresholds": {
+      "active_sustained_for": "0s",
+      "inactive_sustained_for": "0s"
+    }
+  },
+  "continuous_power_device": {
+    "default_thresholds": {
+      "active_above_w": 25,
+      "active_sustained_for": "10s",
+      "compressor_above_w": 25,
+      "idle_below_w": 5,
+      "inactive_sustained_for": "30s"
+    },
+    "energy_strategy": "integration",
+    "name_hints": [
+      "fridge",
+      "freezer",
+      "dehumidifier"
+    ]
+  },
+  "cycle_power_device": {
+    "default_thresholds": {
+      "active_above_w": 20,
+      "active_sustained_for": "10s",
+      "idle_below_w": 5,
+      "inactive_sustained_for": "5m"
+    },
+    "energy_strategy": "counter",
+    "name_hints": [
+      "dishwasher",
+      "washing_machine",
+      "washer",
+      "tumble_dryer",
+      "dryer"
+    ]
+  },
+  "energy_meter": {
+    "name_hints": [
+      "electricitymeter",
+      "meter"
+    ]
+  },
+  "environmental_sensor": {
+    "name_hints": [
+      "climate",
+      "thsensor",
+      "snzb"
+    ]
+  },
+  "fire_alarm": {
+    "name_hints": [
+      "firealarm"
+    ]
+  },
+  "media_power_device": {
+    "default_thresholds": {
+      "active_above_w": 20,
+      "active_sustained_for": "10s",
+      "idle_below_w": 5,
+      "inactive_sustained_for": "60s"
+    },
+    "energy_strategy": "integration",
+    "name_hints": [
+      "tv",
+      "television",
+      "av",
+      "amplifier",
+      "receiver",
+      "apple_tv",
+      "speakers"
+    ]
+  },
+  "short_burst_power_device": {
+    "default_thresholds": {
+      "active_above_w": 50,
+      "active_sustained_for": "3s",
+      "idle_below_w": 5,
+      "inactive_sustained_for": "10s"
+    },
+    "energy_strategy": "counter",
+    "name_hints": [
+      "kettle",
+      "toaster",
+      "microwave"
+    ]
+  },
+  "ups_sensor": {
+    "name_hints": [
+      "ups"
+    ]
+  },
+  "appliance_probe": {
+    "name_hints": [
+      "probe"
+    ]
+  }
+}

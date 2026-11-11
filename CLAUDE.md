@@ -16,3 +16,14 @@ DTO gains a schema.
 derived — in particular `floor` is not parsed out of the `<floor>.<slug>` room id. See
 `docs/floorplan-vocabulary.md` for what statehouse deliberately does not relay
 (`coordinate`, `note`) and why room is not an Influx tag.
+
+## Local vs remote config
+
+The local YAML holds only connection settings (`site`, `mqtt`, `identity`,
+`remote_config`, `http`, `auth`, `recent_log`, `influx`). `adapters`, `energy`,
+`availability`, `house`, `device_classes` and `devices` come only from the
+config service, and `Load` refuses a local file that sets them. To switch an
+adapter on or change behaviour, edit `statehouse_behaviour` and restart (SIGHUP
+does not start or stop adapters). A new remote-only setting goes on a `yaml:"-"`
+field and in `remoteOnlySections`; a new local one gets a yaml tag. See
+`docs/remote-config.md`.

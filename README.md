@@ -18,6 +18,9 @@ go test ./...
 statehouse -config config/config.example.yaml
 ```
 
+The example needs a reachable config service and identity client (see
+[Remote config](#remote-config)); statehouse does not start without them.
+
 The config must declare which property this instance serves:
 
 ```yaml
@@ -432,24 +435,33 @@ Device classes today:
 
 ## Remote config
 
-Device classification, per-device overrides, and behaviour tuning are
-managed through a remote config service rather than the local YAML file.
-On startup the daemon fetches three namespaces from the URL set in
-`remote_config.base_url` (authenticated via the identity service):
+The local YAML file holds only what the host needs to start and to reach
+everything else: `site`, `mqtt`, `identity`, `remote_config`, `http`, `auth`,
+`recent_log` and `influx`. Everything else comes **only** from the config
+service at `remote_config.base_url`, authenticated via the identity service:
 
-- the site's devices namespace, named by `site.devices_namespace` (e.g.
-  `devices_home`) — per-device overrides (class, thresholds,
-  `energy_strategy`, `display_name`, `location`).
-- `statehouse_classes` — device class definitions (name hints, default
-  thresholds, energy strategy).
-- `statehouse_behaviour` — runtime tuning (energy, availability, house,
-  adapter config).
+| Setting | Namespace |
+|---|---|
+| `adapters`, `energy`, `availability`, `house` | `statehouse_behaviour` |
+| `device_classes` | `statehouse_classes` |
+| `devices` | the site's devices namespace, named by `site.devices_namespace` (e.g. `devices_home`) |
 
-Remote values win over local config on overlap. A namespace that fails
-to fetch is skipped non-fatally; the local config value is preserved.
-The `/healthz` endpoint reports the fetch status of each namespace,
-including a failure to get an identity token, which is recorded against
-all three.
+statehouse refuses to start if the local file sets any of those sections
+(the error names where each one lives), if `remote_config` or `identity` is
+missing, or if any namespace cannot be fetched; systemd restarts it until the
+config service is reachable. There is no local mode.
+
+On SIGHUP the three namespaces are fetched again and applied without a
+restart. If any fetch fails, the running config is kept. Adapters are built
+only at startup, so switching one on or off needs a restart, as does any
+change to the local file. `/healthz` reports each namespace's last fetch,
+including a failure to get an identity token, which is recorded against all
+three.
+
+A `statehouse_behaviour` section replaces the whole of that section, so list
+every key you mean to set. Example documents for all three namespaces are in
+`config/remote/`, and [docs/remote-config.md](docs/remote-config.md) explains
+each setting.
 
 The transport is `github.com/sweeney/common/remoteconfig`, shared with
 countinghouse and greenhouse. A `401` is retried once with a fresh token;
@@ -457,9 +469,6 @@ a body that is not a JSON object is refused rather than merged as empty;
 requests carry `User-Agent: statehouse/<version>`. `site.devices_namespace`
 must be a name the config service accepts (`^[a-z0-9_-]{1,64}$`) or the
 daemon refuses to start.
-
-To update device config (e.g. override a device's energy strategy),
-edit the remote config service — not the local YAML.
 
 ## Notes
 
