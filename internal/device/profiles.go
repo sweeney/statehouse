@@ -149,9 +149,9 @@ type Resolver struct {
 }
 
 // NewResolver builds a resolver from the loaded config. Device entries
-// in config.Devices are normalised by config.Load() so this resolver
-// sees canonical Scheme/Primary/Display fields even when the YAML
-// used the legacy ieee_address/friendly_name shorthand.
+// in config.Devices are normalised by the remote config fetcher, so this
+// resolver sees canonical Scheme/Primary/Display fields even when the
+// devices namespace uses the legacy ieee_address/friendly_name shorthand.
 func NewResolver(cfg config.Config) *Resolver {
 	r := &Resolver{
 		classes:     cfg.DeviceClasses,

@@ -27,13 +27,20 @@ through the real fetcher, and carry no key statehouse would ignore.
 
 ## When it is read
 
-- **At startup**, all three namespaces are fetched. If any fetch fails, or the
-  local file has no `remote_config` or `identity` block, statehouse exits
-  non-zero. systemd restarts it until the config service is reachable. There
-  is no local mode.
+- **At startup**, all three namespaces are fetched (30 s budget, token
+  included). If any fetch fails, or the local file has no `remote_config` or
+  `identity` block, statehouse exits non-zero. systemd restarts it until the
+  config service is reachable. There is no local mode, and no cached copy:
+  **statehouse cannot start or restart while the config service or identity
+  is unreachable.** A running statehouse is unaffected by an outage; a
+  restart during one (crash, deploy, host reboot) waits for it to end, and
+  MQTT state, Influx writes and the HTTP API stop until then.
 - **On SIGHUP** (`systemctl kill -s HUP statehouse`), all three are fetched
-  again and applied to the running engine. If any fetch fails, the running
-  config is kept and the failure is logged.
+  again and applied to the running engine. If any fetch fails, or a document
+  is refused, the running config is kept and the failure is logged.
+- A `statehouse_behaviour` document whose `house.timezone` is not a tz
+  database name is refused (at startup: statehouse exits; on SIGHUP: the
+  running config is kept), rather than falling back to UTC.
 - **Restart, not SIGHUP,** for: switching an adapter on or off, or changing its
   `base_topic` (adapters are built once, at startup), and any change to the
   local file.
@@ -92,7 +99,7 @@ unless `enabled` is `false`.
 | `quiet_after` | `30m` | No activity for this long: the house is quiet. |
 | `empty_after` | `6h` | Quiet this long with no sign of presence: empty. |
 | `sleeping_after` | `2h` | Occupied and quiet this long: sleeping. `0` never enters sleeping. |
-| `timezone` | UTC | tz database name (e.g. `Europe/London`, or `Local` for the host's zone) for the mode dimension's night/day hours. |
+| `timezone` | UTC | tz database name (e.g. `Europe/London`, or `Local` for the host's zone) for the mode dimension's night/day hours. A name that does not resolve refuses the whole document. |
 
 ## `statehouse_classes`
 

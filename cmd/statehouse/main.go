@@ -71,7 +71,9 @@ func main() {
 		Logger:    logger,
 		UserAgent: "statehouse/" + version,
 	}
-	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Longer than a SIGHUP reload's budget: a timeout here exits, and right
+	// after a host reboot identity and config may be up but slow.
+	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	err = remoteCfgFetcher.ApplyRemote(fetchCtx, &cfg)
 	fetchCancel()
 	if err != nil {

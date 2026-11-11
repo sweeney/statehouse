@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/sweeney/common/devices"
 	"github.com/sweeney/common/remoteconfig"
@@ -180,6 +181,17 @@ func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconf
 		f.warn("remote config: statehouse_behaviour unavailable", "error", err)
 		f.tracker.Record(nsBehaviour, err)
 		return fmt.Errorf("%s: %w", nsBehaviour, err)
+	}
+	// Location() falls back to UTC on a name it cannot resolve, so a typo
+	// would apply cleanly and shift the night/day window with nothing showing
+	// it. Refuse the document instead, before any of it is applied.
+	if b.House != nil && b.House.Timezone != "" {
+		if _, err := time.LoadLocation(b.House.Timezone); err != nil {
+			err = fmt.Errorf("house.timezone %q: %w", b.House.Timezone, err)
+			f.warn("remote config: statehouse_behaviour rejected", "error", err)
+			f.tracker.Record(nsBehaviour, err)
+			return fmt.Errorf("%s: %w", nsBehaviour, err)
+		}
 	}
 	f.tracker.Record(nsBehaviour, nil)
 	if b.Energy != nil {

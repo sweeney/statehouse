@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -38,27 +39,37 @@ type Config struct {
 	RemoteConfig RemoteConfigConfig `yaml:"remote_config"`
 	Auth         AuthConfig         `yaml:"auth"`
 
-	// Remote: from the config service only, never the YAML file.
-	Energy        EnergyConfig                 `yaml:"-"` // statehouse_behaviour
-	Availability  AvailabilityConfig           `yaml:"-"` // statehouse_behaviour
-	House         HouseConfig                  `yaml:"-"` // statehouse_behaviour
-	Adapters      AdaptersConfig               `yaml:"-"` // statehouse_behaviour
-	DeviceClasses map[string]DeviceClassConfig `yaml:"-"` // statehouse_classes
-	Devices       map[string]DeviceConfig      `yaml:"-"` // site.devices_namespace
+	// Remote: from the config service only, never the YAML file. The remote
+	// tag is "<the YAML key Load refuses>,<namespace>"; no namespace means
+	// the site's devices namespace (site.devices_namespace).
+	Energy        EnergyConfig                 `yaml:"-" remote:"energy,statehouse_behaviour"`
+	Availability  AvailabilityConfig           `yaml:"-" remote:"availability,statehouse_behaviour"`
+	House         HouseConfig                  `yaml:"-" remote:"house,statehouse_behaviour"`
+	Adapters      AdaptersConfig               `yaml:"-" remote:"adapters,statehouse_behaviour"`
+	DeviceClasses map[string]DeviceClassConfig `yaml:"-" remote:"device_classes,statehouse_classes"`
+	Devices       map[string]DeviceConfig      `yaml:"-" remote:"devices"`
 }
 
 // remoteOnlySections are the top-level YAML keys that belong to the config
-// service, with the namespace each one lives in. Load refuses them: they used
-// to be read locally and then replaced by the remote copy, so a local edit
-// could do nothing at all, with no sign why. An empty namespace means the
-// site's devices namespace (site.devices_namespace).
-var remoteOnlySections = []struct{ key, namespace string }{
-	{"adapters", nsBehaviour},
-	{"energy", nsBehaviour},
-	{"availability", nsBehaviour},
-	{"house", nsBehaviour},
-	{"device_classes", nsClasses},
-	{"devices", ""},
+// service, with the namespace each one lives in, read from the remote tags on
+// Config so the list cannot drift from the fields. Load refuses them: they
+// used to be read locally and then replaced by the remote copy, so a local
+// edit could do nothing at all, with no sign why. An empty namespace means
+// the site's devices namespace (site.devices_namespace).
+var remoteOnlySections = remoteSectionsFromTags()
+
+func remoteSectionsFromTags() []struct{ key, namespace string } {
+	var out []struct{ key, namespace string }
+	ct := reflect.TypeOf(Config{})
+	for i := 0; i < ct.NumField(); i++ {
+		tag, ok := ct.Field(i).Tag.Lookup("remote")
+		if !ok {
+			continue
+		}
+		key, ns, _ := strings.Cut(tag, ",")
+		out = append(out, struct{ key, namespace string }{key, ns})
+	}
+	return out
 }
 
 // SiteConfig identifies the property this instance serves and where that property's
@@ -376,16 +387,17 @@ type HouseConfig struct {
 	// Timezone names a tz database location (e.g. "Europe/London") used to
 	// classify the mode dimension's night/day hour window. Empty means UTC
 	// (back-compat for existing configs); "Local" uses the host time zone.
-	// Load() rejects values that time.LoadLocation cannot resolve (typo,
-	// missing tzdata) with a clear error — operators see the diagnostic at
-	// startup rather than discovering it via mis-bucketed mode readings.
+	// The remote fetcher refuses a statehouse_behaviour document whose
+	// timezone time.LoadLocation cannot resolve (typo, missing tzdata), so
+	// the mistake stops startup, or fails a SIGHUP reload, rather than
+	// showing up as mis-bucketed mode readings.
 	Timezone string `yaml:"timezone" json:"timezone,omitempty"`
 }
 
 // Location returns the time.Location implied by Timezone. Falls back to
-// time.UTC on parse failure; production configs go through Load() which
-// rejects invalid timezones up front, so this fallback only matters for
-// hand-crafted HouseConfig values in tests.
+// time.UTC on parse failure; the remote fetcher refuses invalid timezones
+// before they are applied, so this fallback only matters for hand-crafted
+// HouseConfig values in tests.
 func (h HouseConfig) Location() *time.Location {
 	if h.Timezone == "" {
 		return time.UTC
@@ -554,10 +566,10 @@ func trimTrailingNewline(b []byte) []byte {
 // An unset id means the Influx `site` tag is missing, producing exactly the ambiguous
 // untagged history the tag exists to prevent, which no later work can recover.
 //
-// An unnamed devices namespace fails even more quietly: the fetch 404s, applyDevices
-// fails open onto an empty snapshot, /healthz still reports "ok", and every endpoint
-// honestly serves zero devices. A service that looks healthy and serves nothing is
-// worse than one that refuses to start.
+// An unnamed devices namespace would have nothing to fetch, so the service would have
+// no devices at all. It is refused here, with a message naming the fix, rather than
+// left to fail later as a fetch error. A service that looks healthy and serves nothing
+// is worse than one that refuses to start.
 //
 // A malformed browser origin is the same shape of failure a third time. Skipping the
 // entry would leave an origin unallowlisted that the operator believes is allowlisted,
@@ -580,8 +592,8 @@ func (c Config) Validate() error {
 			c.Site.ID, c.Site.ID)
 	}
 	// A name config would refuse is refused here. remoteconfig rejects it without
-	// sending a request, so left to run it would be one more warning while the
-	// service ran on local devices alone.
+	// sending a request, so left to run it would surface only as a devices fetch
+	// error, without saying the name itself is the problem.
 	if err := remoteconfig.ValidName(c.Site.DevicesNamespace); err != nil {
 		return fmt.Errorf("site.devices_namespace %q is not a name the config service "+
 			"accepts (lowercase letters, digits, _ and -, at most 64), so it could never "+

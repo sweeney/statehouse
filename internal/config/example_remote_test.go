@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -69,18 +70,72 @@ func TestRemoteDevicesExamplePassesCheck(t *testing.T) {
 	}
 }
 
-// Behaviour and classes have no Decode of their own, so their top-level and
-// per-class keys are checked strictly here.
-func TestRemoteBehaviourAndClassesExamplesHaveNoUnknownKeys(t *testing.T) {
-	strict := func(name string, into any) {
-		dec := json.NewDecoder(bytes.NewReader(readRemoteExample(t, name)))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(into); err != nil {
-			t.Errorf("%s: %v", name, err)
+// strictDecode decodes raw into into, refusing any key into has no field for.
+func strictDecode(raw []byte, into any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode(into)
+}
+
+// checkBehaviourKeys refuses any key statehouse would ignore in a
+// statehouse_behaviour document. A plain strict decode into behaviourDoc is
+// not enough: energy, availability and house have their own UnmarshalJSON,
+// which a decoder's DisallowUnknownFields does not reach, so each of those
+// sections is decoded strictly into the struct its UnmarshalJSON reads.
+func checkBehaviourKeys(raw []byte) error {
+	var top struct {
+		Energy       json.RawMessage `json:"energy"`
+		Availability json.RawMessage `json:"availability"`
+		House        json.RawMessage `json:"house"`
+		Adapters     *AdaptersConfig `json:"adapters"`
+	}
+	if err := strictDecode(raw, &top); err != nil {
+		return err
+	}
+	for _, s := range []struct {
+		name string
+		raw  json.RawMessage
+		into any
+	}{
+		{"energy", top.Energy, &energyJSON{}},
+		{"availability", top.Availability, &availabilityJSON{}},
+		{"house", top.House, &houseJSON{}},
+	} {
+		if s.raw == nil {
+			continue
+		}
+		if err := strictDecode(s.raw, s.into); err != nil {
+			return fmt.Errorf("%s: %w", s.name, err)
 		}
 	}
-	strict("statehouse_behaviour.json", &behaviourDoc{})
-	strict("statehouse_classes.json", &map[string]DeviceClassConfig{})
+	return nil
+}
+
+// The check itself must catch a key inside a custom-unmarshalled section: the
+// old example's energy.electricity block was never a real field.
+func TestCheckBehaviourKeysCatchesNestedUnknownKey(t *testing.T) {
+	for _, doc := range []string{
+		`{"energy":{"divergence_warning_pct":20,"electricity":{"idle_after":"5m"}}}`,
+		`{"availability":{"offline_debounc":"30s"}}`,
+		`{"house":{"sleeping_afer":"2h"}}`,
+		`{"adapters":{"tanktemp":{"enabled":true,"base_topc":"x"}}}`,
+		`{"hous":{}}`,
+	} {
+		if err := checkBehaviourKeys([]byte(doc)); err == nil {
+			t.Errorf("checkBehaviourKeys(%s) = nil; want the unknown key refused", doc)
+		}
+	}
+}
+
+// Behaviour and classes have no Decode of their own, so their keys are
+// checked strictly here, down to each section's fields.
+func TestRemoteBehaviourAndClassesExamplesHaveNoUnknownKeys(t *testing.T) {
+	if err := checkBehaviourKeys(readRemoteExample(t, "statehouse_behaviour.json")); err != nil {
+		t.Errorf("statehouse_behaviour.json: %v", err)
+	}
+	if err := strictDecode(readRemoteExample(t, "statehouse_classes.json"), &map[string]DeviceClassConfig{}); err != nil {
+		t.Errorf("statehouse_classes.json: %v", err)
+	}
 }
 
 // The local example holds only local sections, so Load would accept it. (Load

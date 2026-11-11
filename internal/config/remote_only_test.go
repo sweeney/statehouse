@@ -178,19 +178,89 @@ func TestApplyRemoteFillsAdapterBaseTopicDefaults(t *testing.T) {
 	}
 }
 
-// Every field the local file cannot set (yaml:"-") must be listed in
-// remoteOnlySections, or a local copy of it would be ignored silently rather
-// than refused.
+// Every field the local file cannot set (yaml:"-") must carry a remote tag,
+// or Load would ignore a local copy of it silently rather than refuse it.
+// (The keys themselves are checked against the spellings an operator would
+// write by TestLoadRejectsRemoteOnlySections.)
 func TestRemoteOnlyFieldsAreAllRefused(t *testing.T) {
-	var skipped []string
 	ct := reflect.TypeOf(Config{})
 	for i := 0; i < ct.NumField(); i++ {
-		if ct.Field(i).Tag.Get("yaml") == "-" {
-			skipped = append(skipped, ct.Field(i).Name)
+		f := ct.Field(i)
+		_, remote := f.Tag.Lookup("remote")
+		if local := f.Tag.Get("yaml") != "-"; local == remote {
+			t.Errorf("Config.%s: yaml:%q with remote tag %v; a field is either local (yaml key) or remote (yaml:\"-\" and a remote tag)",
+				f.Name, f.Tag.Get("yaml"), remote)
 		}
 	}
-	if len(skipped) != len(remoteOnlySections) {
-		t.Errorf("Config has %d yaml:\"-\" fields %v but remoteOnlySections lists %d keys; keep them in step",
-			len(skipped), skipped, len(remoteOnlySections))
+}
+
+// The table in TestLoadRejectsRemoteOnlySections spells each key the way an
+// operator would; the derived list must name exactly those, so a misspelt
+// remote tag (device_class) fails here instead of letting device_classes:
+// through again.
+func TestRemoteOnlySectionsMatchOperatorSpellings(t *testing.T) {
+	want := map[string]string{
+		"adapters": "statehouse_behaviour", "energy": "statehouse_behaviour",
+		"availability": "statehouse_behaviour", "house": "statehouse_behaviour",
+		"device_classes": "statehouse_classes", "devices": "",
+	}
+	got := map[string]string{}
+	for _, s := range remoteOnlySections {
+		got[s.key] = s.namespace
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("remoteOnlySections = %v, want %v", got, want)
+	}
+}
+
+// A remote house.timezone that time.LoadLocation cannot resolve used to apply
+// cleanly and then fall back to UTC in Location(), putting the night/day
+// window an hour out for half the year with /healthz still ok. The behaviour
+// document is refused instead: startup stops, and a SIGHUP keeps the running
+// config.
+func TestApplyRemoteRejectsInvalidTimezone(t *testing.T) {
+	mux := http.NewServeMux()
+	serveNamespace(mux, "statehouse_classes", map[string]any{})
+	serveNamespace(mux, "devices_test", map[string]any{})
+	serveNamespace(mux, "statehouse_behaviour", map[string]any{
+		"house": map[string]any{"quiet_after": "30m", "timezone": "Europe/Londn"},
+	})
+
+	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
+	before := cfg.House
+	f := newTestFetcher(t, mux)
+	err := f.ApplyRemote(context.Background(), &cfg)
+	if err == nil {
+		t.Fatal("ApplyRemote() = nil with house.timezone \"Europe/Londn\"; want an error")
+	}
+	for _, want := range []string{"statehouse_behaviour", "house.timezone", "Europe/Londn"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+	if cfg.House != before {
+		t.Errorf("House = %+v after a rejected document, want it unchanged %+v", cfg.House, before)
+	}
+	if f.Statuses()["statehouse_behaviour"].OK {
+		t.Error("/healthz would report statehouse_behaviour ok after rejecting it")
+	}
+}
+
+func TestApplyRemoteAcceptsValidTimezone(t *testing.T) {
+	mux := http.NewServeMux()
+	serveNamespace(mux, "statehouse_classes", map[string]any{})
+	serveNamespace(mux, "devices_test", map[string]any{})
+	serveNamespace(mux, "statehouse_behaviour", map[string]any{
+		"house": map[string]any{"quiet_after": "30m", "timezone": "Europe/London"},
+	})
+
+	cfg := Default()
+	cfg.Site.DevicesNamespace = "devices_test"
+	if err := newTestFetcher(t, mux).ApplyRemote(context.Background(), &cfg); err != nil {
+		t.Fatalf("ApplyRemote() = %v", err)
+	}
+	if cfg.House.Timezone != "Europe/London" {
+		t.Errorf("House.Timezone = %q, want Europe/London", cfg.House.Timezone)
 	}
 }

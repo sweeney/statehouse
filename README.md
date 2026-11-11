@@ -449,10 +449,13 @@ service at `remote_config.base_url`, authenticated via the identity service:
 statehouse refuses to start if the local file sets any of those sections
 (the error names where each one lives), if `remote_config` or `identity` is
 missing, or if any namespace cannot be fetched; systemd restarts it until the
-config service is reachable. There is no local mode.
+config service is reachable. There is no local mode and no cached copy, so
+statehouse cannot start or restart while the config service or identity is
+down (a running instance is unaffected).
 
 On SIGHUP the three namespaces are fetched again and applied without a
-restart. If any fetch fails, the running config is kept. Adapters are built
+restart. If any fetch fails, or a document is refused (an unresolvable
+`house.timezone`, say), the running config is kept. Adapters are built
 only at startup, so switching one on or off needs a restart, as does any
 change to the local file. `/healthz` reports each namespace's last fetch,
 including a failure to get an identity token, which is recorded against all
