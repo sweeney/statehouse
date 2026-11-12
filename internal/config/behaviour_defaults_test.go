@@ -135,6 +135,14 @@ var refusedCases = []struct {
 	{"unknown availability key", `{"availability":{"offline_debounc":"30s"}}`, []string{"availability:", `"offline_debounc"`}},
 	{"unknown adapter", `{"adapters":{"zigbee":{"enabled":true}}}`, []string{"adapters:", `"zigbee"`}},
 	{"unknown adapter key", `{"adapters":{"tanktemp":{"enabled":true,"base_topc":"x"}}}`, []string{"adapters:", `"base_topc"`}},
+	// Duplicate keys, compared case-insensitively as encoding/json matches
+	// them. A later copy would otherwise win silently (or, for an adapter,
+	// merge with the earlier one).
+	{"duplicate section, other case", `{"house":{"sleeping_after":"0s"},"House":null}`, []string{`duplicate key "House"`}},
+	{"duplicate key in section", `{"house":{"sleeping_after":"0s","Sleeping_After":null}}`, []string{`duplicate key "Sleeping_After"`}},
+	{"duplicate adapter would merge", `{"adapters":{"boiler":{"base_topic":"x"},"boiler":{"enabled":true}}}`, []string{`duplicate key "boiler"`}},
+	{"duplicate inside an array", `{"house":[{"a":1,"a":2}]}`, []string{`duplicate key "a"`}},
+
 	// Durations that do not parse. "" is refused, not read as "unset": it
 	// used to give 0, so reading it as the default would silently flip
 	// sleeping mode on.
@@ -176,6 +184,7 @@ var refusedCases = []struct {
 	{"document not JSON", `{"house":`, nil},
 	{"document with a non-string key", `{1:2}`, nil},
 	{"trailing data", `{} {}`, nil},
+	{"unterminated after a control byte", "[0\x0f", nil},
 }
 
 func TestOverlayBehaviour_Applies(t *testing.T) {

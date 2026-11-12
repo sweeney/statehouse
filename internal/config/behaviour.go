@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -46,6 +47,9 @@ type behaviourWire struct {
 // returned as it was. On any error it returns base unchanged and an error
 // naming the section and key at fault.
 func overlayBehaviour(base Config, doc []byte) (Config, error) {
+	if err := checkDuplicateKeys(doc); err != nil {
+		return base, err
+	}
 	var w behaviourWire
 	if err := strictUnmarshal(doc, &w); err != nil {
 		return base, err
@@ -114,8 +118,8 @@ func isPresent(raw json.RawMessage) bool {
 // strictUnmarshal decodes b into into like json.Unmarshal, but refuses a key
 // that into does not have, so a misspelt key (sleeping_afer) is an error
 // rather than silently meaning "default". encoding/json matches keys
-// case-insensitively. A key given twice is not refused: a scalar or section
-// keeps its last value, but two occurrences of the same adapter merge.
+// case-insensitively; overlayBehaviour refuses a key given twice (in any case)
+// before this runs, so that does not matter.
 func strictUnmarshal(b []byte, into any) error {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -175,6 +179,55 @@ func (h HouseConfig) validate() error {
 func nonNegative(name string, d time.Duration) error {
 	if d < 0 {
 		return fmt.Errorf("%s must not be negative, got %v", name, d)
+	}
+	return nil
+}
+
+// checkDuplicateKeys refuses an object, at any depth, that names a key twice,
+// comparing keys case-insensitively as encoding/json matches them. Otherwise
+// {"house":{"sleeping_after":"0s"},"House":null} would apply cleanly with the
+// second key resetting house to its defaults, and two copies of an adapter
+// would merge. Input that is not valid JSON is left to json.Unmarshal.
+func checkDuplicateKeys(doc []byte) error {
+	err := walkKeys(json.NewDecoder(bytes.NewReader(doc)))
+	if errors.Is(err, errBadJSON) {
+		return nil
+	}
+	return err
+}
+
+// errBadJSON stops the whole walk on a syntax error: after a failed Token,
+// dec.More can keep returning true, so carrying on could loop forever.
+var errBadJSON = errors.New("not valid JSON")
+
+// walkKeys reads one JSON value from dec, checking every object in it.
+func walkKeys(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return errBadJSON
+	}
+	if tok != json.Delim('{') && tok != json.Delim('[') {
+		return nil
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		if tok == json.Delim('{') {
+			key, err := dec.Token()
+			if err != nil {
+				return errBadJSON
+			}
+			k := strings.ToLower(key.(string))
+			if seen[k] {
+				return fmt.Errorf("duplicate key %q", key)
+			}
+			seen[k] = true
+		}
+		if err := walkKeys(dec); err != nil {
+			return err
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return errBadJSON
 	}
 	return nil
 }
