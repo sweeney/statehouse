@@ -27,14 +27,36 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
-// wantFrom is the expected result of a successful overlay onto Default(): the
-// defaults, edited by mutate to the keys the document sets.
-func wantFrom(mutate func(*Config)) Config {
+// bases are the configs every table row is applied to: Default(), and a
+// "dirty" config whose behaviour sections all differ from the defaults (as a
+// running config might) plus a field outside them. The dirty base proves the
+// result is built from Default(), not from what the caller held (#86), that a
+// refusal returns the base unchanged, and that other fields survive.
+var bases = []struct {
+	name string
+	cfg  func() Config
+}{
+	{"default", Default},
+	{"dirty", func() Config {
+		c := Default()
+		c.Site.DevicesNamespace = "devices_dirty"
+		c.Energy = EnergyConfig{DivergenceWarningPct: 99, MaxIntegrationGap: time.Minute}
+		c.Availability = AvailabilityConfig{OfflineDebounce: time.Minute}
+		c.House = HouseConfig{QuietAfter: time.Minute, EmptyAfter: time.Minute, SleepingAfter: time.Minute, Timezone: "Europe/Paris"}
+		c.Adapters.UPS.Enabled = boolPtr(true)
+		return c
+	}},
+}
+
+// wantFrom is the expected result of a successful overlay: base, with its
+// behaviour sections taken from Default() edited by mutate.
+func wantFrom(base Config, mutate func(*Config)) Config {
 	d := Default()
 	if mutate != nil {
 		mutate(&d)
 	}
-	return d
+	base.Energy, base.Availability, base.House, base.Adapters = d.Energy, d.Availability, d.House, d.Adapters
+	return base
 }
 
 // overlayCases are documents that apply. mutate edits Default() into the
@@ -158,36 +180,40 @@ var refusedCases = []struct {
 
 func TestOverlayBehaviour_Applies(t *testing.T) {
 	for _, tc := range overlayCases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := overlayBehaviour(Default(), []byte(tc.doc))
-			if err != nil {
-				t.Fatalf("overlayBehaviour(%s) = %v, want it applied", tc.doc, err)
-			}
-			if want := wantFrom(tc.mutate); !reflect.DeepEqual(got, want) {
-				t.Errorf("overlayBehaviour(%s):\n got  energy=%+v availability=%+v house=%+v adapters=%s\n want energy=%+v availability=%+v house=%+v adapters=%s",
-					tc.doc, got.Energy, got.Availability, got.House, adaptersString(got.Adapters),
-					want.Energy, want.Availability, want.House, adaptersString(want.Adapters))
-			}
-		})
+		for _, b := range bases {
+			t.Run(tc.name+"/"+b.name, func(t *testing.T) {
+				got, err := overlayBehaviour(b.cfg(), []byte(tc.doc))
+				if err != nil {
+					t.Fatalf("overlayBehaviour(%s) = %v, want it applied", tc.doc, err)
+				}
+				if want := wantFrom(b.cfg(), tc.mutate); !reflect.DeepEqual(got, want) {
+					t.Errorf("overlayBehaviour(%s):\n got  energy=%+v availability=%+v house=%+v adapters=%s\n want energy=%+v availability=%+v house=%+v adapters=%s",
+						tc.doc, got.Energy, got.Availability, got.House, adaptersString(got.Adapters),
+						want.Energy, want.Availability, want.House, adaptersString(want.Adapters))
+				}
+			})
+		}
 	}
 }
 
 func TestOverlayBehaviour_Refuses(t *testing.T) {
 	for _, tc := range refusedCases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := overlayBehaviour(Default(), []byte(tc.doc))
-			if err == nil {
-				t.Fatalf("overlayBehaviour(%s) = nil error, want it refused", tc.doc)
-			}
-			for _, want := range tc.wantErr {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error %q does not mention %q", err, want)
+		for _, b := range bases {
+			t.Run(tc.name+"/"+b.name, func(t *testing.T) {
+				got, err := overlayBehaviour(b.cfg(), []byte(tc.doc))
+				if err == nil {
+					t.Fatalf("overlayBehaviour(%s) = nil error, want it refused", tc.doc)
 				}
-			}
-			if !reflect.DeepEqual(got, Default()) {
-				t.Errorf("a refused document changed the config: house=%+v adapters=%s", got.House, adaptersString(got.Adapters))
-			}
-		})
+				for _, want := range tc.wantErr {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not mention %q", err, want)
+					}
+				}
+				if !reflect.DeepEqual(got, b.cfg()) {
+					t.Errorf("a refused document changed the config: house=%+v adapters=%s", got.House, adaptersString(got.Adapters))
+				}
+			})
+		}
 	}
 }
 

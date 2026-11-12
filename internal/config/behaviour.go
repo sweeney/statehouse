@@ -27,7 +27,7 @@ import (
 //     resolve.
 //
 // Keeping this pure (no I/O, logging or status recording) lets the rules be
-// unit- and fuzz-tested without a config service; Fetcher.applyBehaviour only
+// unit-tested without a config service; Fetcher.applyBehaviour only
 // fetches, records the outcome and commits.
 
 // behaviourWire is the statehouse_behaviour document with each section kept
@@ -114,7 +114,8 @@ func isPresent(raw json.RawMessage) bool {
 // strictUnmarshal decodes b into into like json.Unmarshal, but refuses a key
 // that into does not have, so a misspelt key (sleeping_afer) is an error
 // rather than silently meaning "default". encoding/json matches keys
-// case-insensitively, and a key given twice keeps its last value.
+// case-insensitively. A key given twice is not refused: a scalar or section
+// keeps its last value, but two occurrences of the same adapter merge.
 func strictUnmarshal(b []byte, into any) error {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
