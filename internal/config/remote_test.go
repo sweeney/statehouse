@@ -249,7 +249,12 @@ func TestFetcher_ApplyBehaviour(t *testing.T) {
 	}
 }
 
-func TestFetcher_BehaviourAbsentSectionsPreserveLocal(t *testing.T) {
+// A section the document leaves out is the default, not whatever cfg held
+// before: the behaviour sections are built from Default() plus the document
+// alone (#86 review), so a value cannot linger from an earlier document or
+// from the caller. (This test used to pin the opposite, from when the local
+// YAML could set these sections; Load now refuses that.)
+func TestFetcher_BehaviourAbsentSectionTakesDefault(t *testing.T) {
 	mux := http.NewServeMux()
 	serveNamespace(mux, "statehouse_classes", map[string]any{})
 	serveNamespace(mux, "devices_test", map[string]any{})
@@ -260,13 +265,13 @@ func TestFetcher_BehaviourAbsentSectionsPreserveLocal(t *testing.T) {
 
 	cfg := Default()
 	cfg.Site.DevicesNamespace = "devices_test"
-	localDebounce := 45 * time.Second
-	cfg.Availability.OfflineDebounce = localDebounce
+	cfg.Availability.OfflineDebounce = 45 * time.Second
 
-	newTestFetcher(t, mux).ApplyRemote(context.Background(), &cfg)
-
-	if cfg.Availability.OfflineDebounce != localDebounce {
-		t.Errorf("availability was overwritten; got %v, want %v", cfg.Availability.OfflineDebounce, localDebounce)
+	if err := newTestFetcher(t, mux).ApplyRemote(context.Background(), &cfg); err != nil {
+		t.Fatalf("ApplyRemote() = %v", err)
+	}
+	if want := Default().Availability; cfg.Availability != want {
+		t.Errorf("availability = %+v, want the default %+v", cfg.Availability, want)
 	}
 }
 
