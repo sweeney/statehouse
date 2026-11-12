@@ -129,3 +129,29 @@ func TestProbeRelaysPartOfWithoutInheritingARoom(t *testing.T) {
 		}
 	}
 }
+
+// part_of is on MQTT too, not only HTTP. cmd/statehouse builds the retained
+// house/state/devices/{id} payload with BuildDeviceResponse and house/state/snapshot
+// with BuildSnapshot, the exported builders. Pinned here so the MQTT contract cannot
+// lose the field while the HTTP tests above stay green.
+func TestMQTTPayloadBuildersCarryPartOf(t *testing.T) {
+	d := model.Device{
+		ID: "hot-water-cylinder-top", Class: "appliance_probe",
+		Room: "first.cupboard", PartOf: "hot-water-cylinder",
+	}
+	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
+
+	perDevice := decodeBody(t, BuildDeviceResponse(d, now, nil))
+	if perDevice["part_of"] != "hot-water-cylinder" {
+		t.Errorf("house/state/devices/{id}: part_of = %v, want hot-water-cylinder", perDevice["part_of"])
+	}
+
+	snap := decodeBody(t, BuildSnapshot(model.Snapshot{
+		GeneratedAt: now, Devices: map[string]model.Device{d.ID: d},
+	}, nil, nil, now, nil, time.Time{}, "home"))
+	devs, _ := snap["devices"].(map[string]any)
+	inSnap, _ := devs[d.ID].(map[string]any)
+	if inSnap["part_of"] != "hot-water-cylinder" {
+		t.Errorf("house/state/snapshot: devices[%s].part_of = %v, want hot-water-cylinder", d.ID, inSnap["part_of"])
+	}
+}

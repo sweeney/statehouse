@@ -5,6 +5,7 @@ import (
 
 	"github.com/sweeney/statehouse/internal/config"
 	"github.com/sweeney/statehouse/internal/model"
+	"github.com/sweeney/statehouse/internal/testutil"
 )
 
 // part_of (github.com/sweeney/common/devices v0.2.0) names the appliance a probe is
@@ -44,7 +45,7 @@ func TestResolveDoesNotInheritRoomThroughPartOf(t *testing.T) {
 			// The appliance. telemetry: false, no identity: it sends nothing itself.
 			"hot-water-cylinder": {
 				Class: "hot_water_cylinder", Room: "first.cupboard", Floor: "first",
-				Telemetry: boolPtr(false),
+				Telemetry: testutil.Ptr(false),
 			},
 			// The probe declares part_of but no room or floor.
 			"hot-water-cylinder-top": {
@@ -68,5 +69,3 @@ func TestResolveDoesNotInheritRoomThroughPartOf(t *testing.T) {
 		t.Errorf("Floor = %q; want empty: floor is not inherited either", p.Floor)
 	}
 }
-
-func boolPtr(b bool) *bool { return &b }

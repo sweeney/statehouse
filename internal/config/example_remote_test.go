@@ -89,10 +89,21 @@ func TestRemoteDevicesExampleProbeDeclaresItsOwnRoom(t *testing.T) {
 			continue
 		}
 		probes++
-		parent := devs[d.PartOf]
+		parent, ok := devs[d.PartOf]
+		if !ok {
+			// Say so directly: comparing against the zero Device would blame the
+			// probe's room for what is really a renamed or missing parent.
+			t.Errorf("%s: part_of %q names no device in the example", id, d.PartOf)
+			continue
+		}
 		if d.Room == "" || d.Room != parent.Room {
 			t.Errorf("%s: room %q, want its own room declared, matching %s's %q",
 				id, d.Room, d.PartOf, parent.Room)
+		}
+		// Room AND floor: the docs ask a probe to declare both.
+		if d.Floor == "" || d.Floor != parent.Floor {
+			t.Errorf("%s: floor %q, want its own floor declared, matching %s's %q",
+				id, d.Floor, d.PartOf, parent.Floor)
 		}
 	}
 	if probes == 0 {

@@ -9,93 +9,171 @@ import (
 	"github.com/sweeney/statehouse/internal/testutil"
 )
 
-// partOfCfg is a hot water cylinder with one probe. The cylinder always declares its
-// room; the probe's room and part_of are the arguments, empty meaning "the namespace
-// record does not declare this key".
-func partOfCfg(probeRoom, partOf string) config.Config {
-	off := false
+// probeIdentity is the tanktemp probe every scenario below discovers.
+var probeIdentity = model.DeviceIdentity{Scheme: "tanktemp", Primary: "hot-water-cylinder.top"}
+
+// ns is one published devices namespace, reduced to what these scenarios vary. The
+// probe entry is present unless noProbe; the parents are present when named in
+// parents, each with its own room and floor.
+type ns struct {
+	probeRoom, probeFloor, partOf string
+	noProbe                       bool
+	parents                       map[string][2]string // id -> {room, floor}
+}
+
+func (n ns) config() config.Config {
 	cfg := config.Default()
-	cfg.Devices = map[string]config.DeviceConfig{
-		"hot-water-cylinder": {
-			Class: "hot_water_cylinder", Room: "first.cupboard", Floor: "first",
-			Telemetry: &off,
-		},
-		"hot-water-cylinder-top": {
-			Scheme: "tanktemp", Primary: "hot-water-cylinder.top",
-			Class: "appliance_probe", Room: probeRoom, PartOf: partOf,
-		},
+	cfg.Devices = map[string]config.DeviceConfig{}
+	for id, place := range n.parents {
+		cfg.Devices[id] = config.DeviceConfig{
+			Class: "hot_water_cylinder", Room: place[0], Floor: place[1],
+			Telemetry: testutil.Ptr(false),
+		}
+	}
+	if !n.noProbe {
+		cfg.Devices["hot-water-cylinder-top"] = config.DeviceConfig{
+			Scheme: probeIdentity.Scheme, Primary: probeIdentity.Primary,
+			Class: "appliance_probe", Room: n.probeRoom, Floor: n.probeFloor, PartOf: n.partOf,
+		}
 	}
 	return cfg
 }
 
-var probeIdentity = model.DeviceIdentity{Scheme: "tanktemp", Primary: "hot-water-cylinder.top"}
-
-// part_of has to reach the stored device record, because that record is what both
-// /state and /config/devices serve from (see ProfiledDevice).
-func TestDiscoveryCarriesPartOf(t *testing.T) {
-	store := NewStore()
-	clock := testutil.NewFakeClock(time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC))
-	eng := NewEngine(partOfCfg("first.cupboard", "hot-water-cylinder"), store, clock)
-
-	id := eng.EnsureDiscovered(probeIdentity, "test")
-
-	d, ok := store.Get(id)
-	if !ok {
-		t.Fatalf("device %q not stored", id)
+var (
+	cylinder = map[string][2]string{"hot-water-cylinder": {"first.cupboard", "first"}}
+	twoTanks = map[string][2]string{
+		"hot-water-cylinder": {"first.cupboard", "first"},
+		"buffer-tank":        {"ground.utility", "ground"},
 	}
-	if d.PartOf != "hot-water-cylinder" {
-		t.Errorf("PartOf = %q, want hot-water-cylinder", d.PartOf)
-	}
-}
+)
 
-// part_of reaches a running service the way room does: the namespace is republished
-// and SIGHUP reloads it. So it has to follow room through Upsert's merge, both ways —
-// a newly declared value is picked up, and a record that stops declaring it keeps the
-// last known value ("not republished", not "no longer part of anything"). That is the
-// same rule as room, floor and covers, and the same rule keeps /state and
-// /config/devices in agreement after a reload.
-func TestReloadConfigPropagatesPartOfAndKeepsItWhenAbsent(t *testing.T) {
-	store := NewStore()
-	clock := testutil.NewFakeClock(time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC))
-	eng := NewEngine(partOfCfg("first.cupboard", ""), store, clock)
-	id := eng.EnsureDiscovered(probeIdentity, "test")
+// expect is what the stored device record must say after a step. It is what both
+// /state and /config/devices serve (see ProfiledDevice).
+type expect struct{ partOf, room, floor string }
 
-	eng.ReloadConfig(partOfCfg("first.cupboard", "hot-water-cylinder"))
-	if d, _ := store.Get(id); d.PartOf != "hot-water-cylinder" {
-		t.Errorf("PartOf = %q after reload, want hot-water-cylinder", d.PartOf)
+// The device is discovered under the first namespace; each later one is applied with
+// ReloadConfig, which is what SIGHUP does. After every step the stored record is
+// checked. A new "weird production" scenario is one row.
+//
+// The rule being pinned: part_of is relayed and merged like room, floor and covers
+// (a new value replaces, an absent one keeps the last), and room is never filled in
+// from the parent at any step (#83).
+func TestPartOfAcrossDiscoveryAndReloads(t *testing.T) {
+	cases := []struct {
+		name  string
+		steps []ns
+		want  []expect // one per step
+	}{
+		{
+			name:  "declared at discovery",
+			steps: []ns{{probeRoom: "first.cupboard", probeFloor: "first", partOf: "hot-water-cylinder", parents: cylinder}},
+			want:  []expect{{"hot-water-cylinder", "first.cupboard", "first"}},
+		},
+		{
+			// Most devices: nothing declared, nothing relayed.
+			name:  "never declared",
+			steps: []ns{{probeRoom: "first.cupboard", parents: cylinder}},
+			want:  []expect{{"", "first.cupboard", ""}},
+		},
+		{
+			// The namespace learns about the probe's appliance after the probe has
+			// already been discovered and is reporting.
+			name: "declared by a later reload",
+			steps: []ns{
+				{probeRoom: "first.cupboard", parents: cylinder},
+				{probeRoom: "first.cupboard", partOf: "hot-water-cylinder", parents: cylinder},
+			},
+			want: []expect{{"", "first.cupboard", ""}, {"hot-water-cylinder", "first.cupboard", ""}},
+		},
+		{
+			// The probe is reporting before its namespace record exists at all
+			// (adapter enabled first, namespace published second).
+			name: "probe discovered before its namespace record exists",
+			steps: []ns{
+				{noProbe: true, parents: cylinder},
+				{probeRoom: "first.cupboard", probeFloor: "first", partOf: "hot-water-cylinder", parents: cylinder},
+			},
+			want: []expect{{"", "", ""}, {"hot-water-cylinder", "first.cupboard", "first"}},
+		},
+		{
+			// The probe is moved to another appliance: the new value replaces.
+			name: "moved from one appliance to another",
+			steps: []ns{
+				{probeRoom: "first.cupboard", partOf: "hot-water-cylinder", parents: twoTanks},
+				{probeRoom: "ground.utility", partOf: "buffer-tank", parents: twoTanks},
+			},
+			want: []expect{{"hot-water-cylinder", "first.cupboard", ""}, {"buffer-tank", "ground.utility", ""}},
+		},
+		{
+			// "Not republished", not "no longer part of anything": the sticky rule.
+			name: "a republish that drops part_of keeps the last value",
+			steps: []ns{
+				{probeRoom: "first.cupboard", partOf: "hot-water-cylinder", parents: cylinder},
+				{probeRoom: "first.cupboard", parents: cylinder},
+			},
+			want: []expect{{"hot-water-cylinder", "first.cupboard", ""}, {"hot-water-cylinder", "first.cupboard", ""}},
+		},
+		{
+			// The parent is removed from the namespace. Statehouse relays part_of,
+			// it does not resolve it, so the probe keeps relaying the id, now
+			// dangling. devices.Check warns part_of_unresolved for exactly this
+			// (asserted in internal/config); statehouse does not second-guess it.
+			name: "parent removed from the namespace",
+			steps: []ns{
+				{probeRoom: "first.cupboard", partOf: "hot-water-cylinder", parents: cylinder},
+				{probeRoom: "first.cupboard", partOf: "hot-water-cylinder"},
+			},
+			want: []expect{{"hot-water-cylinder", "first.cupboard", ""}, {"hot-water-cylinder", "first.cupboard", ""}},
+		},
+		{
+			// The decision on #83. The parent has a room; the probe declares none.
+			// devices.PlaceOf would give it first.cupboard; statehouse gives nothing,
+			// at discovery and again at the re-resolution every reload runs.
+			name: "probe without a room does not inherit its appliance's",
+			steps: []ns{
+				{partOf: "hot-water-cylinder", parents: cylinder},
+				{partOf: "hot-water-cylinder", parents: cylinder},
+			},
+			want: []expect{{"hot-water-cylinder", "", ""}, {"hot-water-cylinder", "", ""}},
+		},
+		{
+			// A republish that drops the probe's room keeps the old room (sticky),
+			// even though the probe is part_of a roomed parent. That kept room is
+			// the probe's own last declared one, not an inherited one: nothing
+			// changes when the parent's room differs, as it does here.
+			name: "dropped room keeps the probe's own last room, not the parent's",
+			steps: []ns{
+				{probeRoom: "first.landing", partOf: "hot-water-cylinder", parents: cylinder},
+				{partOf: "hot-water-cylinder", parents: cylinder},
+			},
+			want: []expect{{"hot-water-cylinder", "first.landing", ""}, {"hot-water-cylinder", "first.landing", ""}},
+		},
 	}
 
-	eng.ReloadConfig(partOfCfg("first.cupboard", ""))
-	pd, ok := store.GetProfiled(id)
-	if !ok {
-		t.Fatalf("device %q has no paired record after reload", id)
-	}
-	if pd.Device.PartOf != "hot-water-cylinder" {
-		t.Errorf("PartOf = %q, want the previous value to survive an absent one", pd.Device.PartOf)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if len(tc.want) != len(tc.steps) {
+				t.Fatalf("bad row: %d steps, %d expectations", len(tc.steps), len(tc.want))
+			}
+			store := NewStore()
+			clock := testutil.NewFakeClock(time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC))
+			eng := NewEngine(tc.steps[0].config(), store, clock)
+			id := eng.EnsureDiscovered(probeIdentity, "test")
 
-// The decision on #83, at the store: a probe that declares part_of but no room has no
-// room in statehouse, even though its appliance declares one. Probes declare their own
-// room. Nothing in discovery or reload may fill it from the parent.
-func TestProbeWithoutARoomDoesNotInheritItsAppliancesRoom(t *testing.T) {
-	store := NewStore()
-	clock := testutil.NewFakeClock(time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC))
-	eng := NewEngine(partOfCfg("", "hot-water-cylinder"), store, clock)
-	id := eng.EnsureDiscovered(probeIdentity, "test")
-	// A reload runs EnsureDiscovered again for every known device: a second chance to
-	// get this wrong, so assert after it as well.
-	eng.ReloadConfig(partOfCfg("", "hot-water-cylinder"))
-
-	d, ok := store.Get(id)
-	if !ok {
-		t.Fatalf("device %q not stored", id)
-	}
-	if d.PartOf != "hot-water-cylinder" {
-		t.Fatalf("PartOf = %q; the probe did not resolve to its config entry", d.PartOf)
-	}
-	if d.Place() != "" || d.Floor != "" {
-		t.Errorf("room = %q, floor = %q; want both empty: a probe does not inherit its appliance's placement",
-			d.Place(), d.Floor)
+			for i, step := range tc.steps {
+				if i > 0 {
+					eng.ReloadConfig(step.config())
+				}
+				pd, ok := store.GetProfiled(id)
+				if !ok {
+					t.Fatalf("step %d: device %q has no paired record", i, id)
+				}
+				d, w := pd.Device, tc.want[i]
+				if d.PartOf != w.partOf || d.Place() != w.room || d.Floor != w.floor {
+					t.Errorf("step %d: part_of=%q room=%q floor=%q, want part_of=%q room=%q floor=%q",
+						i, d.PartOf, d.Place(), d.Floor, w.partOf, w.room, w.floor)
+				}
+			}
+		})
 	}
 }
