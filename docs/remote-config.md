@@ -48,11 +48,28 @@ through the real fetcher, and carry no key statehouse would ignore.
 
 ## How each namespace is applied
 
-- **`statehouse_behaviour`**: each top-level section that is present
-  (`adapters`, `energy`, `availability`, `house`) **replaces that section
-  whole**. A section that is absent keeps statehouse's built-in defaults.
-  Within a present section, a key you leave out does not fall back to its
-  default: write every key you mean to set (see #86).
+- **`statehouse_behaviour`**: a section that is absent keeps statehouse's
+  built-in defaults.
+  - `energy`, `availability` and `house` are applied **key by key over the
+    defaults**: a key you leave out keeps the default in the tables below, and
+    a key you write replaces it. An explicit zero (`"0s"`, `0`) is a real
+    value and is applied, not treated as "unset" (for example
+    `sleeping_after: "0s"` turns sleeping mode off). An empty string for a
+    duration is treated as "unset". `house.timezone: ""` is an explicit choice
+    of UTC, while leaving `timezone` out keeps the default (also UTC).
+  - `adapters` **replaces the section whole**: an adapter left out of the block
+    is off (except `zigbee2mqtt`; see below), and within an adapter a
+    `base_topic` left out takes its default.
+  - One bad value anywhere in the document (a duration that does not parse, a
+    wrong type, a timezone that does not resolve) refuses the whole document,
+    and none of it is applied.
+
+  Before #86 a key left out of a present section became **zero** instead of
+  its default. Production's `house` block named only `quiet_after` and
+  `empty_after`, so `sleeping_after` was `0s` and the house never entered
+  sleeping mode. Since the fix it gets the `2h` default, so `house/mode` can
+  report `sleeping` again: set `sleeping_after` explicitly if 2h is not what
+  you want, or `"0s"` to keep sleeping mode off.
 - **`statehouse_classes`**: each class entry is applied by name. A class
   missing from the namespace has no name hints or default thresholds.
 - **devices**: each entry is applied by id, and checked with the shared

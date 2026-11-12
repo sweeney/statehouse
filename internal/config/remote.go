@@ -49,8 +49,14 @@ func (f *Fetcher) Statuses() map[string]NamespaceStatus {
 }
 
 // behaviourDoc mirrors the JSON structure of the statehouse_behaviour
-// namespace. Pointer fields let us distinguish "key absent" (nil — keep the
-// default) from "key present" (non-nil — replace the section whole).
+// namespace. applyBehaviour seeds energy, availability and house with
+// pointers to copies of the sections cfg already holds, so decoding overlays
+// the document onto the current values: a key the document leaves out keeps
+// its value instead of becoming zero (#86). See json.go for the per-key
+// rules. Adapters are seeded with a fresh struct instead; see applyBehaviour.
+//
+// A section given as JSON null sets its pointer to nil, which is applied the
+// same as an absent section: nothing changes.
 type behaviourDoc struct {
 	Energy       *EnergyConfig       `json:"energy,omitempty"`
 	Availability *AvailabilityConfig `json:"availability,omitempty"`
@@ -64,9 +70,12 @@ type behaviourDoc struct {
 //   - statehouse_classes: each class entry is added to cfg.DeviceClasses.
 //   - the devices namespace (cfg.Site.DevicesNamespace): each device entry is
 //     added to cfg.Devices.
-//   - statehouse_behaviour: each top-level section present (adapters, energy,
-//     availability, house) replaces that section of cfg whole. A section the
-//     document leaves out keeps its default.
+//   - statehouse_behaviour: each top-level section present (energy,
+//     availability, house) is decoded over the section cfg already holds, so
+//     a key the document leaves out keeps its value (the default, at startup
+//     and on SIGHUP), and a section left out is untouched. The adapters
+//     section replaces cfg.Adapters whole: an adapter left out is off. A
+//     document with any bad value is refused and changes nothing.
 //
 // Each namespace is fetched independently, and every failure is recorded on
 // /healthz and returned, joined, so one error names all of them. There is no
@@ -176,7 +185,23 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, c *remoteconfig
 }
 
 func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconfig.Client) error {
-	var b behaviourDoc
+	// Seed the sections with copies, not with cfg's own fields: the document
+	// must not reach cfg until all of it has decoded and been checked, so a
+	// refused document leaves cfg exactly as it was.
+	energy, availability, house := cfg.Energy, cfg.Availability, cfg.House
+	b := behaviourDoc{
+		Energy:       &energy,
+		Availability: &availability,
+		House:        &house,
+		// Adapters is left nil, so encoding/json allocates a fresh struct only
+		// when the document has the key: the section replaces cfg.Adapters
+		// whole, as documented (an adapter left out is off). That already is
+		// decode-over-defaults, since the zero AdaptersConfig is the default
+		// (zigbee2mqtt on, the rest off) apart from base_topic, which
+		// fillDefaults supplies below. Seeding it with a copy of cfg.Adapters
+		// would instead share that copy's Enabled pointers, and decoding
+		// would write through them into cfg.
+	}
 	if err := c.Get(ctx, nsBehaviour, &b); err != nil {
 		f.warn("remote config: statehouse_behaviour unavailable", "error", err)
 		f.tracker.Record(nsBehaviour, err)
@@ -184,7 +209,9 @@ func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconf
 	}
 	// Location() falls back to UTC on a name it cannot resolve, so a typo
 	// would apply cleanly and shift the night/day window with nothing showing
-	// it. Refuse the document instead, before any of it is applied.
+	// it. Refuse the document instead, before any of it is applied. This
+	// checks the zone that would be applied: the document's if it names one,
+	// otherwise the current one carried over by the overlay.
 	if b.House != nil && b.House.Timezone != "" {
 		if _, err := time.LoadLocation(b.House.Timezone); err != nil {
 			err = fmt.Errorf("house.timezone %q: %w", b.House.Timezone, err)
@@ -194,6 +221,9 @@ func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconf
 		}
 	}
 	f.tracker.Record(nsBehaviour, nil)
+	// Each of these is the current section with the document's keys laid
+	// over it, or nil if the document set the section to null. An absent
+	// section is the unchanged copy, so assigning it is a no-op.
 	if b.Energy != nil {
 		cfg.Energy = *b.Energy
 	}

@@ -50,7 +50,8 @@ func TestRemoteExamplesApply(t *testing.T) {
 	if !cfg.Adapters.Zigbee2MQTT.IsEnabled() {
 		t.Error("example behaviour leaves zigbee2mqtt off")
 	}
-	// The house block names every key, so none falls back to zero (#86).
+	// The example names every house key. Since #86 a key left out would keep
+	// its default anyway, but the example shows the full set to copy from.
 	if cfg.House.SleepingAfter == 0 || cfg.House.QuietAfter == 0 || cfg.House.EmptyAfter == 0 {
 		t.Errorf("example house block leaves a duration unset: %+v", cfg.House)
 	}

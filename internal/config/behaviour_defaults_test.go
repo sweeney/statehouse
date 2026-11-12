@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -239,5 +240,36 @@ func TestSectionUnmarshalDecodesOverExistingValue(t *testing.T) {
 	}
 	if a.OfflineDebounce != 30*time.Second {
 		t.Errorf("availability = %+v, want offline_debounce kept", a)
+	}
+}
+
+// The adapters section must not be decoded into a shallow copy of
+// cfg.Adapters: the copy would share each adapter's Enabled *bool, and
+// decoding `"enabled": false` would write through it into the config the
+// caller still holds (on SIGHUP, the running engine's base config).
+func TestBehaviour_AdaptersDecodeDoesNotWriteThroughCfgPointers(t *testing.T) {
+	on := true
+	cfg := Default()
+	cfg.Adapters.Boiler.Enabled = &on
+	held := cfg.Adapters.Boiler.Enabled // what a previous copy of cfg would share
+
+	if err := applyBehaviourDoc(t, &cfg, `{"adapters":{"boiler":{"enabled":false}}}`); err != nil {
+		t.Fatalf("ApplyRemote() = %v", err)
+	}
+	if cfg.Adapters.Boiler.IsEnabled() {
+		t.Error("boiler: want off as written")
+	}
+	if !*held {
+		t.Error("decoding wrote through a pointer shared with the previous config")
+	}
+}
+
+// A refused document says which key was wrong, so the log line and /healthz
+// point at the fix.
+func TestBehaviour_BadDurationErrorNamesTheKey(t *testing.T) {
+	cfg := Default()
+	err := applyBehaviourDoc(t, &cfg, `{"house":{"sleeping_after":"soon"}}`)
+	if err == nil || !strings.Contains(err.Error(), "sleeping_after") {
+		t.Errorf("ApplyRemote() = %v, want an error naming sleeping_after", err)
 	}
 }
