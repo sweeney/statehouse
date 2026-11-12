@@ -12,8 +12,9 @@ DTO gains a schema.
 
 ## Device placement
 
-`room`, `floor` and `covers` come from the devices namespace and are relayed, never
-derived — in particular `floor` is not parsed out of the `<floor>.<slug>` room id. See
+`room`, `floor`, `covers` and `part_of` come from the devices namespace and are relayed,
+never derived — in particular `floor` is not parsed out of the `<floor>.<slug>` room id,
+and a probe does not inherit its appliance's room through `part_of` (#83). See
 `docs/floorplan-vocabulary.md` for what statehouse deliberately does not relay
 (`coordinate`, `note`) and why room is not an Influx tag.
 

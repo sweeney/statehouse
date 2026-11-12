@@ -136,6 +136,7 @@ func (e *Engine) EnsureDiscovered(identity model.DeviceIdentity, sourceTopic str
 		Room:         prof.Room,
 		Floor:        prof.Floor,
 		Covers:       prof.Covers,
+		PartOf:       prof.PartOf,
 		Location:     prof.Location,
 		Identity:     identity,
 		Availability: model.AvailabilityUnknown,

@@ -139,6 +139,12 @@ Placement uses the floorplan vocabulary (`docs/floorplan-vocabulary.md`):
 - `covers`: what its readings describe when that is not its own room: `house`
   for whole-house devices (the boiler channels, the electricity meter), or
   another room id. `house` is never a room.
+- `part_of`: the id of the device this one is inside, e.g. a cylinder or
+  fridge probe's appliance. Relayed on `/state/devices` and `/config/devices`.
+  It does **not** give the device a room: a probe declares its own `room` and
+  `floor` (usually the appliance's), or has none. A probe that leaves them out
+  while its appliance declares one is logged as
+  `statehouse.part_of_room_not_inherited` and still applied.
 
 Leave a field out when it is unknown. `location` is deprecated: it is still
 decoded and read as the room when `room` is absent; don't use it in new

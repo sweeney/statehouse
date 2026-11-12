@@ -403,7 +403,9 @@ Device classes today:
   contribution.
 - `appliance_probe` — temperature probes inside another appliance: a
   fridge, freezer or wine cooler, or a hot water cylinder. Measurement-only,
-  and never ambient: consumers leave them out of room averages.
+  and never ambient: consumers leave them out of room averages. `part_of`
+  names the appliance; the probe declares its own `room`, it does not
+  inherit the appliance's.
 
 ## Layout
 

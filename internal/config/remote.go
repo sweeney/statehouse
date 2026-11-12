@@ -168,7 +168,12 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, c *remoteconfig
 		cfg.Devices[k] = v
 	}
 	normaliseDevices(cfg.Devices)
-	for _, p := range append(problems, devices.Check(cfg.Devices)...) {
+	// devices.Check's problems, then statehouse's own: a probe that would only have
+	// a room by inheriting its appliance's, which statehouse does not do (#83).
+	// Both are advisory, logged the same way, and cost no device.
+	problems = append(problems, devices.Check(cfg.Devices)...)
+	problems = append(problems, PartOfRoomNotInheritedProblems(cfg.Devices)...)
+	for _, p := range problems {
 		f.warn("remote config: devices problem", "namespace", ns, "device", p.ID,
 			"field", p.Field, "code", p.Code, "problem", p.Message)
 	}

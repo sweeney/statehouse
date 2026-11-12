@@ -177,6 +177,7 @@ type DeviceResponse struct {
 	Room         string             `json:"room,omitempty"`
 	Floor        string             `json:"floor,omitempty"`
 	Covers       string             `json:"covers,omitempty"`
+	PartOf       string             `json:"part_of,omitempty"`
 	Location     string             `json:"location,omitempty"`
 	Identity     *IdentityResponse  `json:"identity,omitempty"`
 	Availability model.Availability `json:"availability"`
@@ -507,6 +508,7 @@ func buildDeviceResponse(d model.Device, now time.Time, stalenessSeconds *int, i
 		Room:         d.Place(),
 		Floor:        d.Floor,
 		Covers:       d.Covers,
+		PartOf:       d.PartOf,
 		Location:     d.Place(),
 		Identity:     identity,
 		Availability: d.Availability,
@@ -645,6 +647,9 @@ func buildCycleResponse(c *model.Cycle, class string) *CycleResponse {
 // id under the key the migration exists to retire, and Covers was dropped entirely —
 // so the whole-house meter looked like an ordinary device sitting in basement.hallway
 // and anything grouping off this endpoint attributed the property to that room.
+//
+// PartOf joined them in #83 and follows the same rule: present on both endpoints,
+// read from the same device record, so the two agree.
 type DeviceProfileResponse struct {
 	Class          string `json:"class"`
 	EnergyStrategy string `json:"energy_strategy"`
@@ -653,6 +658,7 @@ type DeviceProfileResponse struct {
 	Room           string `json:"room,omitempty"`
 	Floor          string `json:"floor,omitempty"`
 	Covers         string `json:"covers,omitempty"`
+	PartOf         string `json:"part_of,omitempty"`
 	// Location is the DEPRECATED alias for Room, carrying the same value. Kept for
 	// one more release so consumers migrate on their own schedule; removed once the
 	// last of them reads Room.
@@ -675,7 +681,7 @@ type ThresholdsResponse struct {
 // Placement comes from the DEVICE record, not the profile, and that is the whole
 // reason this takes both. The two are updated by opposite rules — the device merges
 // so an absent field does not overwrite, the profile is replaced wholesale on every
-// EnsureDiscovered — so reading room, floor and covers off the profile would make
+// EnsureDiscovered — so reading room, floor, covers or part_of off the profile would make
 // this endpoint disagree with /state as soon as a republished namespace record
 // stopped declaring one of them. See state.ProfiledDevice.
 //
@@ -690,6 +696,7 @@ func buildDeviceProfileResponse(pd state.ProfiledDevice) DeviceProfileResponse {
 		Room:           d.Place(),
 		Floor:          d.Floor,
 		Covers:         d.Covers,
+		PartOf:         d.PartOf,
 		Location:       d.Place(),
 		Thresholds:     buildThresholdsResponse(p.Thresholds),
 	}
