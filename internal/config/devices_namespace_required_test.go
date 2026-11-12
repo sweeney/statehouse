@@ -38,8 +38,7 @@ func TestValidateRejectsUnnamedDevicesNamespace(t *testing.T) {
 }
 
 func TestValidateAcceptsANamedDevicesNamespace(t *testing.T) {
-	cfg := Default()
-	cfg.Site = SiteConfig{ID: "home", DevicesNamespace: "devices_home"}
+	cfg := validConfig()
 
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil", err)

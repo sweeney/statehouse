@@ -35,130 +35,30 @@ func TestDefaultNonNil(t *testing.T) {
 	}
 }
 
-// TestLoadBasicYAML verifies that Load reads a YAML file, merges it on
-// top of defaults, and exposes the values correctly.
+// TestLoadBasicYAML verifies that Load reads local fields from the file and
+// leaves the remote-only ones at their defaults.
 func TestLoadBasicYAML(t *testing.T) {
 	yaml := `
 mqtt:
   broker: "tcp://mqtt.example.com:1883"
   client_id: "test-client"
-device_classes:
-  kettle:
-    energy_strategy: integration
-    default_thresholds:
-      idle_below_w: 3.0
-      active_above_w: 100.0
-devices:
-  my_kettle:
-    scheme: zigbee
-    primary: "0xaabbccdd"
-    display: "Kitchen Kettle"
-    class: kettle
-    location: kitchen
 `
 	path := writeTempYAML(t, yaml)
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-
-	// Broker URL
 	if cfg.MQTT.Broker != "tcp://mqtt.example.com:1883" {
 		t.Errorf("unexpected broker %q", cfg.MQTT.Broker)
 	}
 	if cfg.MQTT.ClientID != "test-client" {
 		t.Errorf("unexpected client_id %q", cfg.MQTT.ClientID)
 	}
-
-	// Device class
-	dc, ok := cfg.DeviceClasses["kettle"]
-	if !ok {
-		t.Fatal("expected device class 'kettle'")
-	}
-	if dc.EnergyStrategy != "integration" {
-		t.Errorf("unexpected energy_strategy %q", dc.EnergyStrategy)
-	}
-	if dc.DefaultThresholds.IdleBelowW == nil || *dc.DefaultThresholds.IdleBelowW != 3.0 {
-		t.Errorf("unexpected idle_below_w %v", dc.DefaultThresholds.IdleBelowW)
-	}
-
-	// Device entry
-	dev, ok := cfg.Devices["my_kettle"]
-	if !ok {
-		t.Fatal("expected device 'my_kettle'")
-	}
-	if dev.Scheme != "zigbee" {
-		t.Errorf("unexpected scheme %q", dev.Scheme)
-	}
-	if dev.Primary != "0xaabbccdd" {
-		t.Errorf("unexpected primary %q", dev.Primary)
-	}
-	if dev.Display != "Kitchen Kettle" {
-		t.Errorf("unexpected display %q", dev.Display)
-	}
-	if dev.Location != "kitchen" {
-		t.Errorf("unexpected location %q", dev.Location)
-	}
-
-	// Defaults still populated
 	if cfg.Availability.OfflineDebounce != 30*time.Second {
 		t.Errorf("expected default OfflineDebounce=30s, got %v", cfg.Availability.OfflineDebounce)
 	}
-}
-
-// TestLoadLegacyZigbeeShorthand verifies that the old ieee_address /
-// friendly_name fields are normalised to scheme/primary/display by Load.
-func TestLoadLegacyZigbeeShorthand(t *testing.T) {
-	yaml := `
-devices:
-  toaster:
-    ieee_address: "0x1234567890abcdef"
-    friendly_name: "Kitchen Toaster"
-    class: short_burst_power_device
-`
-	path := writeTempYAML(t, yaml)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-
-	dev, ok := cfg.Devices["toaster"]
-	if !ok {
-		t.Fatal("expected device 'toaster'")
-	}
-	if dev.Scheme != "zigbee" {
-		t.Errorf("expected scheme=zigbee after normalisation, got %q", dev.Scheme)
-	}
-	if dev.Primary != "0x1234567890abcdef" {
-		t.Errorf("expected primary=ieee_address after normalisation, got %q", dev.Primary)
-	}
-	if dev.Display != "Kitchen Toaster" {
-		t.Errorf("expected display=friendly_name after normalisation, got %q", dev.Display)
-	}
-}
-
-// TestContinuousPowerDeviceUsesIntegrationStrategy verifies that the
-// continuous_power_device class is configured with integration strategy.
-// Compressor cycles are typically too short to accumulate a full counter
-// tick (10 Wh resolution), so integration is more accurate and prevents
-// spurious stale_counter warnings on every short cycle.
-func TestContinuousPowerDeviceUsesIntegrationStrategy(t *testing.T) {
-	yaml := `
-device_classes:
-  continuous_power_device:
-    energy_strategy: integration
-`
-	path := writeTempYAML(t, yaml)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	dc, ok := cfg.DeviceClasses["continuous_power_device"]
-	if !ok {
-		t.Fatal("expected device class 'continuous_power_device'")
-	}
-	if dc.EnergyStrategy != "integration" {
-		t.Errorf("continuous_power_device must use integration strategy, got %q", dc.EnergyStrategy)
+	if len(cfg.Devices) != 0 || len(cfg.DeviceClasses) != 0 {
+		t.Errorf("Load filled remote-only fields: devices %v, classes %v", cfg.Devices, cfg.DeviceClasses)
 	}
 }
 
@@ -242,8 +142,9 @@ func TestAdapterIsEnabled_DefaultMatrix(t *testing.T) {
 	}
 }
 
-// TestLoadFillsAdapterBaseTopicDefaults verifies that Load sets each adapter's
-// BaseTopic to its documented default when the YAML does not specify one.
+// TestLoadFillsAdapterBaseTopicDefaults verifies that a loaded config gives
+// each adapter its documented default BaseTopic. The values come from
+// Default, since adapters are never read from the local file.
 func TestLoadFillsAdapterBaseTopicDefaults(t *testing.T) {
 	// Minimal YAML — just a broker so Load succeeds.
 	yaml := `
@@ -346,102 +247,5 @@ func TestHouseConfig_Location_InvalidFallsBackToUTC(t *testing.T) {
 	cfg := HouseConfig{Timezone: "Not/A/Real/Zone"}
 	if loc := cfg.Location(); loc != time.UTC {
 		t.Errorf("invalid timezone must fall back to UTC, got %v", loc)
-	}
-}
-
-// TestLoadHouseTimezoneInvalidReturnsError verifies that Load() rejects a
-// typo'd timezone with a clear error rather than silently degrading to UTC
-// at first Tick — the operator sees the diagnostic at startup.
-func TestLoadHouseTimezoneInvalidReturnsError(t *testing.T) {
-	yaml := `
-house:
-  timezone: "Europe/Lonon"
-`
-	path := writeTempYAML(t, yaml)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected error for invalid house.timezone, got nil")
-	}
-	if !contains(err.Error(), "Europe/Lonon") {
-		t.Errorf("expected error to name the bad timezone, got %q", err.Error())
-	}
-}
-
-// TestLoadHouseTimezoneValidIsAccepted verifies that a valid timezone passes
-// validation and is preserved on the loaded config.
-func TestLoadHouseTimezoneValidIsAccepted(t *testing.T) {
-	yaml := `
-house:
-  timezone: "America/Los_Angeles"
-`
-	path := writeTempYAML(t, yaml)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("unexpected error for valid timezone: %v", err)
-	}
-	if cfg.House.Timezone != "America/Los_Angeles" {
-		t.Errorf("expected timezone preserved, got %q", cfg.House.Timezone)
-	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
-
-// TestLoadPerDeviceEnergyStrategy verifies that a device-level
-// energy_strategy is preserved through Load() unchanged, so the resolver
-// can use it to override the class default.
-func TestLoadPerDeviceEnergyStrategy(t *testing.T) {
-	yaml := `
-devices:
-  officeheater:
-    ieee_address: "0x20a716fffed18230"
-    class: cycle_power_device
-    energy_strategy: integration
-`
-	path := writeTempYAML(t, yaml)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	dev, ok := cfg.Devices["officeheater"]
-	if !ok {
-		t.Fatal("expected device 'officeheater'")
-	}
-	if dev.EnergyStrategy != "integration" {
-		t.Errorf("expected energy_strategy=integration, got %q", dev.EnergyStrategy)
-	}
-}
-
-// TestLoadExplicitSchemeBeatsLegacyShorthand verifies that when a device has
-// both scheme/primary set AND legacy ieee_address/ieee fields, the explicit
-// scheme and primary fields are preserved.
-func TestLoadExplicitSchemeBeatsLegacyShorthand(t *testing.T) {
-	yaml := `
-devices:
-  my_device:
-    scheme: tasmota
-    primary: "explicit_primary"
-    ieee_address: "0xlegacy"
-`
-	path := writeTempYAML(t, yaml)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-	dev, ok := cfg.Devices["my_device"]
-	if !ok {
-		t.Fatal("expected device 'my_device'")
-	}
-	if dev.Scheme != "tasmota" {
-		t.Errorf("expected scheme=tasmota, got %q", dev.Scheme)
-	}
-	if dev.Primary != "explicit_primary" {
-		t.Errorf("expected primary=explicit_primary, got %q", dev.Primary)
 	}
 }

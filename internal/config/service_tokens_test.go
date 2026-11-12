@@ -10,7 +10,11 @@ import (
 
 // siteBlock is the minimum a config needs to pass Validate, so these tests can
 // assert on the auth block alone.
-const siteBlock = "site:\n  id: home\n  devices_namespace: devices_home\n"
+// siteBlock is the smallest startable local config: the site, and the
+// identity and remote_config blocks that everything else is fetched through.
+const siteBlock = "site:\n  id: home\n  devices_namespace: devices_home\n" +
+	"identity:\n  base_url: https://id.example.net\n  client_id: statehouse\n  client_secret: s3cret\n" +
+	"remote_config:\n  base_url: https://config.example.net\n"
 
 // Omitting the auth block must leave service tokens accepted. The whole point
 // of issue #69 is that sibling services cannot call the API at all, and a

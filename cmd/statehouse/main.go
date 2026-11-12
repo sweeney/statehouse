@@ -51,27 +51,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	// baseCfg is the local-only config (no remote overlay). On SIGHUP we
-	// re-apply remote config against a fresh copy of baseCfg so that
-	// removed remote entries don't accumulate across reloads.
+	// baseCfg is the local file plus defaults, before any remote config. On
+	// SIGHUP the remote config is re-applied to a fresh copy of it, so entries
+	// removed from a namespace don't linger across reloads.
 	baseCfg := cfg
 
-	var remoteCfgFetcher *config.Fetcher
-	if cfg.Identity.BaseURL != "" && cfg.RemoteConfig.BaseURL != "" {
-		logger.Info("applying remote config", "url", cfg.RemoteConfig.BaseURL)
-		remoteCfgFetcher = &config.Fetcher{
-			BaseURL: cfg.RemoteConfig.BaseURL,
-			Tokens: &auth.TokenSource{
-				BaseURL:      cfg.Identity.BaseURL,
-				ClientID:     cfg.Identity.ClientID,
-				ClientSecret: cfg.Identity.ClientSecret,
-			},
-			Logger:    logger,
-			UserAgent: "statehouse/" + version,
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		remoteCfgFetcher.ApplyRemote(ctx, &cfg)
-		cancel()
+	// Devices, classes, adapters and behaviour come only from the config
+	// service (see config.Config). Without them the service would run, report
+	// healthy and do nothing useful, so a failed fetch stops startup; systemd
+	// restarts it until the config service is reachable again.
+	logger.Info("applying remote config", "url", cfg.RemoteConfig.BaseURL)
+	remoteCfgFetcher := &config.Fetcher{
+		BaseURL: cfg.RemoteConfig.BaseURL,
+		Tokens: &auth.TokenSource{
+			BaseURL:      cfg.Identity.BaseURL,
+			ClientID:     cfg.Identity.ClientID,
+			ClientSecret: cfg.Identity.ClientSecret,
+		},
+		Logger:    logger,
+		UserAgent: "statehouse/" + version,
+	}
+	// Longer than a SIGHUP reload's budget: a timeout here exits, and right
+	// after a host reboot identity and config may be up but slow.
+	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err = remoteCfgFetcher.ApplyRemote(fetchCtx, &cfg)
+	fetchCancel()
+	if err != nil {
+		logger.Error("remote config unavailable; refusing to start without it",
+			"url", cfg.RemoteConfig.BaseURL, "error", err)
+		os.Exit(1)
 	}
 
 	logger.Info("starting", "config", *configPath, "broker", cfg.MQTT.Broker, "http", cfg.HTTP.Listen)
@@ -265,18 +273,29 @@ func signalContext() (context.Context, context.CancelFunc) {
 
 // watchSIGHUP listens for SIGHUP and re-applies remote config to the engine
 // without restarting the process. On each signal it re-fetches all three
-// remote namespaces against the local-only baseCfg (no stale remote values
-// carry over), then calls engine.ReloadConfig with the result.
+// namespaces onto a fresh copy of baseCfg (no stale remote values carry
+// over), then calls engine.ReloadConfig with the result.
+//
+// If any namespace fails, the engine keeps the config it is running: the
+// alternative is a section silently reset to its defaults, such as every
+// device or adapter setting gone because the config service blipped. The
+// local file is not re-read; changing it needs a restart.
+//
+// Adapters are built once at startup, so a reload changes their settings in
+// the engine's config but does not start or stop one. That also needs a
+// restart.
 func watchSIGHUP(baseCfg config.Config, fetcher *config.Fetcher, eng *state.Engine, logger *slog.Logger) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGHUP)
 	for range ch {
 		logger.Info("SIGHUP: reloading remote config")
 		newCfg := baseCfg
-		if fetcher != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			fetcher.ApplyRemote(ctx, &newCfg)
-			cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := fetcher.ApplyRemote(ctx, &newCfg)
+		cancel()
+		if err != nil {
+			logger.Error("SIGHUP: remote config reload failed; keeping the running config", "error", err)
+			continue
 		}
 		eng.ReloadConfig(newCfg)
 		logger.Info("SIGHUP: remote config reload complete")

@@ -19,11 +19,28 @@ func parseDuration(s *string, field string) (time.Duration, error) {
 	return d, nil
 }
 
+// energyJSON, availabilityJSON and houseJSON are the wire shapes the
+// UnmarshalJSON methods below read. They are named so the example-document
+// tests can decode each section strictly: DisallowUnknownFields does not
+// reach inside a custom UnmarshalJSON.
+type energyJSON struct {
+	DivergenceWarningPct float64 `json:"divergence_warning_pct"`
+	MaxIntegrationGap    *string `json:"max_integration_gap"`
+}
+
+type availabilityJSON struct {
+	OfflineDebounce *string `json:"offline_debounce"`
+}
+
+type houseJSON struct {
+	QuietAfter    *string `json:"quiet_after"`
+	EmptyAfter    *string `json:"empty_after"`
+	SleepingAfter *string `json:"sleeping_after"`
+	Timezone      string  `json:"timezone"`
+}
+
 func (e *EnergyConfig) UnmarshalJSON(b []byte) error {
-	var raw struct {
-		DivergenceWarningPct float64 `json:"divergence_warning_pct"`
-		MaxIntegrationGap    *string `json:"max_integration_gap"`
-	}
+	var raw energyJSON
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
@@ -39,9 +56,7 @@ func (e *EnergyConfig) UnmarshalJSON(b []byte) error {
 }
 
 func (a *AvailabilityConfig) UnmarshalJSON(b []byte) error {
-	var raw struct {
-		OfflineDebounce *string `json:"offline_debounce"`
-	}
+	var raw availabilityJSON
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
@@ -56,12 +71,7 @@ func (a *AvailabilityConfig) UnmarshalJSON(b []byte) error {
 }
 
 func (h *HouseConfig) UnmarshalJSON(b []byte) error {
-	var raw struct {
-		QuietAfter    *string `json:"quiet_after"`
-		EmptyAfter    *string `json:"empty_after"`
-		SleepingAfter *string `json:"sleeping_after"`
-		Timezone      string  `json:"timezone"`
-	}
+	var raw houseJSON
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}

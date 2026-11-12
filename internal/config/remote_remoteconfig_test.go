@@ -147,15 +147,17 @@ func TestFetcher_ErrorNamesTheNamespace(t *testing.T) {
 	}
 }
 
-// An empty base URL is explicit local mode: nothing requested, no token asked
-// for, no status recorded.
-func TestFetcher_EmptyBaseURLIsLocalMode(t *testing.T) {
+// An empty base URL is an error, not a local mode: there is nowhere else for
+// devices, classes, adapters or behaviour to come from. Nothing is requested
+// and no token is asked for.
+func TestFetcher_EmptyBaseURLIsAnError(t *testing.T) {
 	src := &countingErrTokenSource{}
 	f := &Fetcher{Tokens: src}
 	cfg := Default()
 	cfg.Site.DevicesNamespace = "devices_test"
-	f.ApplyRemote(context.Background(), &cfg)
-
+	if err := f.ApplyRemote(context.Background(), &cfg); err == nil {
+		t.Error("ApplyRemote() = nil with no base URL, want an error")
+	}
 	if n := src.calls.Load(); n != 0 {
 		t.Errorf("Token called %d times with no base URL, want 0", n)
 	}

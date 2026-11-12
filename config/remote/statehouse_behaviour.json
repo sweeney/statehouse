@@ -1,0 +1,45 @@
+{
+  "adapters": {
+    "zigbee2mqtt": {
+      "base_topic": "zigbee2mqtt",
+      "enabled": true
+    },
+    "boiler": {
+      "base_topic": "energy/boiler/sensor",
+      "enabled": false
+    },
+    "ups": {
+      "base_topic": "ups",
+      "enabled": false
+    },
+    "climate": {
+      "base_topic": "climate",
+      "enabled": false
+    },
+    "meter": {
+      "base_topic": "energy",
+      "enabled": false
+    },
+    "intercom": {
+      "base_topic": "asterisk",
+      "enabled": false
+    },
+    "tanktemp": {
+      "base_topic": "energy/hot_water",
+      "enabled": false
+    }
+  },
+  "energy": {
+    "divergence_warning_pct": 20,
+    "max_integration_gap": "30m"
+  },
+  "availability": {
+    "offline_debounce": "30s"
+  },
+  "house": {
+    "quiet_after": "30m",
+    "empty_after": "6h",
+    "sleeping_after": "2h",
+    "timezone": "Local"
+  }
+}

@@ -31,6 +31,8 @@ func loadWithHTTP(t *testing.T, httpBlock string) Config {
 func validConfig() Config {
 	c := Default()
 	c.Site = SiteConfig{ID: "home", DevicesNamespace: "devices_home"}
+	c.Identity = IdentityConfig{BaseURL: "https://id.example.net", ClientID: "statehouse", ClientSecret: "s3cret"}
+	c.RemoteConfig = RemoteConfigConfig{BaseURL: "https://config.example.net"}
 	return c
 }
 
