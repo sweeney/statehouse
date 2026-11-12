@@ -62,8 +62,11 @@ func (f *Fetcher) Statuses() map[string]NamespaceStatus {
 }
 
 // behaviourDoc mirrors the JSON structure of the statehouse_behaviour
-// namespace. Pointer fields let us distinguish "key absent" (nil — keep the
-// default) from "key present" (non-nil — replace the section whole).
+// namespace. Pointer fields let us distinguish "section absent" (nil — keep
+// cfg's section) from "section present" (non-nil — replace cfg's section).
+// A present energy, availability or house section has been decoded over a
+// copy of Default()'s, so a key it leaves out is the default (#86; see
+// json.go). A present adapters section starts from zero plus fillDefaults.
 type behaviourDoc struct {
 	Energy       *EnergyConfig       `json:"energy,omitempty"`
 	Availability *AvailabilityConfig `json:"availability,omitempty"`
@@ -78,8 +81,9 @@ type behaviourDoc struct {
 //   - the devices namespace (cfg.Site.DevicesNamespace): each device entry is
 //     added to cfg.Devices.
 //   - statehouse_behaviour: each top-level section present (adapters, energy,
-//     availability, house) replaces that section of cfg whole. A section the
-//     document leaves out keeps its default.
+//     availability, house) replaces that section of cfg. Within energy,
+//     availability and house, a key the document leaves out (or sets to null)
+//     takes its default. A section the document leaves out keeps its default.
 //
 // Each namespace is fetched independently, and every failure is recorded on
 // /healthz and returned, joined, so one error names all of them. There is no

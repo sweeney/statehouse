@@ -6,17 +6,41 @@ import (
 	"time"
 )
 
+// Issue #86: each behaviour section used to be decoded into a fresh zero
+// struct, so a key the document left out became zero rather than its
+// default. Production's house block left out sleeping_after, which became
+// 0s, and the house never entered sleeping mode.
+//
+// The UnmarshalJSON methods below therefore decode over a copy of Default()'s
+// section: a key that is absent or null keeps its default, and a key that is
+// present replaces it, including an explicit zero ("0s" for sleeping_after is
+// documented as "never enter sleeping"). They start from Default() rather
+// than from the receiver because encoding/json hands them a freshly allocated
+// zero struct for a *Section field, so the receiver holds nothing to keep.
+// Every wire field is a pointer so absent (nil) and present differ.
+
 // parseDuration parses a duration string (e.g. "30m", "10s") from a JSON
-// field. Returns an error if the string is present but invalid.
-func parseDuration(s *string, field string) (time.Duration, error) {
+// field. ok is false when the key is absent, null or "" (all of which leave
+// the default in place); a string that does not parse is an error.
+func parseDuration(s *string, field string) (d time.Duration, ok bool, err error) {
 	if s == nil || *s == "" {
-		return 0, nil
+		return 0, false, nil
 	}
-	d, err := time.ParseDuration(*s)
+	d, err = time.ParseDuration(*s)
 	if err != nil {
-		return 0, fmt.Errorf("%s: %w", field, err)
+		return 0, false, fmt.Errorf("%s: %w", field, err)
 	}
-	return d, nil
+	return d, true, nil
+}
+
+// overlayDuration sets *dst from s when the key is present, and leaves it
+// alone when it is absent.
+func overlayDuration(dst *time.Duration, s *string, field string) error {
+	d, ok, err := parseDuration(s, field)
+	if ok {
+		*dst = d
+	}
+	return err
 }
 
 // energyJSON, availabilityJSON and houseJSON are the wire shapes the
@@ -24,8 +48,8 @@ func parseDuration(s *string, field string) (time.Duration, error) {
 // tests can decode each section strictly: DisallowUnknownFields does not
 // reach inside a custom UnmarshalJSON.
 type energyJSON struct {
-	DivergenceWarningPct float64 `json:"divergence_warning_pct"`
-	MaxIntegrationGap    *string `json:"max_integration_gap"`
+	DivergenceWarningPct *float64 `json:"divergence_warning_pct"`
+	MaxIntegrationGap    *string  `json:"max_integration_gap"`
 }
 
 type availabilityJSON struct {
@@ -36,62 +60,66 @@ type houseJSON struct {
 	QuietAfter    *string `json:"quiet_after"`
 	EmptyAfter    *string `json:"empty_after"`
 	SleepingAfter *string `json:"sleeping_after"`
-	Timezone      string  `json:"timezone"`
+	Timezone      *string `json:"timezone"`
 }
 
+// UnmarshalJSON sets e to Default().Energy with the keys present in b applied.
 func (e *EnergyConfig) UnmarshalJSON(b []byte) error {
 	var raw energyJSON
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
-	e.DivergenceWarningPct = raw.DivergenceWarningPct
-	d, err := parseDuration(raw.MaxIntegrationGap, "max_integration_gap")
-	if err != nil {
+	next := Default().Energy
+	if raw.DivergenceWarningPct != nil {
+		next.DivergenceWarningPct = *raw.DivergenceWarningPct
+	}
+	if err := overlayDuration(&next.MaxIntegrationGap, raw.MaxIntegrationGap, "max_integration_gap"); err != nil {
 		return err
 	}
-	if d != 0 {
-		e.MaxIntegrationGap = d
-	}
+	*e = next
 	return nil
 }
 
+// UnmarshalJSON sets a to Default().Availability with the keys present in b
+// applied.
 func (a *AvailabilityConfig) UnmarshalJSON(b []byte) error {
 	var raw availabilityJSON
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
-	d, err := parseDuration(raw.OfflineDebounce, "offline_debounce")
-	if err != nil {
+	next := Default().Availability
+	if err := overlayDuration(&next.OfflineDebounce, raw.OfflineDebounce, "offline_debounce"); err != nil {
 		return err
 	}
-	if d != 0 {
-		a.OfflineDebounce = d
-	}
+	*a = next
 	return nil
 }
 
+// UnmarshalJSON sets h to Default().House with the keys present in b applied.
+// The timezone is stored as written: the remote fetcher checks that it
+// resolves before the section is applied.
 func (h *HouseConfig) UnmarshalJSON(b []byte) error {
 	var raw houseJSON
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
-	h.Timezone = raw.Timezone
+	next := Default().House
+	if raw.Timezone != nil {
+		next.Timezone = *raw.Timezone
+	}
 	for _, f := range []struct {
 		dst  *time.Duration
 		src  *string
 		name string
 	}{
-		{&h.QuietAfter, raw.QuietAfter, "quiet_after"},
-		{&h.EmptyAfter, raw.EmptyAfter, "empty_after"},
-		{&h.SleepingAfter, raw.SleepingAfter, "sleeping_after"},
+		{&next.QuietAfter, raw.QuietAfter, "quiet_after"},
+		{&next.EmptyAfter, raw.EmptyAfter, "empty_after"},
+		{&next.SleepingAfter, raw.SleepingAfter, "sleeping_after"},
 	} {
-		d, err := parseDuration(f.src, f.name)
-		if err != nil {
+		if err := overlayDuration(f.dst, f.src, f.name); err != nil {
 			return err
 		}
-		if d != 0 {
-			*f.dst = d
-		}
 	}
+	*h = next
 	return nil
 }

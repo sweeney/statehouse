@@ -51,8 +51,11 @@ through the real fetcher, and carry no key statehouse would ignore.
 - **`statehouse_behaviour`**: each top-level section that is present
   (`adapters`, `energy`, `availability`, `house`) **replaces that section
   whole**. A section that is absent keeps statehouse's built-in defaults.
-  Within a present section, a key you leave out does not fall back to its
-  default: write every key you mean to set (see #86).
+  Within `energy`, `availability` and `house`, a key you leave out, or set to
+  `null`, takes its default from the tables below; a key you write replaces
+  it, including an explicit `"0s"`. (Before #86 a key left out became zero:
+  production's `house` block omitted `sleeping_after`, so sleeping mode was
+  never entered.)
 - **`statehouse_classes`**: each class entry is applied by name. A class
   missing from the namespace has no name hints or default thresholds.
 - **devices**: each entry is applied by id, and checked with the shared
