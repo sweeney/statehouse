@@ -66,11 +66,9 @@ through the real fetcher, and carry no key statehouse would ignore.
   - `adapters` **replaces the section whole**: an adapter left out of the block
     is off (except `zigbee2mqtt`; see below), and within an adapter a
     `base_topic` left out takes its default.
-  - Anything statehouse cannot use exactly as written **refuses the whole
-    document**, and none of it is applied: an unknown or misspelt key at any
-    level (keys are case-sensitive), a key that appears twice in the same
-    object, a wrong type, a duration that is empty,
-    does not parse or is negative, a `divergence_warning_pct` of 0 or less, or
+  - Anything statehouse cannot use **refuses the whole document**, and none
+    of it is applied: an unknown or misspelt key at any level, a wrong type, a
+    duration that is empty, does not parse or is negative, a `divergence_warning_pct` of 0 or less, or
     a timezone that does not resolve. The error names the section and the key.
     At startup statehouse exits; on SIGHUP it keeps the running config. Either
     way `/healthz` shows the error under `remote_config`.
@@ -82,7 +80,7 @@ through the real fetcher, and carry no key statehouse would ignore.
   report `sleeping` again: set `sleeping_after` explicitly if 2h is not what
   you want, or `"0s"` to keep sleeping mode off. The same change made
   statehouse refuse documents it used to accept silently (unknown keys,
-  duplicate keys, `""` durations, negative values): check the live document against the rules
+  `""` durations, negative values): check the live document against the rules
   above before deploying.
 - **`statehouse_classes`**: each class entry is applied by name. A class
   missing from the namespace has no name hints or default thresholds.
