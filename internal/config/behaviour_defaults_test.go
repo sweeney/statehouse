@@ -136,17 +136,6 @@ var overlayCases = []struct {
 	{"timezone: UTC", `{"house":{"timezone":"UTC"}}`, func(c *Config) { c.House.Timezone = "UTC" }},
 	{"timezone: Local", `{"house":{"timezone":"Local"}}`, func(c *Config) { c.House.Timezone = "Local" }},
 
-	// Duplicate keys: the last occurrence wins, at either level, and a null
-	// before a real section cannot zero it (the #86 shape the reviewer found
-	// with pre-seeded pointers).
-	{"duplicate section: null then value", `{"house":null,"house":{"quiet_after":"5m"}}`,
-		func(c *Config) { c.House.QuietAfter = 5 * time.Minute }},
-	{"duplicate section: value then null", `{"house":{"quiet_after":"5m"},"house":null}`, nil},
-	{"duplicate section: last wins whole", `{"house":{"quiet_after":"5m"},"house":{"empty_after":"1h"}}`,
-		func(c *Config) { c.House.EmptyAfter = time.Hour }},
-	{"duplicate key in section: last wins", `{"house":{"quiet_after":"5m","quiet_after":"6m"}}`,
-		func(c *Config) { c.House.QuietAfter = 6 * time.Minute }},
-
 	// Adapters: an adapter named with only enabled gets its default
 	// base_topic, and one left out is off (zigbee2mqtt on).
 	{"adapters: partial block", `{"adapters":{"boiler":{"enabled":true}}}`,
@@ -180,6 +169,19 @@ var refusedCases = []struct {
 	{"wrong case: key", `{"house":{"Sleeping_After":"0s"}}`, []string{"house:", `"Sleeping_After"`}},
 	{"wrong case: adapter", `{"adapters":{"Boiler":{"enabled":true}}}`, []string{"adapters:", `"Boiler"`}},
 	{"wrong case: adapter key", `{"adapters":{"boiler":{"Enabled":true}}}`, []string{"adapters:", `"boiler.Enabled"`}},
+
+	// Duplicate keys, at any level. encoding/json would keep the last
+	// occurrence of a section but merge the occurrences of an adapter, and a
+	// typo in an earlier occurrence would never be seen; with pre-seeded
+	// pointers, null-then-value zeroed the section (#86 again).
+	{"duplicate section: null then value", `{"house":null,"house":{"quiet_after":"5m"}}`, []string{`duplicate key "house"`}},
+	{"duplicate section: value then null", `{"house":{"quiet_after":"5m"},"house":null}`, []string{`duplicate key "house"`}},
+	{"duplicate section: two values", `{"house":{"quiet_after":"5m"},"house":{"empty_after":"1h"}}`, []string{`duplicate key "house"`}},
+	{"duplicate key in section", `{"house":{"quiet_after":"5m","quiet_after":"6m"}}`, []string{`duplicate key "house.quiet_after"`}},
+	{"duplicate adapter would merge", `{"adapters":{"boiler":{"base_topic":"x"},"boiler":{"enabled":true}}}`, []string{`duplicate key "adapters.boiler"`}},
+	{"typo hidden in an earlier duplicate", `{"adapters":{"boiler":{"base_topc":"x"},"boiler":{"enabled":true}}}`, []string{`duplicate key "adapters.boiler"`}},
+	{"duplicate key in adapter", `{"adapters":{"ups":{"enabled":true,"enabled":false}}}`, []string{`duplicate key "adapters.ups.enabled"`}},
+	{"duplicate inside an array", `{"house":[{"a":1,"a":2}]}`, []string{`duplicate key "house.a"`}},
 
 	// Durations that do not parse. "" is refused, not read as "unset": it
 	// used to give 0, so reading it as the default would silently flip
@@ -220,17 +222,34 @@ var refusedCases = []struct {
 	{"enabled as a string", `{"adapters":{"boiler":{"enabled":"yes"}}}`, []string{"adapters:", "enabled"}},
 	{"document as an array", `[]`, []string{"array"}},
 	{"document not JSON", `{"house":`, nil},
+	{"document with a non-string key", `{1:2}`, nil},
 }
 
-// withGoodSections adds valid, non-default energy and adapters sections ahead
-// of a refused document's own keys. They prove that a refusal drops the
-// sections that did decode as well, not just the bad one. (If the bad case
-// itself sets energy or adapters, its occurrence comes last and wins.)
+// withGoodSections adds valid, non-default energy and adapters sections to a
+// refused document. They prove that a refusal drops the sections that did
+// decode as well, not just the bad one. A section the case already sets is
+// not added again: that would be a duplicate key, refused for its own reason
+// rather than the case's. It reports false when there is nothing to add.
 func withGoodSections(doc string) (string, bool) {
-	if !strings.HasPrefix(doc, "{") || doc == "{}" || !json.Valid([]byte(doc)) {
+	var top map[string]json.RawMessage
+	if !json.Valid([]byte(doc)) || json.Unmarshal([]byte(doc), &top) != nil || top == nil {
 		return "", false
 	}
-	return `{"adapters":{"boiler":{"enabled":true}},"energy":{"max_integration_gap":"45m"},` + doc[1:], true
+	var add []string
+	if _, ok := top["adapters"]; !ok {
+		add = append(add, `"adapters":{"boiler":{"enabled":true}}`)
+	}
+	if _, ok := top["energy"]; !ok {
+		add = append(add, `"energy":{"max_integration_gap":"45m"}`)
+	}
+	if len(add) == 0 {
+		return "", false
+	}
+	rest := strings.TrimSpace(doc[1:])
+	if rest != "}" {
+		rest = "," + rest
+	}
+	return "{" + strings.Join(add, ",") + rest, true
 }
 
 func TestOverlayBehaviour_Applies(t *testing.T) {
@@ -407,6 +426,43 @@ func TestDefaultBehaviourValidates(t *testing.T) {
 	}
 }
 
+// checkDuplicateKeys on its own: it must find a duplicate at any depth and
+// in any container, name it by path, and leave anything that is not valid
+// JSON to json.Unmarshal (returning nil) rather than misreport it.
+func TestCheckDuplicateKeys(t *testing.T) {
+	for _, tc := range []struct {
+		doc, wantErr string // wantErr "" means no error
+	}{
+		{`{}`, ""},
+		{`{"a":1,"b":{"a":1},"c":[{"a":1},{"a":1}]}`, ""}, // same key in different objects is fine
+		{`"scalar"`, ""},
+		{`[]`, ""},
+		{`{"a":1,"a":2}`, `duplicate key "a"`},
+		{`{"a":{"b":1,"b":1}}`, `duplicate key "a.b"`},
+		{`[{"a":1},{"b":1,"b":2}]`, `duplicate key "b"`},
+		{`{"a":[[{"c":1,"c":1}]]}`, `duplicate key "a.c"`},
+		{`{"a":1,"A":2}`, ""}, // keys are case-sensitive; checkKeys refuses "A" later
+		// Not valid JSON: nil, so json.Unmarshal reports the syntax error.
+		{``, ""},
+		{`}`, ""},
+		{`{1:2}`, ""},
+		{`{"a":`, ""},
+		{`{"a":1`, ""},
+		{`[1,`, ""},
+		{"[0\x0f", ""},        // found by FuzzOverlayBehaviour: More kept saying true, and the walk never ended
+		{"{\"a\":[0\x0f", ""}, // the same, one level down
+		{`{"a":1]`, ""},       // a mismatched closing delimiter
+	} {
+		err := checkDuplicateKeys([]byte(tc.doc))
+		switch {
+		case tc.wantErr == "" && err != nil:
+			t.Errorf("checkDuplicateKeys(%s) = %v, want nil", tc.doc, err)
+		case tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr):
+			t.Errorf("checkDuplicateKeys(%s) = %v, want %q", tc.doc, err, tc.wantErr)
+		}
+	}
+}
+
 func TestSectionValidate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -486,8 +542,8 @@ func FuzzOverlayBehaviour(f *testing.F) {
 }
 
 // checkAbsentIsDefault asserts that every section and key doc leaves out, or
-// sets to null, has its default value in got. It reads doc with the same
-// last-occurrence-wins rule encoding/json uses, so duplicate keys agree.
+// sets to null, has its default value in got. A document that applied has no
+// duplicate keys (they are refused), so reading it into a map loses nothing.
 func checkAbsentIsDefault(t *testing.T, doc string, got, def Config) {
 	t.Helper()
 	var top map[string]json.RawMessage

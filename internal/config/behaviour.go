@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -22,9 +24,9 @@ import (
 //     duration. JSON null, for a section or a key, is the same as leaving it
 //     out.
 //   - Anything statehouse cannot use exactly as written refuses the whole
-//     document, and none of it is applied: an unknown or misspelt key, a wrong
-//     type, an empty or unparseable duration, an out-of-range value, or a
-//     timezone that does not resolve.
+//     document, and none of it is applied: an unknown or misspelt key, a key
+//     given twice, a wrong type, an empty or unparseable duration, an
+//     out-of-range value, or a timezone that does not resolve.
 //
 // Keeping this pure (no I/O, logging or status recording) lets the rules be
 // unit- and fuzz-tested without a config service; Fetcher.applyBehaviour only
@@ -35,8 +37,8 @@ import (
 // overlayBehaviour), rather than by pre-seeding pointers for encoding/json to
 // decode into: with pointers, {"house":null,"house":{...}} made the first null
 // clear the seed and the second allocate a zero struct, which was #86 again.
-// With raw values, a duplicate key simply keeps its last occurrence, the same
-// as encoding/json does everywhere else.
+// Duplicate keys are refused before this is decoded (see checkDuplicateKeys),
+// so each section is here at most once.
 type behaviourWire struct {
 	Energy       json.RawMessage `json:"energy"`
 	Availability json.RawMessage `json:"availability"`
@@ -114,13 +116,81 @@ func isPresent(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
 }
 
-// strictUnmarshal decodes b into into, refusing any object key that is not one
-// of into's json keys spelled exactly (see checkKeys).
+// strictUnmarshal decodes b into into, refusing an object that names a key
+// twice (see checkDuplicateKeys) and any object key that is not one of into's
+// json keys spelled exactly (see checkKeys).
 func strictUnmarshal(b []byte, into any) error {
+	if err := checkDuplicateKeys(b); err != nil {
+		return err
+	}
 	if err := checkKeys(b, reflect.TypeOf(into), ""); err != nil {
 		return err
 	}
 	return json.Unmarshal(b, into)
+}
+
+// checkDuplicateKeys refuses a JSON object, at any depth, that names the same
+// key twice. encoding/json accepts duplicates, but not consistently: a
+// json.RawMessage or scalar field keeps the last occurrence, while a struct
+// field merges every occurrence (in adapters, {"boiler":{"base_topic":"x"},
+// "boiler":{"enabled":true}} gave base_topic "x" and enabled true), and a
+// misspelt key in an earlier occurrence passed checkKeys, which only sees the
+// last. A document that says two things about one key is ambiguous, so it is
+// refused like any other value statehouse cannot use exactly as written.
+//
+// It returns nil for input that is not valid JSON, leaving json.Unmarshal to
+// report the syntax error.
+func checkDuplicateKeys(b []byte) error {
+	err := walkDuplicateKeys(json.NewDecoder(bytes.NewReader(b)), "")
+	if errors.Is(err, errStopWalk) {
+		return nil // a syntax error: json.Unmarshal reports it
+	}
+	return err
+}
+
+// errStopWalk ends walkDuplicateKeys on input that is not valid JSON. It must
+// end the whole walk, not just the current value: after a failed Token,
+// dec.More can keep reporting true (for `[0\x0f` it does, forever), so an
+// enclosing loop that carried on would never finish.
+var errStopWalk = errors.New("not valid JSON")
+
+// walkDuplicateKeys reads one JSON value from dec, checking every object in
+// it. path prefixes the key named in the error, as in checkKeys.
+func walkDuplicateKeys(dec *json.Decoder, path string) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return errStopWalk
+	}
+	switch tok {
+	case json.Delim('{'):
+		seen := make(map[string]bool)
+		for dec.More() {
+			tok, err := dec.Token()
+			if err != nil {
+				return errStopWalk
+			}
+			key, _ := tok.(string) // Token only returns a string in key position
+			if seen[key] {
+				return fmt.Errorf("duplicate key %q", path+key)
+			}
+			seen[key] = true
+			if err := walkDuplicateKeys(dec, path+key+"."); err != nil {
+				return err
+			}
+		}
+	case json.Delim('['):
+		for dec.More() {
+			if err := walkDuplicateKeys(dec, path); err != nil {
+				return err
+			}
+		}
+	default:
+		return nil // a scalar
+	}
+	if _, err := dec.Token(); err != nil { // the closing '}' or ']'
+		return errStopWalk
+	}
+	return nil
 }
 
 // checkKeys refuses any object key in raw that is not exactly the json name of
