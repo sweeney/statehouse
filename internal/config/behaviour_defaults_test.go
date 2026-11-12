@@ -173,7 +173,13 @@ var refusedCases = []struct {
 	{"unknown energy key", `{"energy":{"electricity":{"idle_after":"5m"}}}`, []string{"energy:", `"electricity"`}},
 	{"unknown availability key", `{"availability":{"offline_debounc":"30s"}}`, []string{"availability:", `"offline_debounc"`}},
 	{"unknown adapter", `{"adapters":{"zigbee":{"enabled":true}}}`, []string{"adapters:", `"zigbee"`}},
-	{"unknown adapter key", `{"adapters":{"tanktemp":{"enabled":true,"base_topc":"x"}}}`, []string{"adapters:", `"base_topc"`}},
+	{"unknown adapter key", `{"adapters":{"tanktemp":{"enabled":true,"base_topc":"x"}}}`, []string{"adapters:", `"tanktemp.base_topc"`}},
+	// encoding/json matches keys case-insensitively, even with
+	// DisallowUnknownFields; keys must be spelled exactly as documented.
+	{"wrong case: section", `{"House":{"quiet_after":"5m"}}`, []string{`"House"`}},
+	{"wrong case: key", `{"house":{"Sleeping_After":"0s"}}`, []string{"house:", `"Sleeping_After"`}},
+	{"wrong case: adapter", `{"adapters":{"Boiler":{"enabled":true}}}`, []string{"adapters:", `"Boiler"`}},
+	{"wrong case: adapter key", `{"adapters":{"boiler":{"Enabled":true}}}`, []string{"adapters:", `"boiler.Enabled"`}},
 
 	// Durations that do not parse. "" is refused, not read as "unset": it
 	// used to give 0, so reading it as the default would silently flip

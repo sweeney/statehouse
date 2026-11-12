@@ -1,34 +1,41 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 )
 
 // The behaviour sections (energy, availability, house) are decoded as an
 // overlay: each UnmarshalJSON below writes only the keys the document names
-// and leaves every other field of the receiver as it was. The remote fetcher
-// relies on that. It calls them on a copy of the section cfg already holds
-// (the defaults), so a key a document leaves out keeps its default instead of
-// becoming zero. That is issue #86: production's house block left out
-// sleeping_after, which became 0s, and the house never entered sleeping mode.
+// and leaves every other field of the receiver as it was. overlayBehaviour
+// (behaviour.go) calls them on a copy of Default()'s section, so a key a
+// document leaves out keeps its default instead of becoming zero. That is
+// issue #86: production's house block left out sleeping_after, which became
+// 0s, and the house never entered sleeping mode.
 //
 // To make "absent" and "present" distinguishable, every field of the wire
-// shapes is a pointer: nil means the key was absent (keep the current value),
-// non-nil means it was present (replace it, even with a zero). An explicit
-// zero is a real setting: `sleeping_after: "0s"` is documented as "never
-// enter sleeping", so it must not be mistaken for "not set".
+// shapes is a pointer: nil means the key was absent or null (keep the current
+// value), non-nil means it was present (replace it, even with a zero). An
+// explicit zero is a real setting: `sleeping_after: "0s"` is documented as
+// "never enter sleeping", so it must not be mistaken for "not set".
+//
+// Each decoder is strict (strictUnmarshal): an unknown or misspelt key is an
+// error, not ignored. On any error the receiver is left exactly as it was.
+// Range checks (negative durations, the timezone) are not done here but in
+// each section's validate method, so one place owns a section's rules.
 
 // parseDuration parses a duration string (e.g. "30m", "10s") from a JSON
-// field. ok is false when the key is absent (s == nil) or empty (""), which
-// both mean "leave the current value alone". An empty string is treated as
-// absent rather than as an error for compatibility with documents written
-// before #86, where it was silently skipped. A string that is present but
-// does not parse is an error naming the field.
+// field. ok is false when the key is absent or null (s == nil), meaning
+// "leave the current value alone". An empty string is an error rather than
+// "unset": before #86 it decoded to 0 (sleeping off), so reading it as the
+// default now would silently turn sleeping mode on. A string that does not
+// parse is an error naming the field.
 func parseDuration(s *string, field string) (d time.Duration, ok bool, err error) {
-	if s == nil || *s == "" {
+	if s == nil {
 		return 0, false, nil
+	}
+	if *s == "" {
+		return 0, false, fmt.Errorf("%s: empty string is not a duration; write \"0s\" or leave the key out", field)
 	}
 	d, err = time.ParseDuration(*s)
 	if err != nil {
@@ -67,9 +74,8 @@ type durationField struct {
 }
 
 // energyJSON, availabilityJSON and houseJSON are the wire shapes the
-// UnmarshalJSON methods below read. They are named so the example-document
-// tests can decode each section strictly: DisallowUnknownFields does not
-// reach inside a custom UnmarshalJSON.
+// UnmarshalJSON methods below read. Their json tags are the complete list of
+// keys each section accepts: strictUnmarshal refuses any other.
 type energyJSON struct {
 	// A pointer, like the durations, so an energy block that names only
 	// max_integration_gap does not zero the warning threshold (#86).
@@ -95,7 +101,7 @@ type houseJSON struct {
 // top of this file.
 func (e *EnergyConfig) UnmarshalJSON(b []byte) error {
 	var raw energyJSON
-	if err := json.Unmarshal(b, &raw); err != nil {
+	if err := strictUnmarshal(b, &raw); err != nil {
 		return err
 	}
 	// Durations first: they are the only thing that can fail, and e must not
@@ -115,7 +121,7 @@ func (e *EnergyConfig) UnmarshalJSON(b []byte) error {
 // top of this file.
 func (a *AvailabilityConfig) UnmarshalJSON(b []byte) error {
 	var raw availabilityJSON
-	if err := json.Unmarshal(b, &raw); err != nil {
+	if err := strictUnmarshal(b, &raw); err != nil {
 		return err
 	}
 	return overlayDurations([]durationField{
@@ -124,11 +130,11 @@ func (a *AvailabilityConfig) UnmarshalJSON(b []byte) error {
 }
 
 // UnmarshalJSON overlays the keys present in b onto h; see the note at the
-// top of this file. The timezone is stored as written: the remote fetcher
+// top of this file. The timezone is stored as written: HouseConfig.validate
 // checks that it resolves before the section is applied.
 func (h *HouseConfig) UnmarshalJSON(b []byte) error {
 	var raw houseJSON
-	if err := json.Unmarshal(b, &raw); err != nil {
+	if err := strictUnmarshal(b, &raw); err != nil {
 		return err
 	}
 	if err := overlayDurations([]durationField{

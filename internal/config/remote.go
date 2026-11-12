@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/sweeney/common/devices"
 	"github.com/sweeney/common/remoteconfig"
@@ -48,34 +47,17 @@ func (f *Fetcher) Statuses() map[string]NamespaceStatus {
 	return f.tracker.Statuses()
 }
 
-// behaviourDoc mirrors the JSON structure of the statehouse_behaviour
-// namespace. applyBehaviour seeds energy, availability and house with
-// pointers to copies of the sections cfg already holds, so decoding overlays
-// the document onto the current values: a key the document leaves out keeps
-// its value instead of becoming zero (#86). See json.go for the per-key
-// rules. Adapters are seeded with a fresh struct instead; see applyBehaviour.
-//
-// A section given as JSON null sets its pointer to nil, which is applied the
-// same as an absent section: nothing changes.
-type behaviourDoc struct {
-	Energy       *EnergyConfig       `json:"energy,omitempty"`
-	Availability *AvailabilityConfig `json:"availability,omitempty"`
-	House        *HouseConfig        `json:"house,omitempty"`
-	Adapters     *AdaptersConfig     `json:"adapters,omitempty"`
-}
-
 // ApplyRemote fetches the three statehouse namespaces and applies them to
 // cfg:
 //
 //   - statehouse_classes: each class entry is added to cfg.DeviceClasses.
 //   - the devices namespace (cfg.Site.DevicesNamespace): each device entry is
 //     added to cfg.Devices.
-//   - statehouse_behaviour: each top-level section present (energy,
-//     availability, house) is decoded over the section cfg already holds, so
-//     a key the document leaves out keeps its value (the default, at startup
-//     and on SIGHUP), and a section left out is untouched. The adapters
-//     section replaces cfg.Adapters whole: an adapter left out is off. A
-//     document with any bad value is refused and changes nothing.
+//   - statehouse_behaviour: the energy, availability, house and adapters
+//     sections are rebuilt from Default() plus the document (overlayBehaviour,
+//     behaviour.go), so a key or section the document leaves out is the
+//     default whatever cfg held. A document with any key or value statehouse
+//     cannot use is refused whole and changes nothing.
 //
 // Each namespace is fetched independently, and every failure is recorded on
 // /healthz and returned, joined, so one error names all of them. There is no
@@ -184,6 +166,9 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, c *remoteconfig
 	return nil
 }
 
+// applyBehaviour fetches statehouse_behaviour, applies it with
+// overlayBehaviour, records the outcome for /healthz and commits the result to
+// cfg. The apply rules themselves live in behaviour.go.
 func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconfig.Client) error {
 	var doc json.RawMessage
 	if err := c.Get(ctx, nsBehaviour, &doc); err != nil {
@@ -200,38 +185,6 @@ func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconf
 	f.tracker.Record(nsBehaviour, nil)
 	*cfg = next
 	return nil
-}
-
-// overlayBehaviour returns base with a statehouse_behaviour document applied.
-// It is pure (no I/O, logging or status recording) so the apply rules can be
-// unit- and fuzz-tested without a config service. On error it returns base
-// unchanged.
-func overlayBehaviour(base Config, doc []byte) (Config, error) {
-	energy, availability, house := base.Energy, base.Availability, base.House
-	b := behaviourDoc{Energy: &energy, Availability: &availability, House: &house}
-	if err := json.Unmarshal(doc, &b); err != nil {
-		return base, err
-	}
-	if b.House != nil && b.House.Timezone != "" {
-		if _, err := time.LoadLocation(b.House.Timezone); err != nil {
-			return base, fmt.Errorf("house.timezone %q: %w", b.House.Timezone, err)
-		}
-	}
-	out := base
-	if b.Energy != nil {
-		out.Energy = *b.Energy
-	}
-	if b.Availability != nil {
-		out.Availability = *b.Availability
-	}
-	if b.House != nil {
-		out.House = *b.House
-	}
-	if b.Adapters != nil {
-		out.Adapters = *b.Adapters
-		out.Adapters.fillDefaults()
-	}
-	return out, nil
 }
 
 func (f *Fetcher) warn(msg string, args ...any) {
