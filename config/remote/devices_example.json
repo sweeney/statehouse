@@ -31,6 +31,22 @@
     "room": "ground.utility",
     "scheme": "boiler"
   },
+  "hot_water_cylinder": {
+    "class": "hot_water_cylinder",
+    "display_name": "Hot water cylinder",
+    "floor": "first",
+    "room": "first.airing_cupboard",
+    "telemetry": false
+  },
+  "hot_water_cylinder_top": {
+    "class": "appliance_probe",
+    "display_name": "Cylinder top",
+    "floor": "first",
+    "part_of": "hot_water_cylinder",
+    "primary": "hot_water_cylinder.top",
+    "room": "first.airing_cupboard",
+    "scheme": "tanktemp"
+  },
   "house_meter": {
     "class": "energy_meter",
     "display_name": "House meter",

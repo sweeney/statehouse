@@ -708,6 +708,21 @@ components:
           description: >
             What this device's readings describe when that is not its own room:
             "house", or another room id. Absent means it covers the room it is in.
+        part_of:
+          type: string
+          description: >
+            Id of the device this one is part of, as DECLARED by the devices
+            namespace: the hot water cylinder a cylinder probe is inside, the
+            fridge a fridge probe is inside. Absent means it is part of nothing.
+            Use it, with class "appliance_probe", to tell a cylinder probe from a
+            fridge probe. It does not imply a room: a probe that declares no room of
+            its own has none here, whatever room its appliance is in. Statehouse
+            does not inherit room through part_of. The named device often sends no
+            telemetry of its own (a "telemetry: false" entry, like the cylinder
+            itself) and then does not appear on /state/devices or /config/devices,
+            so GET on its id returns 404: treat part_of as a grouping key, not a
+            link.
+          example: hot-water-cylinder
         location:
           type: string
           deprecated: true
@@ -921,6 +936,21 @@ components:
           description: >
             What this device's readings describe when that is not its own room:
             "house", or another room id. Absent means it covers the room it is in.
+        part_of:
+          type: string
+          description: >
+            Id of the device this one is part of, as DECLARED by the devices
+            namespace: the hot water cylinder a cylinder probe is inside, the
+            fridge a fridge probe is inside. Absent means it is part of nothing.
+            Use it, with class "appliance_probe", to tell a cylinder probe from a
+            fridge probe. It does not imply a room: a probe that declares no room of
+            its own has none here, whatever room its appliance is in. Statehouse
+            does not inherit room through part_of. The named device often sends no
+            telemetry of its own (a "telemetry: false" entry, like the cylinder
+            itself) and then does not appear on /state/devices or /config/devices,
+            so GET on its id returns 404: treat part_of as a grouping key, not a
+            link.
+          example: hot-water-cylinder
         location:
           type: string
           deprecated: true

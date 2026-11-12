@@ -88,6 +88,11 @@ func (s *Store) Upsert(id string, d model.Device, rt *device.Runtime) {
 		if d.Covers != "" {
 			entry.Device.Covers = d.Covers
 		}
+		// part_of follows the placement rule: an absent value means "not
+		// republished", so it keeps the last known one rather than clearing it.
+		if d.PartOf != "" {
+			entry.Device.PartOf = d.PartOf
+		}
 		if d.Location != "" {
 			entry.Device.Location = d.Location
 		}
@@ -255,7 +260,7 @@ func (s *Store) RecentActivity(limit int) []model.ActivityRecord {
 // ProfiledDevice pairs a device's resolved runtime profile with its stored device
 // record.
 //
-// The two carry placement (room, floor, covers) under opposite update rules, and the
+// The two carry placement (room, floor, covers, part_of) under opposite update rules, and the
 // pairing exists so a caller cannot pick the wrong one by accident. Device is
 // AUTHORITATIVE for placement: it is merged so an absent field does not overwrite,
 // while Runtime.Profile is replaced wholesale on every EnsureDiscovered — including

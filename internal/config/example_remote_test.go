@@ -68,6 +68,47 @@ func TestRemoteDevicesExamplePassesCheck(t *testing.T) {
 	for _, p := range append(problems, devices.Check(devs)...) {
 		t.Errorf("devices_example.json: %s", p)
 	}
+	// And statehouse's own advisory: the example probe declares its room rather
+	// than leaning on its cylinder's, which statehouse would not inherit (#83).
+	for _, p := range PartOfRoomNotInheritedProblems(devs) {
+		t.Errorf("devices_example.json: %s", p)
+	}
+}
+
+// The example teaches part_of the way #83 settled it: a probe names its appliance
+// AND repeats the appliance's room. Pinned so a later tidy-up that drops the
+// probe's room (it looks redundant) fails here, not in production.
+func TestRemoteDevicesExampleProbeDeclaresItsOwnRoom(t *testing.T) {
+	devs, _, err := devices.Decode(readRemoteExample(t, "devices_example.json"))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var probes int
+	for id, d := range devs {
+		if d.PartOf == "" {
+			continue
+		}
+		probes++
+		parent, ok := devs[d.PartOf]
+		if !ok {
+			// Say so directly: comparing against the zero Device would blame the
+			// probe's room for what is really a renamed or missing parent.
+			t.Errorf("%s: part_of %q names no device in the example", id, d.PartOf)
+			continue
+		}
+		if d.Room == "" || d.Room != parent.Room {
+			t.Errorf("%s: room %q, want its own room declared, matching %s's %q",
+				id, d.Room, d.PartOf, parent.Room)
+		}
+		// Room AND floor: the docs ask a probe to declare both.
+		if d.Floor == "" || d.Floor != parent.Floor {
+			t.Errorf("%s: floor %q, want its own floor declared, matching %s's %q",
+				id, d.Floor, d.PartOf, parent.Floor)
+		}
+	}
+	if probes == 0 {
+		t.Error("devices_example.json has no part_of entry; it should teach one")
+	}
 }
 
 // strictDecode decodes raw into into, refusing any key into has no field for.

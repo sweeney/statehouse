@@ -168,6 +168,11 @@ type Device struct {
 	// Covers is what the device's readings describe when that is not its own room:
 	// "house", or another room id. Absent means it covers the room it sits in.
 	Covers string `json:"covers,omitempty"`
+	// PartOf names the device this one is part of, e.g. the hot water cylinder a
+	// probe is inside, as the devices namespace declares it. Absent means it is
+	// part of nothing. It does not imply a room: a probe that declares no room of
+	// its own has none, whatever room its appliance is in (#83).
+	PartOf string `json:"part_of,omitempty"`
 	// Location is the deprecated free-text place, still carried while a devices
 	// namespace that has not been republished supplies it.
 	Location     string         `json:"location,omitempty"`

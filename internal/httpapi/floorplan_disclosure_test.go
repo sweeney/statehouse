@@ -158,7 +158,7 @@ func TestStateAndConfigEndpointsAgreeOnPlacement(t *testing.T) {
 	stateDev := getJSON(t, mux, "/state/devices/"+id)
 	configDev := getJSON(t, mux, "/config/devices/"+id)
 
-	for _, field := range []string{"room", "floor", "covers", "location"} {
+	for _, field := range []string{"room", "floor", "covers", "part_of", "location"} {
 		if stateDev[field] != configDev[field] {
 			t.Errorf("%s: /state says %v, /config/devices says %v",
 				field, stateDev[field], configDev[field])
@@ -212,7 +212,7 @@ func TestPlacementStillAgreesAfterAReloadDropsTheNamespaceKeys(t *testing.T) {
 	stateDev := getJSON(t, mux, "/state/devices/"+id)
 	configDev := getJSON(t, mux, "/config/devices/"+id)
 
-	for _, field := range []string{"room", "floor", "covers", "location"} {
+	for _, field := range []string{"room", "floor", "covers", "part_of", "location"} {
 		if stateDev[field] != configDev[field] {
 			t.Errorf("%s: /state says %v, /config/devices says %v",
 				field, stateDev[field], configDev[field])

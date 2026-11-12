@@ -63,14 +63,16 @@ const (
 	// stands in. Consumers aggregating ambient conditions by room need to
 	// exclude these, or a freezer interior drags the room average down and
 	// a hot water cylinder drags it up. The probe's room is necessarily the
-	// appliance's room, so the class is the only handle consumers currently
-	// have for this.
+	// appliance's room, so the room cannot tell them apart; the class can.
 	//
-	// TODO(#83): part_of (github.com/sweeney/common/devices v0.2.0) names the
-	// appliance a probe is inside. Statehouse decodes it but does not yet
-	// relay or act on it. When it does, part_of becomes a second handle: it
-	// says which appliance a probe belongs to, while the class still says
-	// the reading is not ambient.
+	// part_of (github.com/sweeney/common/devices v0.2.0) is the second
+	// handle, relayed since #83: it names the appliance the probe is inside,
+	// so a cylinder probe can be told from a fridge probe. The class still
+	// says the reading is not ambient; part_of says which appliance it
+	// describes. Neither replaces the other.
+	//
+	// A probe does NOT inherit its appliance's room through part_of. It
+	// declares its own room or has none (decided on #83). See Profile.PartOf.
 	ClassApplianceProbe = "appliance_probe"
 	ClassUnclassified   = "unclassified"
 )
@@ -125,8 +127,18 @@ type Profile struct {
 	Room string
 	// Floor is the floor id as declared by the devices namespace, never derived
 	// from Room. See config.DeviceConfig.Floor.
-	Floor        string
-	Covers       string
+	Floor  string
+	Covers string
+	// PartOf names the device this one is part of, as the devices namespace
+	// declares it: the cylinder for a cylinder probe, the fridge for a fridge
+	// probe. Relayed, never resolved further.
+	//
+	// In particular it is NOT used to fill Room. devices.PlaceOf would give a
+	// probe that declares no room its parent's room; statehouse deliberately
+	// does not call it (#83), because room is relayed and never derived. A
+	// probe declares its own room or has none. config.PartOfRoomNotInheritedProblems
+	// warns about namespace records that rely on the inheritance.
+	PartOf       string
 	Location     string
 	Thresholds   config.Thresholds
 	Strategy     energy.Strategy
@@ -287,6 +299,7 @@ func profileFromOverride(d config.DeviceConfig, classes map[string]config.Device
 		Room:        d.Room,
 		Floor:       d.Floor,
 		Covers:      d.Coverage(),
+		PartOf:      d.PartOf,
 		Location:    d.Location,
 	}
 	if cls, ok := classes[d.Class]; ok {
