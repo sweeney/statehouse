@@ -48,11 +48,42 @@ through the real fetcher, and carry no key statehouse would ignore.
 
 ## How each namespace is applied
 
-- **`statehouse_behaviour`**: each top-level section that is present
-  (`adapters`, `energy`, `availability`, `house`) **replaces that section
-  whole**. A section that is absent keeps statehouse's built-in defaults.
-  Within a present section, a key you leave out does not fall back to its
-  default: write every key you mean to set (see #86).
+- **`statehouse_behaviour`**: the four sections are built from statehouse's
+  built-in defaults (the tables below) plus the document, and nothing else.
+  A section or key you leave out is the default, whatever an earlier document
+  or a previous reload set, so removing a key returns it to its default.
+  - `energy`, `availability` and `house` are applied **key by key over the
+    defaults**: a key you write replaces the default; a key you leave out
+    keeps it.
+  - `null`, for a whole section or a single key, means the same as leaving it
+    out.
+  - An explicit zero duration (`"0s"`) is a real value and is applied, not
+    treated as "unset": for example `sleeping_after: "0s"` turns sleeping mode
+    off. An **empty string** is not a duration and refuses the document: write
+    `"0s"` or leave the key out.
+  - `house.timezone: ""` means UTC, the same as the default. `"Local"` means
+    the host's zone.
+  - `adapters` **replaces the section whole**: an adapter left out of the block
+    is off (except `zigbee2mqtt`; see below), and within an adapter a
+    `base_topic` left out takes its default.
+  - Anything statehouse cannot use exactly as written **refuses the whole
+    document**, and none of it is applied: an unknown or misspelt key at any
+    level (keys are case-sensitive), a key that appears twice in the same
+    object, a wrong type, a duration that is empty,
+    does not parse or is negative, a `divergence_warning_pct` of 0 or less, or
+    a timezone that does not resolve. The error names the section and the key.
+    At startup statehouse exits; on SIGHUP it keeps the running config. Either
+    way `/healthz` shows the error under `remote_config`.
+
+  Before #86 a key left out of a present section became **zero** instead of
+  its default. Production's `house` block named only `quiet_after` and
+  `empty_after`, so `sleeping_after` was `0s` and the house never entered
+  sleeping mode. Since the fix it gets the `2h` default, so `house/mode` can
+  report `sleeping` again: set `sleeping_after` explicitly if 2h is not what
+  you want, or `"0s"` to keep sleeping mode off. The same change made
+  statehouse refuse documents it used to accept silently (unknown keys,
+  duplicate keys, `""` durations, negative values): check the live document against the rules
+  above before deploying.
 - **`statehouse_classes`**: each class entry is applied by name. A class
   missing from the namespace has no name hints or default thresholds.
 - **devices**: each entry is applied by id, and checked with the shared
@@ -83,14 +114,14 @@ unless `enabled` is `false`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `divergence_warning_pct` | `20` | Counter and integrated kWh for a cycle diverging by more than this raises `energy_divergence_warning`. |
-| `max_integration_gap` | `30m` | The engine refuses to integrate power across a longer gap. |
+| `divergence_warning_pct` | `20` | Counter and integrated kWh for a cycle diverging by more than this raises `energy_divergence_warning`. Must be greater than 0. |
+| `max_integration_gap` | `30m` | The engine refuses to integrate power across a longer gap. `"0s"` never refuses. |
 
 ### `availability`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `offline_debounce` | `30s` | How long a device must stay offline before it is reported offline. |
+| `offline_debounce` | `30s` | How long a device must stay offline before it is reported offline. `"0s"` reports it at once. |
 
 ### `house`
 
@@ -98,7 +129,7 @@ unless `enabled` is `false`.
 |---|---|---|
 | `quiet_after` | `30m` | No activity for this long: the house is quiet. |
 | `empty_after` | `6h` | Quiet this long with no sign of presence: empty. |
-| `sleeping_after` | `2h` | Occupied and quiet this long: sleeping. `0` never enters sleeping. |
+| `sleeping_after` | `2h` | Occupied and quiet this long: sleeping. `"0s"` never enters sleeping. |
 | `timezone` | UTC | tz database name (e.g. `Europe/London`, or `Local` for the host's zone) for the mode dimension's night/day hours. A name that does not resolve refuses the whole document. |
 
 ## `statehouse_classes`

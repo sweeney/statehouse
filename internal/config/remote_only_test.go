@@ -234,7 +234,7 @@ func TestApplyRemoteRejectsInvalidTimezone(t *testing.T) {
 	if err == nil {
 		t.Fatal("ApplyRemote() = nil with house.timezone \"Europe/Londn\"; want an error")
 	}
-	for _, want := range []string{"statehouse_behaviour", "house.timezone", "Europe/Londn"} {
+	for _, want := range []string{"statehouse_behaviour", "house: timezone", "Europe/Londn"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}

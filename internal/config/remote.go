@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/sweeney/common/devices"
 	"github.com/sweeney/common/remoteconfig"
@@ -61,25 +60,17 @@ func (f *Fetcher) Statuses() map[string]NamespaceStatus {
 	return f.tracker.Statuses()
 }
 
-// behaviourDoc mirrors the JSON structure of the statehouse_behaviour
-// namespace. Pointer fields let us distinguish "key absent" (nil — keep the
-// default) from "key present" (non-nil — replace the section whole).
-type behaviourDoc struct {
-	Energy       *EnergyConfig       `json:"energy,omitempty"`
-	Availability *AvailabilityConfig `json:"availability,omitempty"`
-	House        *HouseConfig        `json:"house,omitempty"`
-	Adapters     *AdaptersConfig     `json:"adapters,omitempty"`
-}
-
 // ApplyRemote fetches the three statehouse namespaces and applies them to
 // cfg:
 //
 //   - statehouse_classes: each class entry is added to cfg.DeviceClasses.
 //   - the devices namespace (cfg.Site.DevicesNamespace): each device entry is
 //     added to cfg.Devices.
-//   - statehouse_behaviour: each top-level section present (adapters, energy,
-//     availability, house) replaces that section of cfg whole. A section the
-//     document leaves out keeps its default.
+//   - statehouse_behaviour: the energy, availability, house and adapters
+//     sections are rebuilt from Default() plus the document (overlayBehaviour,
+//     behaviour.go), so a key or section the document leaves out is the
+//     default whatever cfg held. A document with any key or value statehouse
+//     cannot use is refused whole and changes nothing.
 //
 // Each namespace is fetched independently, and every failure is recorded on
 // /healthz and returned, joined, so one error names all of them. There is no
@@ -191,38 +182,24 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, c *remoteconfig
 	return nil
 }
 
+// applyBehaviour fetches statehouse_behaviour, applies it with
+// overlayBehaviour, records the outcome for /healthz and commits the result to
+// cfg. The apply rules themselves live in behaviour.go.
 func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconfig.Client) error {
-	var b behaviourDoc
-	if err := c.Get(ctx, nsBehaviour, &b); err != nil {
+	var doc json.RawMessage
+	if err := c.Get(ctx, nsBehaviour, &doc); err != nil {
 		f.warn("remote config: statehouse_behaviour unavailable", "error", err)
 		f.tracker.Record(nsBehaviour, err)
 		return fmt.Errorf("%s: %w", nsBehaviour, err)
 	}
-	// Location() falls back to UTC on a name it cannot resolve, so a typo
-	// would apply cleanly and shift the night/day window with nothing showing
-	// it. Refuse the document instead, before any of it is applied.
-	if b.House != nil && b.House.Timezone != "" {
-		if _, err := time.LoadLocation(b.House.Timezone); err != nil {
-			err = fmt.Errorf("house.timezone %q: %w", b.House.Timezone, err)
-			f.warn("remote config: statehouse_behaviour rejected", "error", err)
-			f.tracker.Record(nsBehaviour, err)
-			return fmt.Errorf("%s: %w", nsBehaviour, err)
-		}
+	next, err := overlayBehaviour(*cfg, doc)
+	if err != nil {
+		f.warn("remote config: statehouse_behaviour rejected", "error", err)
+		f.tracker.Record(nsBehaviour, err)
+		return fmt.Errorf("%s: %w", nsBehaviour, err)
 	}
 	f.tracker.Record(nsBehaviour, nil)
-	if b.Energy != nil {
-		cfg.Energy = *b.Energy
-	}
-	if b.Availability != nil {
-		cfg.Availability = *b.Availability
-	}
-	if b.House != nil {
-		cfg.House = *b.House
-	}
-	if b.Adapters != nil {
-		cfg.Adapters = *b.Adapters
-		cfg.Adapters.fillDefaults()
-	}
+	*cfg = next
 	return nil
 }
 
