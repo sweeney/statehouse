@@ -185,59 +185,53 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, c *remoteconfig
 }
 
 func (f *Fetcher) applyBehaviour(ctx context.Context, cfg *Config, c *remoteconfig.Client) error {
-	// Seed the sections with copies, not with cfg's own fields: the document
-	// must not reach cfg until all of it has decoded and been checked, so a
-	// refused document leaves cfg exactly as it was.
-	energy, availability, house := cfg.Energy, cfg.Availability, cfg.House
-	b := behaviourDoc{
-		Energy:       &energy,
-		Availability: &availability,
-		House:        &house,
-		// Adapters is left nil, so encoding/json allocates a fresh struct only
-		// when the document has the key: the section replaces cfg.Adapters
-		// whole, as documented (an adapter left out is off). That already is
-		// decode-over-defaults, since the zero AdaptersConfig is the default
-		// (zigbee2mqtt on, the rest off) apart from base_topic, which
-		// fillDefaults supplies below. Seeding it with a copy of cfg.Adapters
-		// would instead share that copy's Enabled pointers, and decoding
-		// would write through them into cfg.
-	}
-	if err := c.Get(ctx, nsBehaviour, &b); err != nil {
+	var doc json.RawMessage
+	if err := c.Get(ctx, nsBehaviour, &doc); err != nil {
 		f.warn("remote config: statehouse_behaviour unavailable", "error", err)
 		f.tracker.Record(nsBehaviour, err)
 		return fmt.Errorf("%s: %w", nsBehaviour, err)
 	}
-	// Location() falls back to UTC on a name it cannot resolve, so a typo
-	// would apply cleanly and shift the night/day window with nothing showing
-	// it. Refuse the document instead, before any of it is applied. This
-	// checks the zone that would be applied: the document's if it names one,
-	// otherwise the current one carried over by the overlay.
-	if b.House != nil && b.House.Timezone != "" {
-		if _, err := time.LoadLocation(b.House.Timezone); err != nil {
-			err = fmt.Errorf("house.timezone %q: %w", b.House.Timezone, err)
-			f.warn("remote config: statehouse_behaviour rejected", "error", err)
-			f.tracker.Record(nsBehaviour, err)
-			return fmt.Errorf("%s: %w", nsBehaviour, err)
-		}
+	next, err := overlayBehaviour(*cfg, doc)
+	if err != nil {
+		f.warn("remote config: statehouse_behaviour rejected", "error", err)
+		f.tracker.Record(nsBehaviour, err)
+		return fmt.Errorf("%s: %w", nsBehaviour, err)
 	}
 	f.tracker.Record(nsBehaviour, nil)
-	// Each of these is the current section with the document's keys laid
-	// over it, or nil if the document set the section to null. An absent
-	// section is the unchanged copy, so assigning it is a no-op.
+	*cfg = next
+	return nil
+}
+
+// overlayBehaviour returns base with a statehouse_behaviour document applied.
+// It is pure (no I/O, logging or status recording) so the apply rules can be
+// unit- and fuzz-tested without a config service. On error it returns base
+// unchanged.
+func overlayBehaviour(base Config, doc []byte) (Config, error) {
+	energy, availability, house := base.Energy, base.Availability, base.House
+	b := behaviourDoc{Energy: &energy, Availability: &availability, House: &house}
+	if err := json.Unmarshal(doc, &b); err != nil {
+		return base, err
+	}
+	if b.House != nil && b.House.Timezone != "" {
+		if _, err := time.LoadLocation(b.House.Timezone); err != nil {
+			return base, fmt.Errorf("house.timezone %q: %w", b.House.Timezone, err)
+		}
+	}
+	out := base
 	if b.Energy != nil {
-		cfg.Energy = *b.Energy
+		out.Energy = *b.Energy
 	}
 	if b.Availability != nil {
-		cfg.Availability = *b.Availability
+		out.Availability = *b.Availability
 	}
 	if b.House != nil {
-		cfg.House = *b.House
+		out.House = *b.House
 	}
 	if b.Adapters != nil {
-		cfg.Adapters = *b.Adapters
-		cfg.Adapters.fillDefaults()
+		out.Adapters = *b.Adapters
+		out.Adapters.fillDefaults()
 	}
-	return nil
+	return out, nil
 }
 
 func (f *Fetcher) warn(msg string, args ...any) {
