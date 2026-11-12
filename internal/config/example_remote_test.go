@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -48,6 +49,10 @@ func TestRemoteExamplesApply(t *testing.T) {
 	}
 	if !cfg.Adapters.Zigbee2MQTT.IsEnabled() {
 		t.Error("example behaviour leaves zigbee2mqtt off")
+	}
+	// The house block names every key, so none falls back to zero (#86).
+	if cfg.House.SleepingAfter == 0 || cfg.House.QuietAfter == 0 || cfg.House.EmptyAfter == 0 {
+		t.Errorf("example house block leaves a duration unset: %+v", cfg.House)
 	}
 }
 
@@ -113,12 +118,60 @@ func strictDecode(raw []byte, into any) error {
 	return dec.Decode(into)
 }
 
-// Classes have no Decode of their own, so their keys are checked strictly
-// here. Behaviour needs no test-only checker: the production decoder
-// (overlayBehaviour) refuses unknown keys at every level, so applying the
-// example is the check. The cases it must catch are in refusedCases.
+// checkBehaviourKeys refuses any key statehouse would ignore in a
+// statehouse_behaviour document. A plain strict decode into behaviourDoc is
+// not enough: energy, availability and house have their own UnmarshalJSON,
+// which a decoder's DisallowUnknownFields does not reach, so each of those
+// sections is decoded strictly into the struct its UnmarshalJSON reads.
+func checkBehaviourKeys(raw []byte) error {
+	var top struct {
+		Energy       json.RawMessage `json:"energy"`
+		Availability json.RawMessage `json:"availability"`
+		House        json.RawMessage `json:"house"`
+		Adapters     *AdaptersConfig `json:"adapters"`
+	}
+	if err := strictDecode(raw, &top); err != nil {
+		return err
+	}
+	for _, s := range []struct {
+		name string
+		raw  json.RawMessage
+		into any
+	}{
+		{"energy", top.Energy, &energyJSON{}},
+		{"availability", top.Availability, &availabilityJSON{}},
+		{"house", top.House, &houseJSON{}},
+	} {
+		if s.raw == nil {
+			continue
+		}
+		if err := strictDecode(s.raw, s.into); err != nil {
+			return fmt.Errorf("%s: %w", s.name, err)
+		}
+	}
+	return nil
+}
+
+// The check itself must catch a key inside a custom-unmarshalled section: the
+// old example's energy.electricity block was never a real field.
+func TestCheckBehaviourKeysCatchesNestedUnknownKey(t *testing.T) {
+	for _, doc := range []string{
+		`{"energy":{"divergence_warning_pct":20,"electricity":{"idle_after":"5m"}}}`,
+		`{"availability":{"offline_debounc":"30s"}}`,
+		`{"house":{"sleeping_afer":"2h"}}`,
+		`{"adapters":{"tanktemp":{"enabled":true,"base_topc":"x"}}}`,
+		`{"hous":{}}`,
+	} {
+		if err := checkBehaviourKeys([]byte(doc)); err == nil {
+			t.Errorf("checkBehaviourKeys(%s) = nil; want the unknown key refused", doc)
+		}
+	}
+}
+
+// Behaviour and classes have no Decode of their own, so their keys are
+// checked strictly here, down to each section's fields.
 func TestRemoteBehaviourAndClassesExamplesHaveNoUnknownKeys(t *testing.T) {
-	if _, err := overlayBehaviour(Default(), readRemoteExample(t, "statehouse_behaviour.json")); err != nil {
+	if err := checkBehaviourKeys(readRemoteExample(t, "statehouse_behaviour.json")); err != nil {
 		t.Errorf("statehouse_behaviour.json: %v", err)
 	}
 	if err := strictDecode(readRemoteExample(t, "statehouse_classes.json"), &map[string]DeviceClassConfig{}); err != nil {

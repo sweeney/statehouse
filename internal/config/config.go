@@ -387,15 +387,15 @@ type HouseConfig struct {
 	// Timezone names a tz database location (e.g. "Europe/London") used to
 	// classify the mode dimension's night/day hour window. Empty means UTC
 	// (back-compat for existing configs); "Local" uses the host time zone.
-	// HouseConfig.validate refuses a timezone time.LoadLocation cannot
-	// resolve (typo, missing tzdata), and with it the whole
-	// statehouse_behaviour document, so the mistake stops startup, or fails
-	// a SIGHUP reload, rather than showing up as mis-bucketed mode readings.
+	// The remote fetcher refuses a statehouse_behaviour document whose
+	// timezone time.LoadLocation cannot resolve (typo, missing tzdata), so
+	// the mistake stops startup, or fails a SIGHUP reload, rather than
+	// showing up as mis-bucketed mode readings.
 	Timezone string `yaml:"timezone" json:"timezone,omitempty"`
 }
 
 // Location returns the time.Location implied by Timezone. Falls back to
-// time.UTC on parse failure; HouseConfig.validate refuses invalid timezones
+// time.UTC on parse failure; the remote fetcher refuses invalid timezones
 // before they are applied, so this fallback only matters for hand-crafted
 // HouseConfig values in tests.
 func (h HouseConfig) Location() *time.Location {
@@ -460,8 +460,8 @@ func Default() Config {
 }
 
 // fillDefaults gives every adapter with no base_topic its protocol's default.
-// It runs on Default and again after a remote adapters block is decoded
-// (overlayBehaviour), since that block replaces the whole section.
+// It runs on Default and again after the remote adapters block is applied,
+// since that block replaces the whole section.
 func (a *AdaptersConfig) fillDefaults() {
 	for _, f := range []struct {
 		topic *string
