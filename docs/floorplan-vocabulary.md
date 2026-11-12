@@ -17,7 +17,9 @@ facts, plus `part_of`, and derives none of them.
 | `part_of` | The id of the device this one is **part of**: the hot water cylinder a cylinder probe is inside, the fridge a fridge probe is inside. | The device is part of nothing — the common case. **Not** "its room comes from elsewhere": see below. |
 
 Both `/state/devices` (and `/state`) and `/config/devices` carry all four, with the
-same values for the same device. A consumer may join the two endpoints on device id and
+same values for the same device. So do the retained MQTT payloads, which are built
+by the same code as `/state`: `house/state/devices/{id}` and the `devices` map in
+`house/state/snapshot`. A consumer may join the two endpoints on device id and
 will not get two different answers.
 
 That holds **by construction, not by convention**: both endpoints read placement from
@@ -90,15 +92,32 @@ the probe reads as UNKNOWN like any other unplaced device.
 Because the shared vocabulary considers the omission legal, `devices.Check` does not
 report it. Statehouse reports it itself, as an advisory warning when the devices
 namespace is fetched (`statehouse.part_of_room_not_inherited`, from
-`config.PartOfRoomNotInheritedProblems`). It names the room to add, and is raised only
-when the answers would actually differ: the device declares no place and its parent
-declares one. The device is still applied.
+`config.PartOfRoomNotInheritedProblems`). It is raised only when the answers would
+actually differ: the device declares no place and its parent declares one. The device
+is still applied. The message says what to add:
+
+- parent has a room: `add "room": "first.cupboard", "floor": "first"` (floor only
+  when the parent declares one);
+- parent has only a legacy `location`: give the parent a room first. A free-text
+  location is not a `<floor>.<room>` id, so copying it would only trade this warning
+  for `device.room_malformed`.
+
+The warning describes the **document**, not the running state. Because an absent key
+keeps the last known value (below), a republish that drops a probe's `room` leaves
+`/state` showing the old room while this warning says the record declares none. Both
+are true; the fix is the same: declare the room in the namespace. The checks run over
+every fetched document live in `config.DefaultDeviceChecks`, and all their problems
+are logged sorted by device id.
 
 `part_of` follows the same update rule as the placement fields: an absent key in a
-republished record keeps the last known value. The parent itself (the cylinder, the
+republished record keeps the last known value, and a new value (the probe moved to
+another appliance) replaces it. Statehouse relays `part_of`, it does not resolve it:
+if the parent is removed from the namespace, the probe keeps relaying the now-dangling
+id, and `devices.Check` warns `device.part_of_unresolved`. The parent itself (the cylinder, the
 fridge) is usually a `telemetry: false` entry: it sends nothing, so it is never an
-engine device and does not appear on either endpoint. Its id is still the one
-`part_of` carries.
+engine device and does not appear on either endpoint, so `GET` on the id a probe's
+`part_of` names usually returns 404. **Treat `part_of` as a grouping key, not a
+link.**
 
 ## `location` is deprecated
 

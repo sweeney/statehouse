@@ -149,7 +149,8 @@ MQTT topics published under `house/`:
 
 - `house/state/snapshot`        (retained)
 - `house/state/house`           (retained)
-- `house/state/devices/{id}`    (retained, per device)
+- `house/state/devices/{id}`    (retained, per device; the same body as
+  `GET /state/devices/{id}`, including `room`, `floor`, `covers` and `part_of`)
 - `house/events/derived`        (non-retained, one per derived event)
 
 ## CORS

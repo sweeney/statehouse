@@ -717,7 +717,12 @@ components:
             Use it, with class "appliance_probe", to tell a cylinder probe from a
             fridge probe. It does not imply a room: a probe that declares no room of
             its own has none here, whatever room its appliance is in. Statehouse
-            does not inherit room through part_of.
+            does not inherit room through part_of. The named device often sends no
+            telemetry of its own (a "telemetry: false" entry, like the cylinder
+            itself) and then does not appear on /state/devices or /config/devices,
+            so GET on its id returns 404: treat part_of as a grouping key, not a
+            link.
+          example: hot-water-cylinder
         location:
           type: string
           deprecated: true
@@ -940,7 +945,12 @@ components:
             Use it, with class "appliance_probe", to tell a cylinder probe from a
             fridge probe. It does not imply a room: a probe that declares no room of
             its own has none here, whatever room its appliance is in. Statehouse
-            does not inherit room through part_of.
+            does not inherit room through part_of. The named device often sends no
+            telemetry of its own (a "telemetry: false" entry, like the cylinder
+            itself) and then does not appear on /state/devices or /config/devices,
+            so GET on its id returns 404: treat part_of as a grouping key, not a
+            link.
+          example: hot-water-cylinder
         location:
           type: string
           deprecated: true

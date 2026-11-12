@@ -369,3 +369,14 @@ func TestApplyDevicesDefaultChecksWarnWhenAProbeReliesOnInheritedRoom(t *testing
 		}
 	}
 }
+
+// Only nil means "the defaults". An explicitly empty list runs no checks, so a
+// caller can switch them off; the doc on Fetcher.DeviceChecks says so.
+func TestApplyDevicesRunsNoChecksWhenGivenAnEmptyList(t *testing.T) {
+	_, rec := fetchDevices(t, map[string]any{
+		"orphan": map[string]any{"class": "appliance_probe", "scheme": "tanktemp", "primary": "o", "part_of": "nowhere"},
+	}, []DeviceCheck{})
+	if lines := rec.problemLines(); len(lines) != 0 {
+		t.Errorf("logged %v; an empty check list runs none", lines)
+	}
+}

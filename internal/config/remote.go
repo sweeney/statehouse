@@ -39,8 +39,21 @@ type Fetcher struct {
 	// UserAgent is sent to the config service, conventionally
 	// "statehouse/<version>". Empty sends remoteconfig's default.
 	UserAgent string
+	// DeviceChecks are the advisory checks run over every fetched devices
+	// document, their problems logged as warnings. nil means DefaultDeviceChecks,
+	// which is what production uses; tests inject fakes to exercise the wiring.
+	DeviceChecks []DeviceCheck
 
 	tracker remoteconfig.Tracker
+}
+
+// deviceChecks returns the checks to run: DeviceChecks, or the defaults when nil.
+// An explicitly empty, non-nil list runs none.
+func (f *Fetcher) deviceChecks() []DeviceCheck {
+	if f.DeviceChecks == nil {
+		return DefaultDeviceChecks
+	}
+	return f.DeviceChecks
 }
 
 // Statuses returns a snapshot of the last fetch result for each namespace.
@@ -168,12 +181,10 @@ func (f *Fetcher) applyDevices(ctx context.Context, cfg *Config, c *remoteconfig
 		cfg.Devices[k] = v
 	}
 	normaliseDevices(cfg.Devices)
-	// devices.Check's problems, then statehouse's own: a probe that would only have
-	// a room by inheriting its appliance's, which statehouse does not do (#83).
-	// Both are advisory, logged the same way, and cost no device.
-	problems = append(problems, devices.Check(cfg.Devices)...)
-	problems = append(problems, PartOfRoomNotInheritedProblems(cfg.Devices)...)
-	for _, p := range problems {
+	// The decoder's problems plus every advisory check's (by default devices.Check
+	// and statehouse's own, e.g. a probe relying on an inherited room, #83), sorted
+	// together by device id. All are advisory: logged the same way, no device lost.
+	for _, p := range runDeviceChecks(cfg.Devices, f.deviceChecks(), problems) {
 		f.warn("remote config: devices problem", "namespace", ns, "device", p.ID,
 			"field", p.Field, "code", p.Code, "problem", p.Message)
 	}
