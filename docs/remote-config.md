@@ -66,12 +66,12 @@ through the real fetcher, and carry no key statehouse would ignore.
   - `adapters` **replaces the section whole**: an adapter left out of the block
     is off (except `zigbee2mqtt`; see below), and within an adapter a
     `base_topic` left out takes its default.
-  - Anything statehouse cannot use exactly as written **refuses the whole
-    document**, and none of it is applied: an unknown or misspelt key at any
-    level (keys are case-sensitive), a key that appears twice in the same
-    object, a wrong type, a duration that is empty,
-    does not parse or is negative, a `divergence_warning_pct` of 0 or less, or
-    a timezone that does not resolve. The error names the section and the key.
+  - Anything statehouse cannot use **refuses the whole document**, and none
+    of it is applied: an unknown or misspelt key at any level, a key that
+    appears twice in the same object (compared ignoring case), a wrong type, a
+    duration that is empty, does not parse or is negative, a `divergence_warning_pct` of 0 or less, or
+    a timezone that does not resolve. The error names the section and the key
+    (for a key inside an adapter, the key but not the adapter).
     At startup statehouse exits; on SIGHUP it keeps the running config. Either
     way `/healthz` shows the error under `remote_config`.
 

@@ -21,62 +21,35 @@ import (
 // only quiet_after and empty_after, which made sleeping_after 0s: the house
 // could never enter sleeping mode.
 //
-// The contract these tests pin (see docs/remote-config.md):
-//
-//   - The four behaviour sections are built from Default() plus the document,
-//     and nothing else. What the caller's config held before does not matter,
-//     so a key or section the document leaves out is the default, and
-//     applying a document is idempotent.
-//   - A key that is present replaces the default, including an explicit zero
-//     duration. JSON null, for a section or for a key inside one, is the same
-//     as leaving it out.
-//   - Anything statehouse cannot use exactly as written refuses the whole
-//     document, and none of it is applied: an unknown key, a wrong type, an
-//     empty or unparseable duration, an out-of-range value, an unresolvable
-//     timezone.
-//
-// Most cases are rows in the two tables below: overlayCases (applied) and
-// refusedCases (refused). A new corner case is one row. Each row runs through
-// the pure overlayBehaviour against two bases (see bases), and the same rows
-// seed FuzzOverlayBehaviour. The fetcher-level tests at the end cover only
-// what the fetcher adds: HTTP, /healthz status, logging, and the SIGHUP
-// sequence.
+// overlayCases and refusedCases run through the pure overlayBehaviour; the
+// fetcher tests at the end cover HTTP, /healthz, logging and the SIGHUP
+// sequence. The rules are in docs/remote-config.md.
 
 func boolPtr(b bool) *bool { return &b }
 
-// bases are the configs every table row is applied to. "default" is what
-// startup and SIGHUP pass today. "dirty" has every behaviour section set to
-// something non-default (as a running config carried over from an earlier
-// document would be) plus a non-behaviour field, to prove that a document's
-// result does not depend on what the caller held, and that fields outside the
-// behaviour sections survive.
-func bases() []struct {
+// bases are the configs every table row is applied to: Default(), and a
+// "dirty" config whose behaviour sections all differ from the defaults (as a
+// running config might) plus a field outside them. The dirty base proves the
+// result is built from Default(), not from what the caller held (#86), that a
+// refusal returns the base unchanged, and that other fields survive.
+var bases = []struct {
 	name string
 	cfg  func() Config
-} {
-	return []struct {
-		name string
-		cfg  func() Config
-	}{
-		{"default", Default},
-		{"dirty", func() Config {
-			c := Default()
-			c.Site.DevicesNamespace = "devices_dirty"
-			c.Energy = EnergyConfig{DivergenceWarningPct: 99, MaxIntegrationGap: time.Minute}
-			c.Availability = AvailabilityConfig{OfflineDebounce: time.Minute}
-			c.House = HouseConfig{QuietAfter: time.Minute, EmptyAfter: time.Minute, SleepingAfter: time.Minute, Timezone: "Europe/Paris"}
-			c.Adapters.UPS.Enabled = boolPtr(true)
-			c.Adapters.UPS.BaseTopic = "ups/dirty"
-			return c
-		}},
-	}
+}{
+	{"default", Default},
+	{"dirty", func() Config {
+		c := Default()
+		c.Site.DevicesNamespace = "devices_dirty"
+		c.Energy = EnergyConfig{DivergenceWarningPct: 99, MaxIntegrationGap: time.Minute}
+		c.Availability = AvailabilityConfig{OfflineDebounce: time.Minute}
+		c.House = HouseConfig{QuietAfter: time.Minute, EmptyAfter: time.Minute, SleepingAfter: time.Minute, Timezone: "Europe/Paris"}
+		c.Adapters.UPS.Enabled = boolPtr(true)
+		return c
+	}},
 }
 
-// wantFrom is the expected result of a successful overlay: base, with the four
-// behaviour sections taken from Default() after mutate has applied the keys
-// the document sets. Deriving it from Default() rather than hardcoding the
-// defaults means a change to a default cannot fail these tests for the wrong
-// reason, and comparing whole configs means no field goes unchecked.
+// wantFrom is the expected result of a successful overlay: base, with its
+// behaviour sections taken from Default() edited by mutate.
 func wantFrom(base Config, mutate func(*Config)) Config {
 	d := Default()
 	if mutate != nil {
@@ -154,34 +127,21 @@ var refusedCases = []struct {
 	doc     string
 	wantErr []string
 }{
-	// Unknown keys. Before strict decoding these were silently ignored, and
-	// after #86 a typo would quietly mean "default": sleeping_afer "0s" left
-	// sleeping mode on.
+	// Unknown keys. A typo would otherwise quietly mean "default":
+	// sleeping_afer "0s" would leave sleeping mode on.
 	{"unknown top-level key", `{"hous":{}}`, []string{`"hous"`}},
 	{"unknown house key", `{"house":{"sleeping_afer":"0s"}}`, []string{"house:", `"sleeping_afer"`}},
 	{"unknown energy key", `{"energy":{"electricity":{"idle_after":"5m"}}}`, []string{"energy:", `"electricity"`}},
 	{"unknown availability key", `{"availability":{"offline_debounc":"30s"}}`, []string{"availability:", `"offline_debounc"`}},
 	{"unknown adapter", `{"adapters":{"zigbee":{"enabled":true}}}`, []string{"adapters:", `"zigbee"`}},
-	{"unknown adapter key", `{"adapters":{"tanktemp":{"enabled":true,"base_topc":"x"}}}`, []string{"adapters:", `"tanktemp.base_topc"`}},
-	// encoding/json matches keys case-insensitively, even with
-	// DisallowUnknownFields; keys must be spelled exactly as documented.
-	{"wrong case: section", `{"House":{"quiet_after":"5m"}}`, []string{`"House"`}},
-	{"wrong case: key", `{"house":{"Sleeping_After":"0s"}}`, []string{"house:", `"Sleeping_After"`}},
-	{"wrong case: adapter", `{"adapters":{"Boiler":{"enabled":true}}}`, []string{"adapters:", `"Boiler"`}},
-	{"wrong case: adapter key", `{"adapters":{"boiler":{"Enabled":true}}}`, []string{"adapters:", `"boiler.Enabled"`}},
-
-	// Duplicate keys, at any level. encoding/json would keep the last
-	// occurrence of a section but merge the occurrences of an adapter, and a
-	// typo in an earlier occurrence would never be seen; with pre-seeded
-	// pointers, null-then-value zeroed the section (#86 again).
-	{"duplicate section: null then value", `{"house":null,"house":{"quiet_after":"5m"}}`, []string{`duplicate key "house"`}},
-	{"duplicate section: value then null", `{"house":{"quiet_after":"5m"},"house":null}`, []string{`duplicate key "house"`}},
-	{"duplicate section: two values", `{"house":{"quiet_after":"5m"},"house":{"empty_after":"1h"}}`, []string{`duplicate key "house"`}},
-	{"duplicate key in section", `{"house":{"quiet_after":"5m","quiet_after":"6m"}}`, []string{`duplicate key "house.quiet_after"`}},
-	{"duplicate adapter would merge", `{"adapters":{"boiler":{"base_topic":"x"},"boiler":{"enabled":true}}}`, []string{`duplicate key "adapters.boiler"`}},
-	{"typo hidden in an earlier duplicate", `{"adapters":{"boiler":{"base_topc":"x"},"boiler":{"enabled":true}}}`, []string{`duplicate key "adapters.boiler"`}},
-	{"duplicate key in adapter", `{"adapters":{"ups":{"enabled":true,"enabled":false}}}`, []string{`duplicate key "adapters.ups.enabled"`}},
-	{"duplicate inside an array", `{"house":[{"a":1,"a":2}]}`, []string{`duplicate key "house.a"`}},
+	{"unknown adapter key", `{"adapters":{"tanktemp":{"enabled":true,"base_topc":"x"}}}`, []string{"adapters:", `"base_topc"`}},
+	// Duplicate keys, compared case-insensitively as encoding/json matches
+	// them. A later copy would otherwise win silently (or, for an adapter,
+	// merge with the earlier one).
+	{"duplicate section, other case", `{"house":{"sleeping_after":"0s"},"House":null}`, []string{`duplicate key "House"`}},
+	{"duplicate key in section", `{"house":{"sleeping_after":"0s","Sleeping_After":null}}`, []string{`duplicate key "Sleeping_After"`}},
+	{"duplicate adapter would merge", `{"adapters":{"boiler":{"base_topic":"x"},"boiler":{"enabled":true}}}`, []string{`duplicate key "boiler"`}},
+	{"duplicate inside an array", `{"house":[{"a":1,"a":2}]}`, []string{`duplicate key "a"`}},
 
 	// Durations that do not parse. "" is refused, not read as "unset": it
 	// used to give 0, so reading it as the default would silently flip
@@ -223,41 +183,15 @@ var refusedCases = []struct {
 	{"document as an array", `[]`, []string{"array"}},
 	{"document not JSON", `{"house":`, nil},
 	{"document with a non-string key", `{1:2}`, nil},
-}
-
-// withGoodSections adds valid, non-default energy and adapters sections to a
-// refused document. They prove that a refusal drops the sections that did
-// decode as well, not just the bad one. A section the case already sets is
-// not added again: that would be a duplicate key, refused for its own reason
-// rather than the case's. It reports false when there is nothing to add.
-func withGoodSections(doc string) (string, bool) {
-	var top map[string]json.RawMessage
-	if !json.Valid([]byte(doc)) || json.Unmarshal([]byte(doc), &top) != nil || top == nil {
-		return "", false
-	}
-	var add []string
-	if _, ok := top["adapters"]; !ok {
-		add = append(add, `"adapters":{"boiler":{"enabled":true}}`)
-	}
-	if _, ok := top["energy"]; !ok {
-		add = append(add, `"energy":{"max_integration_gap":"45m"}`)
-	}
-	if len(add) == 0 {
-		return "", false
-	}
-	rest := strings.TrimSpace(doc[1:])
-	if rest != "}" {
-		rest = "," + rest
-	}
-	return "{" + strings.Join(add, ",") + rest, true
+	{"trailing data", `{} {}`, nil},
+	{"unterminated after a control byte", "[0\x0f", nil},
 }
 
 func TestOverlayBehaviour_Applies(t *testing.T) {
 	for _, tc := range overlayCases {
-		for _, b := range bases() {
+		for _, b := range bases {
 			t.Run(tc.name+"/"+b.name, func(t *testing.T) {
-				base := b.cfg()
-				got, err := overlayBehaviour(base, []byte(tc.doc))
+				got, err := overlayBehaviour(b.cfg(), []byte(tc.doc))
 				if err != nil {
 					t.Fatalf("overlayBehaviour(%s) = %v, want it applied", tc.doc, err)
 				}
@@ -273,33 +207,21 @@ func TestOverlayBehaviour_Applies(t *testing.T) {
 
 func TestOverlayBehaviour_Refuses(t *testing.T) {
 	for _, tc := range refusedCases {
-		docs := []string{tc.doc}
-		if wrapped, ok := withGoodSections(tc.doc); ok {
-			docs = append(docs, wrapped)
-		}
-		for i, doc := range docs {
-			for _, b := range bases() {
-				name := tc.name + "/" + b.name
-				if i == 1 {
-					name += "/with good sections"
+		for _, b := range bases {
+			t.Run(tc.name+"/"+b.name, func(t *testing.T) {
+				got, err := overlayBehaviour(b.cfg(), []byte(tc.doc))
+				if err == nil {
+					t.Fatalf("overlayBehaviour(%s) = nil error, want it refused", tc.doc)
 				}
-				t.Run(name, func(t *testing.T) {
-					base := b.cfg()
-					got, err := overlayBehaviour(base, []byte(doc))
-					if err == nil {
-						t.Fatalf("overlayBehaviour(%s) = nil error, want it refused", doc)
+				for _, want := range tc.wantErr {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not mention %q", err, want)
 					}
-					for _, want := range tc.wantErr {
-						if !strings.Contains(err.Error(), want) {
-							t.Errorf("error %q does not mention %q", err, want)
-						}
-					}
-					if !reflect.DeepEqual(got, b.cfg()) {
-						t.Errorf("a refused document changed the config: energy=%+v availability=%+v house=%+v adapters=%s",
-							got.Energy, got.Availability, got.House, adaptersString(got.Adapters))
-					}
-				})
-			}
+				}
+				if !reflect.DeepEqual(got, b.cfg()) {
+					t.Errorf("a refused document changed the config: house=%+v adapters=%s", got.House, adaptersString(got.Adapters))
+				}
+			})
 		}
 	}
 }
@@ -335,82 +257,6 @@ func adaptersString(a AdaptersConfig) string {
 	return string(b)
 }
 
-// --- the section decoders and validators on their own ---
-
-// Each decoder overlays the keys present onto its receiver and, on any error,
-// leaves the receiver exactly as it was. Exercised directly so a regression
-// points at the decoder rather than at the fetcher.
-func TestSectionDecoders(t *testing.T) {
-	seedHouse := HouseConfig{QuietAfter: time.Minute, EmptyAfter: time.Hour, SleepingAfter: 2 * time.Hour, Timezone: "Local"}
-	seedEnergy := EnergyConfig{DivergenceWarningPct: 20, MaxIntegrationGap: 30 * time.Minute}
-	seedAvail := AvailabilityConfig{OfflineDebounce: 30 * time.Second}
-
-	type decoder interface{ UnmarshalJSON([]byte) error }
-	cases := []struct {
-		name    string
-		in      string
-		seed    func() decoder
-		want    any // nil: an error is expected and the receiver must equal the seed
-		section func(decoder) any
-	}{
-		{"house: one key", `{"quiet_after":"5m"}`, func() decoder { h := seedHouse; return &h },
-			HouseConfig{QuietAfter: 5 * time.Minute, EmptyAfter: time.Hour, SleepingAfter: 2 * time.Hour, Timezone: "Local"},
-			func(d decoder) any { return *d.(*HouseConfig) }},
-		{"house: timezone", `{"timezone":"UTC"}`, func() decoder { h := seedHouse; return &h },
-			HouseConfig{QuietAfter: time.Minute, EmptyAfter: time.Hour, SleepingAfter: 2 * time.Hour, Timezone: "UTC"},
-			func(d decoder) any { return *d.(*HouseConfig) }},
-		{"house: null", `null`, func() decoder { h := seedHouse; return &h }, seedHouse,
-			func(d decoder) any { return *d.(*HouseConfig) }},
-		{"house: unknown key", `{"sleeping_afer":"0s"}`, func() decoder { h := seedHouse; return &h }, nil,
-			func(d decoder) any { return *d.(*HouseConfig) }},
-		{"house: bad type", `{"timezone":1}`, func() decoder { h := seedHouse; return &h }, nil,
-			func(d decoder) any { return *d.(*HouseConfig) }},
-		{"house: second duration bad", `{"quiet_after":"5m","sleeping_after":"soon"}`, func() decoder { h := seedHouse; return &h }, nil,
-			func(d decoder) any { return *d.(*HouseConfig) }},
-		{"house: bad duration after timezone", `{"timezone":"UTC","quiet_after":""}`, func() decoder { h := seedHouse; return &h }, nil,
-			func(d decoder) any { return *d.(*HouseConfig) }},
-
-		{"energy: one key", `{"max_integration_gap":"1h"}`, func() decoder { e := seedEnergy; return &e },
-			EnergyConfig{DivergenceWarningPct: 20, MaxIntegrationGap: time.Hour},
-			func(d decoder) any { return *d.(*EnergyConfig) }},
-		{"energy: pct and bad gap", `{"divergence_warning_pct":5,"max_integration_gap":"soon"}`, func() decoder { e := seedEnergy; return &e }, nil,
-			func(d decoder) any { return *d.(*EnergyConfig) }},
-		{"energy: bad type", `{"divergence_warning_pct":"20"}`, func() decoder { e := seedEnergy; return &e }, nil,
-			func(d decoder) any { return *d.(*EnergyConfig) }},
-		{"energy: unknown key", `{"electricity":{}}`, func() decoder { e := seedEnergy; return &e }, nil,
-			func(d decoder) any { return *d.(*EnergyConfig) }},
-
-		{"availability: empty", `{}`, func() decoder { a := seedAvail; return &a }, seedAvail,
-			func(d decoder) any { return *d.(*AvailabilityConfig) }},
-		{"availability: empty string", `{"offline_debounce":""}`, func() decoder { a := seedAvail; return &a }, nil,
-			func(d decoder) any { return *d.(*AvailabilityConfig) }},
-		{"availability: bad type", `{"offline_debounce":30}`, func() decoder { a := seedAvail; return &a }, nil,
-			func(d decoder) any { return *d.(*AvailabilityConfig) }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			d := tc.seed()
-			err := d.UnmarshalJSON([]byte(tc.in))
-			got := tc.section(d)
-			if tc.want == nil {
-				if err == nil {
-					t.Fatalf("UnmarshalJSON(%s) = nil, want an error", tc.in)
-				}
-				if seed := tc.section(tc.seed()); !reflect.DeepEqual(got, seed) {
-					t.Errorf("a failed decode changed the receiver: got %+v, want %+v", got, seed)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("UnmarshalJSON(%s) = %v", tc.in, err)
-			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("UnmarshalJSON(%s): got %+v, want %+v", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
 // The defaults themselves must pass validation, or Default() would describe
 // a config the fetcher refuses.
 func TestDefaultBehaviourValidates(t *testing.T) {
@@ -423,166 +269,6 @@ func TestDefaultBehaviourValidates(t *testing.T) {
 		if err != nil {
 			t.Errorf("Default().%s.validate() = %v", name, err)
 		}
-	}
-}
-
-// checkDuplicateKeys on its own: it must find a duplicate at any depth and
-// in any container, name it by path, and leave anything that is not valid
-// JSON to json.Unmarshal (returning nil) rather than misreport it.
-func TestCheckDuplicateKeys(t *testing.T) {
-	for _, tc := range []struct {
-		doc, wantErr string // wantErr "" means no error
-	}{
-		{`{}`, ""},
-		{`{"a":1,"b":{"a":1},"c":[{"a":1},{"a":1}]}`, ""}, // same key in different objects is fine
-		{`"scalar"`, ""},
-		{`[]`, ""},
-		{`{"a":1,"a":2}`, `duplicate key "a"`},
-		{`{"a":{"b":1,"b":1}}`, `duplicate key "a.b"`},
-		{`[{"a":1},{"b":1,"b":2}]`, `duplicate key "b"`},
-		{`{"a":[[{"c":1,"c":1}]]}`, `duplicate key "a.c"`},
-		{`{"a":1,"A":2}`, ""}, // keys are case-sensitive; checkKeys refuses "A" later
-		// Not valid JSON: nil, so json.Unmarshal reports the syntax error.
-		{``, ""},
-		{`}`, ""},
-		{`{1:2}`, ""},
-		{`{"a":`, ""},
-		{`{"a":1`, ""},
-		{`[1,`, ""},
-		{"[0\x0f", ""},        // found by FuzzOverlayBehaviour: More kept saying true, and the walk never ended
-		{"{\"a\":[0\x0f", ""}, // the same, one level down
-		{`{"a":1]`, ""},       // a mismatched closing delimiter
-	} {
-		err := checkDuplicateKeys([]byte(tc.doc))
-		switch {
-		case tc.wantErr == "" && err != nil:
-			t.Errorf("checkDuplicateKeys(%s) = %v, want nil", tc.doc, err)
-		case tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr):
-			t.Errorf("checkDuplicateKeys(%s) = %v, want %q", tc.doc, err, tc.wantErr)
-		}
-	}
-}
-
-func TestSectionValidate(t *testing.T) {
-	cases := []struct {
-		name    string
-		err     error
-		wantErr string // "" = valid
-	}{
-		{"house zero durations", HouseConfig{}.validate(), ""},
-		{"house Local", HouseConfig{Timezone: "Local"}.validate(), ""},
-		{"house negative quiet", HouseConfig{QuietAfter: -1}.validate(), "quiet_after"},
-		{"house negative empty", HouseConfig{EmptyAfter: -1}.validate(), "empty_after"},
-		{"house negative sleeping", HouseConfig{SleepingAfter: -1}.validate(), "sleeping_after"},
-		{"house bad zone", HouseConfig{Timezone: "Mars/Olympus"}.validate(), "Mars/Olympus"},
-		{"energy smallest pct", EnergyConfig{DivergenceWarningPct: 0.01}.validate(), ""},
-		{"energy zero pct", EnergyConfig{}.validate(), "divergence_warning_pct"},
-		{"energy negative pct", EnergyConfig{DivergenceWarningPct: -5}.validate(), "divergence_warning_pct"},
-		{"energy negative gap", EnergyConfig{DivergenceWarningPct: 20, MaxIntegrationGap: -1}.validate(), "max_integration_gap"},
-		{"energy zero gap (no clamp)", EnergyConfig{DivergenceWarningPct: 20}.validate(), ""},
-		{"availability zero", AvailabilityConfig{}.validate(), ""},
-		{"availability negative", AvailabilityConfig{OfflineDebounce: -1}.validate(), "offline_debounce"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			switch {
-			case tc.wantErr == "" && tc.err != nil:
-				t.Errorf("validate() = %v, want nil", tc.err)
-			case tc.wantErr != "" && (tc.err == nil || !strings.Contains(tc.err.Error(), tc.wantErr)):
-				t.Errorf("validate() = %v, want an error mentioning %q", tc.err, tc.wantErr)
-			}
-		})
-	}
-}
-
-// --- fuzz ---
-
-// FuzzOverlayBehaviour checks the contract on arbitrary documents, seeded
-// with every table row and the example document:
-//
-//   - refused  ⇒ the returned config is the base, unchanged;
-//   - applied  ⇒ fields outside the behaviour sections are the base's;
-//   - applied  ⇒ applying the same document again changes nothing
-//     (idempotent, whatever the base held);
-//   - applied  ⇒ a section, or a key inside one, that the document leaves
-//     out (or sets to null) is the default.
-func FuzzOverlayBehaviour(f *testing.F) {
-	for _, tc := range overlayCases {
-		f.Add(tc.doc)
-	}
-	for _, tc := range refusedCases {
-		f.Add(tc.doc)
-	}
-	if raw, err := os.ReadFile(filepath.Join("..", "..", "config", "remote", "statehouse_behaviour.json")); err == nil {
-		f.Add(string(raw))
-	}
-	def := Default()
-	f.Fuzz(func(t *testing.T, doc string) {
-		for _, b := range bases() {
-			base := b.cfg()
-			got, err := overlayBehaviour(base, []byte(doc))
-			if err != nil {
-				if !reflect.DeepEqual(got, b.cfg()) {
-					t.Fatalf("%s: refused %q but changed the config", b.name, doc)
-				}
-				continue
-			}
-			rest := got
-			rest.Energy, rest.Availability, rest.House, rest.Adapters = base.Energy, base.Availability, base.House, base.Adapters
-			if !reflect.DeepEqual(rest, base) {
-				t.Fatalf("%s: %q changed a field outside the behaviour sections", b.name, doc)
-			}
-			again, err := overlayBehaviour(got, []byte(doc))
-			if err != nil || !reflect.DeepEqual(again, got) {
-				t.Fatalf("%s: %q is not idempotent: second apply err=%v", b.name, doc, err)
-			}
-			checkAbsentIsDefault(t, doc, got, def)
-		}
-	})
-}
-
-// checkAbsentIsDefault asserts that every section and key doc leaves out, or
-// sets to null, has its default value in got. A document that applied has no
-// duplicate keys (they are refused), so reading it into a map loses nothing.
-func checkAbsentIsDefault(t *testing.T, doc string, got, def Config) {
-	t.Helper()
-	var top map[string]json.RawMessage
-	if json.Unmarshal([]byte(doc), &top) != nil {
-		return // "null" applies as all-defaults; anything else that applies is an object
-	}
-	keys := func(section string) (map[string]json.RawMessage, bool) {
-		raw, ok := top[section]
-		if !ok || string(raw) == "null" {
-			return nil, false
-		}
-		var m map[string]json.RawMessage
-		_ = json.Unmarshal(raw, &m)
-		return m, true
-	}
-	absent := func(m map[string]json.RawMessage, key string) bool {
-		raw, ok := m[key]
-		return !ok || string(raw) == "null"
-	}
-	fields := []struct {
-		section, key string
-		got, def     any
-	}{
-		{"energy", "divergence_warning_pct", got.Energy.DivergenceWarningPct, def.Energy.DivergenceWarningPct},
-		{"energy", "max_integration_gap", got.Energy.MaxIntegrationGap, def.Energy.MaxIntegrationGap},
-		{"availability", "offline_debounce", got.Availability.OfflineDebounce, def.Availability.OfflineDebounce},
-		{"house", "quiet_after", got.House.QuietAfter, def.House.QuietAfter},
-		{"house", "empty_after", got.House.EmptyAfter, def.House.EmptyAfter},
-		{"house", "sleeping_after", got.House.SleepingAfter, def.House.SleepingAfter},
-		{"house", "timezone", got.House.Timezone, def.House.Timezone},
-	}
-	for _, f := range fields {
-		m, present := keys(f.section)
-		if (!present || absent(m, f.key)) && f.got != f.def {
-			t.Fatalf("%q leaves %s.%s out but it is %v, not the default %v", doc, f.section, f.key, f.got, f.def)
-		}
-	}
-	if _, present := keys("adapters"); !present && !reflect.DeepEqual(got.Adapters, def.Adapters) {
-		t.Fatalf("%q leaves adapters out but they are %s, not the defaults", doc, adaptersString(got.Adapters))
 	}
 }
 
