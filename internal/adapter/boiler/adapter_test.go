@@ -285,3 +285,21 @@ func TestAdapter_UndatedRetainedEventsAreNotLive(t *testing.T) {
 		t.Errorf("activity = %s, want unknown until the device is heard from", ch.Activity.State)
 	}
 }
+
+// While activity is held at unknown, an old retained event must not announce
+// a cycle that the API says nothing about (PR #94 review).
+func TestAdapter_OldRetainedEventsAnnounceNoCycle(t *testing.T) {
+	a, store, col, clock := mkAdapter(t)
+	clock.Set(time.Date(2026, 5, 15, 7, 0, 0, 0, time.UTC)) // two days after the event
+	a.HandleMessage("energy/boiler/sensor/events",
+		[]byte(`{"boiler":{"timestamp":"2026-05-13T07:02:15Z","event":"CH_ON","ch":{"state":"ON"},"hw":{"state":"OFF"}}}`), true)
+	ch, _ := store.Get("central_heating")
+	if ch.Activity.State != model.ActivityUnknown {
+		t.Fatalf("activity = %s, want unknown", ch.Activity.State)
+	}
+	for _, ev := range col.derived {
+		if ev.Type == model.EvtCycleStarted || ev.Type == model.EvtCycleFinished {
+			t.Errorf("announced %s for a held device", ev.Type)
+		}
+	}
+}

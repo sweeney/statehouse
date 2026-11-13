@@ -220,6 +220,9 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		// differ from the runtime's while the silence rule holds it.
 		prevActivity, newActivity model.DeviceActivityState
 		cameOnline                bool
+		// held is set when the silence rule still holds the device at
+		// unknown after this reading; runtime cycle events stay quiet then.
+		held bool
 	)
 	e.store.withEntry(id, func(ent *deviceEntry) {
 		profile = ent.Runtime.Profile
@@ -236,7 +239,10 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 				ent.availabilityOfflineAt = nil
 				cameOnline = true
 			}
-			ent.silent = false
+			// Restored from the runtime as it stood before this reading;
+			// the reading's own transition, if any, applies below, and the
+			// two are announced as one change from prevActivity.
+			ent.unsilence(reading.Timestamp)
 		} else if ent.Device.Availability == model.AvailabilityUnknown {
 			ent.silent = true
 		}
@@ -248,7 +254,9 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		outcome = ent.Runtime.OnReading(reading.Timestamp, reading)
 		// Push latest measurements onto the public record.
 		l := &ent.Device.Latest
-		if !reading.UndatedReplay {
+		// LastSeen only moves forward: an out-of-order or old dated reading
+		// must not make a device that is up look silent to Tick.
+		if !reading.UndatedReplay && reading.Timestamp.After(l.LastSeen) {
 			l.LastSeen = reading.Timestamp
 		}
 		// Accumulate all-time extremes for the measurements this device
@@ -357,11 +365,7 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		// unknown; the runtime carries on and is restored from once the
 		// device is heard from again.
 		if ent.silent {
-			if ent.Device.Activity.State != model.ActivityUnknown {
-				ent.Device.Activity.State = model.ActivityUnknown
-				ent.Device.Activity.LastChanged = now
-				ent.Device.Activity.Since = now
-			}
+			ent.holdActivityUnknown(now)
 		} else if outcome.NewActivity != outcome.PrevActivity {
 			now := reading.Timestamp
 			ent.Device.Activity.Since = now
@@ -416,6 +420,7 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			staleCounterHit = true
 		}
 		newActivity = ent.Device.Activity.State
+		held = ent.silent
 	})
 
 	if cameOnline {
@@ -424,10 +429,13 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 	if prevActivity != newActivity {
 		e.emitActivityChange(id, profile, device.Outcome{PrevActivity: prevActivity, NewActivity: newActivity}, reading.Timestamp)
 	}
-	if outcome.CycleStarted {
+	// Cycle events describe the public activity, so none while it is held
+	// at unknown: an old retained event must not announce a cycle the API
+	// says nothing about. The runtime still tracks the cycle.
+	if outcome.CycleStarted && !held {
 		e.emitCycleStarted(id, profile, reading.Timestamp)
 	}
-	if outcome.CycleFinished {
+	if outcome.CycleFinished && !held {
 		e.emitCycleFinished(id, profile, reading.Timestamp, outcome.Cycle)
 	}
 	if divergenceHit {
@@ -530,9 +538,21 @@ func (e *Engine) SetAvailability(identity model.DeviceIdentity, sourceTopic stri
 		e.emitAvailabilityChange(id, now, newAvail)
 	}
 	if restored != nil {
-		e.emitActivityChange(id, restored.profile, restored.outcome, now)
+		e.emitActivityChange(restored.id, restored.profile, restored.outcome, now)
 		e.RecomputeHouse()
 	}
+}
+
+// DeclareAvailabilitySource tells the engine an adapter owns availability
+// for this device, whether or not it has reported any yet, so the silence
+// rule never applies to it. zigbee2mqtt calls it: z2m availability is
+// opt-in per device, and an event-driven sensor can be quiet for longer
+// than the silence window while healthy.
+func (e *Engine) DeclareAvailabilitySource(identity model.DeviceIdentity, sourceTopic string) {
+	id := e.EnsureDiscovered(identity, sourceTopic)
+	e.store.withEntry(id, func(ent *deviceEntry) {
+		ent.explicitAvailability = true
+	})
 }
 
 // activityChange is a public activity transition made under the store lock
@@ -543,9 +563,25 @@ type activityChange struct {
 	outcome device.Outcome
 }
 
+// holdActivityUnknown sets the public activity to unknown, with no
+// confidence, and returns the activity it replaced. It is the only way the
+// silence rule enters unknown. The caller holds the store lock.
+func (ent *deviceEntry) holdActivityUnknown(now time.Time) (prev model.DeviceActivityState, changed bool) {
+	prev = ent.Device.Activity.State
+	ent.Device.Activity.Confidence = 0
+	if prev == model.ActivityUnknown {
+		return prev, false
+	}
+	ent.Device.Activity.State = model.ActivityUnknown
+	ent.Device.Activity.LastChanged = now
+	ent.Device.Activity.Since = now
+	return prev, true
+}
+
 // unsilence lifts the silence rule's hold on ent, restoring the public
-// activity from the runtime. It returns the activity change to announce, or
-// nil when there is none. The caller holds the store lock.
+// activity from the runtime. It is the only way out of the hold. It returns
+// the activity change to announce, or nil when there is none. The caller
+// holds the store lock.
 func (ent *deviceEntry) unsilence(now time.Time) *activityChange {
 	if !ent.silent {
 		return nil
@@ -563,6 +599,7 @@ func (ent *deviceEntry) unsilence(now time.Time) *activityChange {
 	ent.Device.Activity.Since = now
 	ent.Device.Activity.Confidence = 0.9
 	return &activityChange{
+		id:      ent.Device.ID,
 		profile: ent.Runtime.Profile,
 		outcome: device.Outcome{PrevActivity: prev, NewActivity: next},
 	}
@@ -724,10 +761,7 @@ func (e *Engine) Tick() {
 				ent.availabilityOfflineAt = nil
 				availChanged = append(availChanged, availChange{id: id, to: model.AvailabilityUnknown})
 			}
-			if prev := ent.Device.Activity.State; prev != model.ActivityUnknown {
-				ent.Device.Activity.State = model.ActivityUnknown
-				ent.Device.Activity.LastChanged = now
-				ent.Device.Activity.Since = now
+			if prev, changed := ent.holdActivityUnknown(now); changed {
 				var profile device.Profile
 				if ent.Runtime != nil {
 					profile = ent.Runtime.Profile

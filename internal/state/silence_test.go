@@ -180,9 +180,42 @@ func TestSilence_UndatedReplayIsNotEvidence(t *testing.T) {
 func TestSilence_OldReadingDoesNotDemoteOnlineDevice(t *testing.T) {
 	engine, store, _, clock := mkSilenceEngine(t, 10)
 	engine.IngestReading(weatherID, "climate/home/observation", temp(clock.Now()))
+	live := clock.Now()
 	r := temp(clock.Now().Add(-48 * time.Hour))
 	engine.IngestReading(weatherID, "climate/home/observation", r)
 	wantState(t, weather(t, store), model.AvailabilityOnline, model.ActivityReporting)
+
+	// LastSeen must not move backwards, or the next tick measures silence
+	// from the old reading and demotes a device that is up (PR #94 review).
+	clock.Advance(time.Minute)
+	engine.Tick()
+	d := weather(t, store)
+	wantState(t, d, model.AvailabilityOnline, model.ActivityReporting)
+	if !d.Latest.LastSeen.Equal(live) {
+		t.Errorf("LastSeen = %v, want it kept at %v", d.Latest.LastSeen, live)
+	}
+}
+
+// Entering unknown resets activity confidence; it is not 0.9 sure of
+// "unknown" (PR #94 review).
+func TestSilence_UnknownActivityHasNoConfidence(t *testing.T) {
+	engine, store, _, clock := mkSilenceEngine(t, 10)
+	engine.IngestReading(weatherID, "climate/home/observation", temp(clock.Now()))
+	if c := weather(t, store).Activity.Confidence; c == 0 {
+		t.Fatalf("precondition: reporting activity should carry confidence, got %v", c)
+	}
+	clock.Advance(11 * time.Hour)
+	engine.Tick()
+	if c := weather(t, store).Activity.Confidence; c != 0 {
+		t.Errorf("silenced: confidence = %v, want 0", c)
+	}
+
+	// The same through the reading path: an online device that has been
+	// silenced, then sent an old reading, stays unknown with no confidence.
+	engine.IngestReading(weatherID, "climate/home/observation", temp(clock.Now().Add(-48*time.Hour)))
+	if d := weather(t, store); d.Activity.State != model.ActivityUnknown || d.Activity.Confidence != 0 {
+		t.Errorf("after old reading: activity = %s @ %v, want unknown @ 0", d.Activity.State, d.Activity.Confidence)
+	}
 }
 
 func TestSilence_ExplicitAvailabilityIsNotOverridden(t *testing.T) {
