@@ -303,3 +303,27 @@ func TestAdapter_OldRetainedEventsAnnounceNoCycle(t *testing.T) {
 		}
 	}
 }
+
+// A cycle whose start was held back must not end with an unpaired
+// cycle_finished once the device is heard from again (PR #94 review).
+func TestAdapter_HeldCycleStartMeansNoUnpairedFinish(t *testing.T) {
+	a, _, col, clock := mkAdapter(t)
+	clock.Set(time.Date(2026, 5, 15, 7, 0, 0, 0, time.UTC))
+	a.HandleMessage("energy/boiler/sensor/events",
+		[]byte(`{"boiler":{"timestamp":"2026-05-13T07:02:15Z","event":"CH_ON","ch":{"state":"ON"},"hw":{"state":"OFF"}}}`), true)
+	clock.Set(time.Date(2026, 5, 15, 7, 5, 0, 0, time.UTC))
+	a.HandleMessage("energy/boiler/sensor/events",
+		[]byte(`{"boiler":{"timestamp":"2026-05-15T07:05:00Z","event":"CH_OFF","ch":{"state":"OFF"},"hw":{"state":"OFF"}}}`), false)
+	var starts, finishes int
+	for _, ev := range col.derived {
+		switch ev.Type {
+		case model.EvtCycleStarted:
+			starts++
+		case model.EvtCycleFinished:
+			finishes++
+		}
+	}
+	if starts != finishes {
+		t.Errorf("cycle_started=%d cycle_finished=%d, want them paired", starts, finishes)
+	}
+}

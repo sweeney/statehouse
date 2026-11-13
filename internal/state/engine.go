@@ -220,9 +220,9 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		// differ from the runtime's while the silence rule holds it.
 		prevActivity, newActivity model.DeviceActivityState
 		cameOnline                bool
-		// held is set when the silence rule still holds the device at
-		// unknown after this reading; runtime cycle events stay quiet then.
-		held bool
+		// announceStart / announceFinish say whether this reading's
+		// runtime cycle events reach listeners (see unannouncedCycle).
+		announceStart, announceFinish bool
 	)
 	e.store.withEntry(id, func(ent *deviceEntry) {
 		profile = ent.Runtime.Profile
@@ -420,7 +420,19 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			staleCounterHit = true
 		}
 		newActivity = ent.Device.Activity.State
-		held = ent.silent
+		// Cycle events describe the public activity, so none while it is
+		// held at unknown: an old retained event must not announce a cycle
+		// the API says nothing about. The runtime still tracks the cycle,
+		// and the finish of a cycle whose start went unannounced is not
+		// announced either, so starts and finishes stay paired.
+		if outcome.CycleFinished {
+			announceFinish = !ent.silent && !ent.unannouncedCycle
+			ent.unannouncedCycle = false
+		}
+		if outcome.CycleStarted {
+			announceStart = !ent.silent
+			ent.unannouncedCycle = ent.silent
+		}
 	})
 
 	if cameOnline {
@@ -429,13 +441,10 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 	if prevActivity != newActivity {
 		e.emitActivityChange(id, profile, device.Outcome{PrevActivity: prevActivity, NewActivity: newActivity}, reading.Timestamp)
 	}
-	// Cycle events describe the public activity, so none while it is held
-	// at unknown: an old retained event must not announce a cycle the API
-	// says nothing about. The runtime still tracks the cycle.
-	if outcome.CycleStarted && !held {
+	if announceStart {
 		e.emitCycleStarted(id, profile, reading.Timestamp)
 	}
-	if outcome.CycleFinished && !held {
+	if announceFinish {
 		e.emitCycleFinished(id, profile, reading.Timestamp, outcome.Cycle)
 	}
 	if divergenceHit {

@@ -48,6 +48,11 @@ type deviceEntry struct {
 	// reading or an explicit availability report clears it and the public
 	// activity is restored from the runtime.
 	silent bool
+
+	// unannouncedCycle is set when a cycle started while silent, so its
+	// cycle_started was held back; its cycle_finished is held back too,
+	// keeping starts and finishes paired for listeners.
+	unannouncedCycle bool
 }
 
 // NewStore returns an empty store with whole-house state = unknown.
