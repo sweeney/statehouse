@@ -39,6 +39,10 @@ type record struct {
 	Timestamp time.Time       `json:"ts"`
 	Topic     string          `json:"topic"`
 	Payload   json.RawMessage `json:"payload"`
+	// Retained marks a message the broker replayed from its retained store
+	// rather than one published live; replays must not count as a device
+	// speaking (#93).
+	Retained bool `json:"retained,omitempty"`
 }
 
 // formatPayload returns the payload as a JSON value. If the bytes
@@ -175,6 +179,7 @@ func main() {
 			Timestamp: time.Now().UTC(),
 			Topic:     m.Topic(),
 			Payload:   formatPayload(m.Payload()),
+			Retained:  m.Retained(),
 		})
 	}
 

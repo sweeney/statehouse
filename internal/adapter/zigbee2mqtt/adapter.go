@@ -78,7 +78,7 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, retained bool) {
 		return
 	}
 	if name := TopicFriendlyName(a.base, topic); name != "" {
-		a.handleDevicePayload(name, topic, payload)
+		a.handleDevicePayload(name, topic, payload, retained)
 		return
 	}
 }
@@ -107,7 +107,9 @@ func (a *Adapter) handleBridgeDevices(payload []byte) {
 	a.mu.Unlock()
 	for _, d := range devs {
 		topic := a.base + "/" + d.FriendlyName
-		a.engine.EnsureDiscovered(a.identityFor(d.FriendlyName, d.IEEEAddress), topic)
+		// z2m owns availability for its devices, whether or not it is
+		// turned on for this one, so the silence rule never applies (#93).
+		a.engine.DeclareAvailabilitySource(a.identityFor(d.FriendlyName, d.IEEEAddress), topic)
 	}
 	if a.logger != nil {
 		a.logger.Info("bridge devices ingested", "count", len(devs))
@@ -122,7 +124,7 @@ func (a *Adapter) handleAvailability(friendlyName string, payload []byte, topic 
 	a.engine.SetAvailability(a.identityFor(friendlyName, ""), topic, avail)
 }
 
-func (a *Adapter) handleDevicePayload(friendlyName, topic string, payload []byte) {
+func (a *Adapter) handleDevicePayload(friendlyName, topic string, payload []byte, retained bool) {
 	// Empty payload is normal on bridge restart; ignore.
 	if len(payload) == 0 {
 		return
@@ -142,7 +144,14 @@ func (a *Adapter) handleDevicePayload(friendlyName, topic string, payload []byte
 		return
 	}
 	reading.SourceTopic = topic
-	a.engine.IngestReading(a.identityFor(friendlyName, ""), topic, reading)
+	// Device payloads carry no timestamp statehouse reads (last_seen is
+	// ignored, see payload.go), so a retained one has no known age (#93).
+	reading.UndatedReplay = retained
+	id := a.identityFor(friendlyName, "")
+	// Also here, not only from bridge/devices: a device can report before
+	// bridge/devices has been seen. Exempt from the silence rule (#93).
+	a.engine.DeclareAvailabilitySource(id, topic)
+	a.engine.IngestReading(id, topic, reading)
 }
 
 // identityFor builds a DeviceIdentity from a friendly name plus

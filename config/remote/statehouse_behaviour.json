@@ -34,7 +34,8 @@
     "max_integration_gap": "30m"
   },
   "availability": {
-    "offline_debounce": "30s"
+    "offline_debounce": "30s",
+    "silence_multiplier": 10
   },
   "house": {
     "quiet_after": "30m",

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sweeney/statehouse/internal/config"
+	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 	"github.com/sweeney/statehouse/internal/testutil"
 )
@@ -556,5 +557,36 @@ func TestAdapter_FixtureReplay(t *testing.T) {
 	}
 	if dev.Lifetime.MaxPower.At.IsZero() {
 		t.Error("max power: expected a recorded timestamp, got zero")
+	}
+}
+
+// A retained meter payload is evidence the meter is up only if its own
+// timestamp says it is recent (#93).
+func TestAdapter_RetainedPayloadNeedsRecentTimestamp(t *testing.T) {
+	const topic = "energy/001122AABBCC/SENSOR/electricitymeter"
+	for _, tc := range []struct {
+		name      string
+		timestamp string
+		retained  bool
+		want      model.Availability
+	}{
+		{"live, recent", "2026-05-13T21:57:19Z", false, model.AvailabilityOnline},
+		{"retained, recent", "2026-05-13T21:57:19Z", true, model.AvailabilityOnline},
+		{"retained, two days old", "2026-05-11T21:57:19Z", true, model.AvailabilityUnknown},
+		{"retained, undated", "", true, model.AvailabilityUnknown},
+		{"live, undated", "", false, model.AvailabilityOnline},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, store, _ := mkAdapter(t)
+			payload := `{"electricitymeter":{"timestamp":"` + tc.timestamp + `","power":{"value":1.0,"units":"kW"}}}`
+			a.HandleMessage(topic, []byte(payload), tc.retained)
+			dev, ok := store.Get("001122AABBCC")
+			if !ok {
+				t.Fatal("meter not in store")
+			}
+			if dev.Availability != tc.want {
+				t.Errorf("availability = %s, want %s", dev.Availability, tc.want)
+			}
+		})
 	}
 }

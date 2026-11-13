@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/sweeney/statehouse/internal/adapter/timeutil"
 	"github.com/sweeney/statehouse/internal/adapter/validate"
@@ -63,7 +62,7 @@ type upsPayload struct {
 	Computed  *upsComputed      `json:"computed"`
 }
 
-func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
+func (a *Adapter) HandleMessage(topic string, payload []byte, retained bool) {
 	if a == nil || a.engine == nil || len(payload) == 0 {
 		return
 	}
@@ -93,15 +92,9 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 	// now comes from the engine, never the wall clock: it both sanitises the
 	// publisher timestamp and stamps the reading, so it has to share a time
 	// base with the engine state derived from it.
-	now := a.engine.Now()
-	ts := now
-	if p.Timestamp != "" {
-		if t, err := time.Parse(time.RFC3339, p.Timestamp); err == nil {
-			ts = timeutil.Sanitise(t, now)
-		}
-	}
+	ts, dated := timeutil.RFC3339Dated(p.Timestamp, a.engine.Now())
 
-	r := model.Reading{Timestamp: ts}
+	r := model.Reading{Timestamp: ts, UndatedReplay: retained && !dated}
 	if p.Computed != nil {
 		if p.Computed.LoadWatts != nil {
 			if validate.FiniteInRange(*p.Computed.LoadWatts, -50_000, 200_000) {

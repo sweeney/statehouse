@@ -11,10 +11,13 @@ import (
 // FixtureEvent is one line from a fixture JSONL file: a timestamped
 // MQTT topic/payload pair. Payload is kept as raw JSON because some
 // payloads are strings (e.g. "online") and others are objects/arrays.
+// Retained marks a broker replay of a retained message, as delivered on
+// (re)subscribe; replay it with the retained flag set.
 type FixtureEvent struct {
 	Timestamp time.Time       `json:"ts"`
 	Topic     string          `json:"topic"`
 	Payload   json.RawMessage `json:"payload"`
+	Retained  bool            `json:"retained,omitempty"`
 }
 
 // PayloadBytes returns the payload as raw bytes suitable for the MQTT

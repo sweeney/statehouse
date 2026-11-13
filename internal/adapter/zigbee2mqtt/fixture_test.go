@@ -578,3 +578,50 @@ func summary(evs []model.DerivedEvent) []string {
 	}
 	return out
 }
+
+// Z2M device payloads carry no timestamp statehouse reads, so a retained
+// one is recorded but does not bring the device online (#93).
+func TestAdapter_RetainedDevicePayloadIsNotLive(t *testing.T) {
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(fixtureCfg(), store, clock)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	a.HandleMessage("zigbee2mqtt/kitchen_kettle", []byte(`{"power":0}`), true)
+	d, ok := store.Get("kitchen_kettle")
+	if !ok {
+		t.Fatal("kitchen_kettle not in store")
+	}
+	if d.Availability != model.AvailabilityUnknown {
+		t.Errorf("after retained payload: availability = %s, want unknown", d.Availability)
+	}
+	a.HandleMessage("zigbee2mqtt/kitchen_kettle/availability", []byte(`online`), true)
+	if d, _ := store.Get("kitchen_kettle"); d.Availability != model.AvailabilityOnline {
+		t.Errorf("after availability online: availability = %s, want online", d.Availability)
+	}
+}
+
+// zigbee2mqtt owns availability for its devices, so the silence rule never
+// applies, even when z2m availability is off for a device and it never
+// publishes an availability message. An event-driven sensor can be quiet
+// for longer than the silence window while healthy (PR #94 review).
+func TestAdapter_QuietDeviceWithoutAvailabilityIsNotSilenced(t *testing.T) {
+	store := state.NewStore()
+	clock := testutil.NewFakeClock(time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC))
+	engine := state.NewEngine(fixtureCfg(), store, clock)
+	a := New(engine, "zigbee2mqtt", nil)
+
+	a.HandleMessage("zigbee2mqtt/kitchen_kettle", []byte(`{"power":0}`), false)
+	clock.Advance(48 * time.Hour)
+	engine.Tick()
+	d, ok := store.Get("kitchen_kettle")
+	if !ok {
+		t.Fatal("kitchen_kettle not in store")
+	}
+	if d.Availability != model.AvailabilityOnline {
+		t.Errorf("availability = %s, want online", d.Availability)
+	}
+	if d.Activity.State == model.ActivityUnknown {
+		t.Errorf("activity = unknown, want it left alone")
+	}
+}

@@ -349,7 +349,14 @@ components:
     Availability:
       type: string
       enum: [unknown, online, offline_pending, offline]
-      description: Whether the engine is currently in contact with the device.
+      description: >-
+        Whether the engine is currently in contact with the device.
+        `offline` and `offline_pending` come only from an adapter's explicit
+        availability signal. `unknown` means statehouse cannot vouch for the
+        device: nothing current has been heard since startup, or a device
+        with no availability signal of its own has been silent for
+        `availability.silence_multiplier` × its class staleness window. Such
+        a device's activity is `unknown` too.
 
     DeviceActivityState:
       type: string

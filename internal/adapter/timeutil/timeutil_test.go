@@ -96,3 +96,28 @@ func TestUnixSeconds_FarFutureUnixSecondsRejected(t *testing.T) {
 		t.Errorf("far-future unix-s: got %v, want %v (now)", got, epoch)
 	}
 }
+
+func TestDatedVariantsReportFallback(t *testing.T) {
+	now := time.Date(2026, 11, 12, 16, 0, 0, 0, time.UTC)
+	old := now.Add(-16 * 24 * time.Hour)
+	tooOld := now.Add(-40 * 24 * time.Hour)
+	for _, tc := range []struct {
+		name      string
+		call      func() (time.Time, bool)
+		want      time.Time
+		wantDated bool
+	}{
+		{"unix kept", func() (time.Time, bool) { return UnixSecondsDated(old.Unix(), now) }, old, true},
+		{"unix absent", func() (time.Time, bool) { return UnixSecondsDated(0, now) }, now, false},
+		{"unix too old", func() (time.Time, bool) { return UnixSecondsDated(tooOld.Unix(), now) }, now, false},
+		{"rfc3339 kept", func() (time.Time, bool) { return RFC3339Dated(old.Format(time.RFC3339), now) }, old, true},
+		{"rfc3339 empty", func() (time.Time, bool) { return RFC3339Dated("", now) }, now, false},
+		{"rfc3339 garbage", func() (time.Time, bool) { return RFC3339Dated("...", now) }, now, false},
+		{"rfc3339 future", func() (time.Time, bool) { return RFC3339Dated(now.Add(48*time.Hour).Format(time.RFC3339), now) }, now, false},
+	} {
+		got, dated := tc.call()
+		if !got.Equal(tc.want) || dated != tc.wantDated {
+			t.Errorf("%s: got %v,%v want %v,%v", tc.name, got, dated, tc.want, tc.wantDated)
+		}
+	}
+}

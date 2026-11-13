@@ -496,5 +496,12 @@ daemon refuses to start.
   and are intended for UI use such as a current-vs-peak power dial.
 - Offline availability is debounced (default 30s) so Z2M restart
   flicker does not produce alarms.
+- A device with no availability signal of its own (climate, meter, UPS)
+  that sends nothing for `availability.silence_multiplier` (default 10) ×
+  its class staleness window goes to availability and activity `unknown`.
+  A reading already older than that window, or a retained message with no
+  publisher timestamp (its age is unknown), records its values but does not
+  mark the device `online`, so a restart replaying old retained state
+  cannot bring a dead device back (#93).
 - Device identity is the IEEE address; friendly-name renames keep the
   underlying state.

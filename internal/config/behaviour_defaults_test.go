@@ -76,7 +76,7 @@ var overlayCases = []struct {
 	{"empty sections", `{"energy":{},"availability":{},"house":{},"adapters":{}}`, nil},
 	{"null sections", `{"energy":null,"availability":null,"house":null,"adapters":null}`, nil},
 	{"null keys", `{"energy":{"divergence_warning_pct":null,"max_integration_gap":null},
-		"availability":{"offline_debounce":null},
+		"availability":{"offline_debounce":null,"silence_multiplier":null},
 		"house":{"quiet_after":null,"empty_after":null,"sleeping_after":null,"timezone":null}}`, nil},
 
 	// One key at a time: the others keep their defaults.
@@ -88,6 +88,10 @@ var overlayCases = []struct {
 		func(c *Config) { c.Energy.DivergenceWarningPct = 0.5 }},
 	{"availability: offline_debounce", `{"availability":{"offline_debounce":"1m"}}`,
 		func(c *Config) { c.Availability.OfflineDebounce = time.Minute }},
+	{"availability: only silence_multiplier", `{"availability":{"silence_multiplier":3.5}}`,
+		func(c *Config) { c.Availability.SilenceMultiplier = 3.5 }},
+	{"availability: silence_multiplier 0 turns the rule off", `{"availability":{"silence_multiplier":0}}`,
+		func(c *Config) { c.Availability.SilenceMultiplier = 0 }},
 	{"house: only sleeping_after", `{"house":{"sleeping_after":"90m"}}`,
 		func(c *Config) { c.House.SleepingAfter = 90 * time.Minute }},
 
@@ -163,6 +167,7 @@ var refusedCases = []struct {
 	{"negative empty_after", `{"house":{"empty_after":"-1h"}}`, []string{"house:", "empty_after", "negative"}},
 	{"negative sleeping_after", `{"house":{"sleeping_after":"-5m"}}`, []string{"house:", "sleeping_after", "negative"}},
 	{"negative offline_debounce", `{"availability":{"offline_debounce":"-1s"}}`, []string{"availability:", "offline_debounce", "negative"}},
+	{"negative silence_multiplier", `{"availability":{"silence_multiplier":-1}}`, []string{"availability:", "silence_multiplier", "negative"}},
 	{"negative max_integration_gap", `{"energy":{"max_integration_gap":"-1m"}}`, []string{"energy:", "max_integration_gap", "negative"}},
 	{"zero divergence_warning_pct", `{"energy":{"divergence_warning_pct":0}}`, []string{"energy:", "divergence_warning_pct"}},
 	{"negative divergence_warning_pct", `{"energy":{"divergence_warning_pct":-1}}`, []string{"energy:", "divergence_warning_pct"}},
@@ -174,6 +179,7 @@ var refusedCases = []struct {
 	// Wrong types, at every level.
 	{"pct as a string", `{"energy":{"divergence_warning_pct":"20"}}`, []string{"energy:", "divergence_warning_pct"}},
 	{"duration as a number", `{"availability":{"offline_debounce":30}}`, []string{"availability:", "offline_debounce"}},
+	{"silence_multiplier as a string", `{"availability":{"silence_multiplier":"10"}}`, []string{"availability:", "silence_multiplier"}},
 	{"timezone as a number", `{"house":{"timezone":1}}`, []string{"house:", "timezone"}},
 	{"house as an array", `{"house":[]}`, []string{"house:"}},
 	{"energy as a string", `{"energy":"20"}`, []string{"energy:"}},

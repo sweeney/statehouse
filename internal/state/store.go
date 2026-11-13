@@ -37,6 +37,22 @@ type deviceEntry struct {
 	// availabilityOfflineAt is non-nil once the adapter signalled
 	// offline; it stays in offline_pending until the debounce elapses.
 	availabilityOfflineAt *time.Time
+
+	// explicitAvailability is set once an adapter has reported availability
+	// for this device through SetAvailability. Such a device is exempt from
+	// the silence rule: its own signal is trusted over silence (#93).
+	explicitAvailability bool
+
+	// silent is set while the silence rule holds the device at availability
+	// and activity "unknown". The runtime keeps running underneath; a fresh
+	// reading or an explicit availability report clears it and the public
+	// activity is restored from the runtime.
+	silent bool
+
+	// unannouncedCycle is set when a cycle started while silent, so its
+	// cycle_started was held back; its cycle_finished is held back too,
+	// keeping starts and finishes paired for listeners.
+	unannouncedCycle bool
 }
 
 // NewStore returns an empty store with whole-house state = unknown.
