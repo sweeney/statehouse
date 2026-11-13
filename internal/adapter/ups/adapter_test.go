@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sweeney/statehouse/internal/config"
+	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 	"github.com/sweeney/statehouse/internal/testutil"
 )
@@ -314,5 +315,34 @@ func TestAdapter_FixtureReplay(t *testing.T) {
 	}
 	if dev.Latest.BatteryRuntimeMins == nil {
 		t.Error("expected BatteryRuntimeMins to be set after fixture replay")
+	}
+}
+
+// A retained UPS state is evidence the UPS is up only if its own timestamp
+// says it is recent (#93).
+func TestAdapter_RetainedStateNeedsRecentTimestamp(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		timestamp string
+		retained  bool
+		want      model.Availability
+	}{
+		{"retained, recent", "2026-05-13T21:57:06Z", true, model.AvailabilityOnline},
+		{"retained, two days old", "2026-05-11T21:57:06Z", true, model.AvailabilityUnknown},
+		{"retained, undated", "", true, model.AvailabilityUnknown},
+		{"live, undated", "", false, model.AvailabilityOnline},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, store, _ := mkAdapter(t)
+			payload := `{"timestamp":"` + tc.timestamp + `","computed":{"load_watts":72}}`
+			a.HandleMessage("ups/cyberpower/state", []byte(payload), tc.retained)
+			dev, ok := store.Get("cyberpower")
+			if !ok {
+				t.Fatal("ups not in store")
+			}
+			if dev.Availability != tc.want {
+				t.Errorf("availability = %s, want %s", dev.Availability, tc.want)
+			}
+		})
 	}
 }

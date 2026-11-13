@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/sweeney/statehouse/internal/adapter/timeutil"
 	"github.com/sweeney/statehouse/internal/adapter/validate"
@@ -88,21 +87,21 @@ type glowSensorPayload struct {
 	GlowSensorTH1 map[string]glowSensorEntry `json:"glowsensorth1"`
 }
 
-func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
+func (a *Adapter) HandleMessage(topic string, payload []byte, retained bool) {
 	if a == nil || a.engine == nil || len(payload) == 0 {
 		return
 	}
 	if serial := serialFromTopic(a.base, topic); serial != "" {
-		a.handleMeter(topic, payload, serial)
+		a.handleMeter(topic, payload, serial, retained)
 		return
 	}
 	if serial := glowSensorSerial(a.base, topic); serial != "" {
-		a.handleGlowSensor(topic, payload, serial)
+		a.handleGlowSensor(topic, payload, serial, retained)
 		return
 	}
 }
 
-func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
+func (a *Adapter) handleMeter(topic string, payload []byte, serial string, retained bool) {
 	var p meterPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		if a.logger != nil {
@@ -114,15 +113,9 @@ func (a *Adapter) handleMeter(topic string, payload []byte, serial string) {
 	// now comes from the engine, never the wall clock: it both sanitises the
 	// publisher timestamp and stamps the reading, so it has to share a time
 	// base with the engine state derived from it.
-	now := a.engine.Now()
-	ts := now
-	if raw := p.ElectricityMeter.Timestamp; raw != "" {
-		if t, err := time.Parse(time.RFC3339, raw); err == nil {
-			ts = timeutil.Sanitise(t, now)
-		}
-	}
+	ts, dated := timeutil.RFC3339Dated(p.ElectricityMeter.Timestamp, a.engine.Now())
 
-	r := model.Reading{Timestamp: ts}
+	r := model.Reading{Timestamp: ts, UndatedReplay: retained && !dated}
 	imp := p.ElectricityMeter.Energy.Import
 	if v := imp.Cumulative.v; v != nil {
 		if validate.FiniteInRange(*v, 0, 1e9) {
@@ -163,7 +156,7 @@ func (a *Adapter) meterPeriod(topic, field string, v *float64, dst **float64) {
 	}
 }
 
-func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial string) {
+func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial string, retained bool) {
 	var p glowSensorPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		if a.logger != nil {
@@ -179,15 +172,9 @@ func (a *Adapter) handleGlowSensor(topic string, payload []byte, sensorSerial st
 	// now comes from the engine, never the wall clock: it both sanitises the
 	// publisher timestamp and stamps the reading, so it has to share a time
 	// base with the engine state derived from it.
-	now := a.engine.Now()
-	ts := now
-	if entry.Timestamp != "" {
-		if t, err := time.Parse(time.RFC3339, entry.Timestamp); err == nil {
-			ts = timeutil.Sanitise(t, now)
-		}
-	}
+	ts, dated := timeutil.RFC3339Dated(entry.Timestamp, a.engine.Now())
 
-	r := model.Reading{Timestamp: ts}
+	r := model.Reading{Timestamp: ts, UndatedReplay: retained && !dated}
 	if v := entry.Temperature.Value.v; v != nil {
 		if validate.FiniteInRange(*v, -50, 80) {
 			r.TemperatureC = v

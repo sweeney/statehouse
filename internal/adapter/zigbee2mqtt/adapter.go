@@ -78,7 +78,7 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, retained bool) {
 		return
 	}
 	if name := TopicFriendlyName(a.base, topic); name != "" {
-		a.handleDevicePayload(name, topic, payload)
+		a.handleDevicePayload(name, topic, payload, retained)
 		return
 	}
 }
@@ -122,7 +122,7 @@ func (a *Adapter) handleAvailability(friendlyName string, payload []byte, topic 
 	a.engine.SetAvailability(a.identityFor(friendlyName, ""), topic, avail)
 }
 
-func (a *Adapter) handleDevicePayload(friendlyName, topic string, payload []byte) {
+func (a *Adapter) handleDevicePayload(friendlyName, topic string, payload []byte, retained bool) {
 	// Empty payload is normal on bridge restart; ignore.
 	if len(payload) == 0 {
 		return
@@ -142,6 +142,9 @@ func (a *Adapter) handleDevicePayload(friendlyName, topic string, payload []byte
 		return
 	}
 	reading.SourceTopic = topic
+	// Device payloads carry no timestamp statehouse reads (last_seen is
+	// ignored, see payload.go), so a retained one has no known age (#93).
+	reading.UndatedReplay = retained
 	a.engine.IngestReading(a.identityFor(friendlyName, ""), topic, reading)
 }
 

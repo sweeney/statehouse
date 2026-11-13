@@ -84,7 +84,8 @@ type energyJSON struct {
 }
 
 type availabilityJSON struct {
-	OfflineDebounce *string `json:"offline_debounce"`
+	OfflineDebounce   *string  `json:"offline_debounce"`
+	SilenceMultiplier *float64 `json:"silence_multiplier"`
 }
 
 type houseJSON struct {
@@ -124,9 +125,15 @@ func (a *AvailabilityConfig) UnmarshalJSON(b []byte) error {
 	if err := strictUnmarshal(b, &raw); err != nil {
 		return err
 	}
-	return overlayDurations([]durationField{
+	if err := overlayDurations([]durationField{
 		{&a.OfflineDebounce, raw.OfflineDebounce, "offline_debounce"},
-	})
+	}); err != nil {
+		return err
+	}
+	if raw.SilenceMultiplier != nil {
+		a.SilenceMultiplier = *raw.SilenceMultiplier
+	}
+	return nil
 }
 
 // UnmarshalJSON overlays the keys present in b onto h; see the note at the

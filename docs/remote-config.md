@@ -122,6 +122,7 @@ unless `enabled` is `false`.
 | Key | Default | Meaning |
 |---|---|---|
 | `offline_debounce` | `30s` | How long a device must stay offline before it is reported offline. `"0s"` reports it at once. |
+| `silence_multiplier` | `10` | Silence window, as a multiple of the device's class staleness window (`staleness_seconds`, default 3600s). A device with no availability signal of its own that sends nothing for this long goes to availability and activity `unknown`; a reading already older than it does not mark a device `online`. `0` turns both off. |
 
 ### `house`
 

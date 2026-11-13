@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/sweeney/statehouse/internal/adapter/timeutil"
 	"github.com/sweeney/statehouse/internal/model"
 	"github.com/sweeney/statehouse/internal/state"
 )
@@ -78,9 +79,9 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, retained bool) {
 	}
 	switch topic {
 	case a.base + "/events":
-		a.handleEvents(topic, payload)
+		a.handleEvents(topic, payload, retained)
 	case a.base + "/system":
-		a.handleSystem(topic, payload)
+		a.handleSystem(topic, payload, retained)
 	}
 }
 
@@ -98,7 +99,7 @@ type boilerEnvelope struct {
 	} `json:"boiler"`
 }
 
-func (a *Adapter) handleEvents(topic string, payload []byte) {
+func (a *Adapter) handleEvents(topic string, payload []byte, retained bool) {
 	var env boilerEnvelope
 	if err := json.Unmarshal(payload, &env); err != nil {
 		if a.logger != nil {
@@ -108,8 +109,9 @@ func (a *Adapter) handleEvents(topic string, payload []byte) {
 	}
 	// Every events payload carries both channel states, so we feed
 	// both — the engine no-ops when state is unchanged.
-	a.ingestChannel(ChannelCH, DisplayCH, env.Boiler.CH.State, topic)
-	a.ingestChannel(ChannelHW, DisplayHW, env.Boiler.HW.State, topic)
+	at := a.stamp(env.Boiler.Timestamp, retained)
+	a.ingestChannel(ChannelCH, DisplayCH, env.Boiler.CH.State, topic, at)
+	a.ingestChannel(ChannelHW, DisplayHW, env.Boiler.HW.State, topic, at)
 }
 
 // systemEnvelope decodes the simple {"system":{...}} shape. The rich
@@ -126,16 +128,17 @@ type systemEnvelope struct {
 
 type statusEnvelope struct {
 	Status struct {
-		Event string `json:"event"`
-		CH    string `json:"ch"`
-		HW    string `json:"hw"`
-		MQTT  struct {
+		Timestamp string `json:"timestamp"`
+		Event     string `json:"event"`
+		CH        string `json:"ch"`
+		HW        string `json:"hw"`
+		MQTT      struct {
 			Connected bool `json:"connected"`
 		} `json:"mqtt"`
 	} `json:"status"`
 }
 
-func (a *Adapter) handleSystem(topic string, payload []byte) {
+func (a *Adapter) handleSystem(topic string, payload []byte, retained bool) {
 	// Distinguish the two shapes by which top-level key is present.
 	// We try status first because it carries channel state we can
 	// seed (e.g. STARTUP gives us the initial CH/HW).
@@ -147,7 +150,7 @@ func (a *Adapter) handleSystem(topic string, payload []byte) {
 			}
 			return
 		}
-		a.applyStatus(s, topic)
+		a.applyStatus(s, topic, retained)
 		return
 	}
 	if hasKey(payload, "system") {
@@ -162,10 +165,11 @@ func (a *Adapter) handleSystem(topic string, payload []byte) {
 	}
 }
 
-func (a *Adapter) applyStatus(s statusEnvelope, topic string) {
+func (a *Adapter) applyStatus(s statusEnvelope, topic string, retained bool) {
 	// Channel state is authoritative — seed both channels.
-	a.ingestChannel(ChannelCH, DisplayCH, s.Status.CH, topic)
-	a.ingestChannel(ChannelHW, DisplayHW, s.Status.HW, topic)
+	at := a.stamp(s.Status.Timestamp, retained)
+	a.ingestChannel(ChannelCH, DisplayCH, s.Status.CH, topic, at)
+	a.ingestChannel(ChannelHW, DisplayHW, s.Status.HW, topic, at)
 	// Lifecycle: STARTUP / HEARTBEAT imply online; SHUTDOWN implies
 	// offline (the simple envelope handler covers explicit LWT).
 	switch strings.ToUpper(s.Status.Event) {
@@ -194,12 +198,23 @@ func (a *Adapter) setBothAvailable(avail model.Availability, topic string) {
 	a.engine.SetAvailability(a.identity(ChannelHW, DisplayHW), topic, avail)
 }
 
-func (a *Adapter) ingestChannel(primary, display, state, topic string) {
+// stamp turns boiler-sensor's RFC3339 timestamp into the reading's time and
+// age. A retained message without a usable one has no known age (#93).
+func (a *Adapter) stamp(raw string, retained bool) model.Reading {
+	ts, dated := timeutil.RFC3339Dated(raw, a.engine.Now())
+	return model.Reading{Timestamp: ts, UndatedReplay: retained && !dated}
+}
+
+// ingestChannel feeds one channel's state into the engine, stamped by at
+// (a Reading carrying only Timestamp and UndatedReplay).
+func (a *Adapter) ingestChannel(primary, display, state, topic string, at model.Reading) {
 	s := strings.ToUpper(strings.TrimSpace(state))
 	if s != "ON" && s != "OFF" {
 		return
 	}
-	a.engine.IngestReading(a.identity(primary, display), topic, model.Reading{State: &s})
+	r := at
+	r.State = &s
+	a.engine.IngestReading(a.identity(primary, display), topic, r)
 }
 
 func (a *Adapter) identity(primary, display string) model.DeviceIdentity {

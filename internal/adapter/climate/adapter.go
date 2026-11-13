@@ -62,7 +62,7 @@ type deviceStatusPayload struct {
 	RSSI      *int  `json:"rssi_dbm"`
 }
 
-func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
+func (a *Adapter) HandleMessage(topic string, payload []byte, retained bool) {
 	if a == nil || a.engine == nil || len(payload) == 0 {
 		return
 	}
@@ -72,13 +72,13 @@ func (a *Adapter) HandleMessage(topic string, payload []byte, _ bool) {
 	}
 	switch subtype {
 	case "observation":
-		a.handleObservation(location, topic, payload)
+		a.handleObservation(location, topic, payload, retained)
 	case "device/status":
-		a.handleDeviceStatus(location, topic, payload)
+		a.handleDeviceStatus(location, topic, payload, retained)
 	}
 }
 
-func (a *Adapter) handleObservation(location, topic string, payload []byte) {
+func (a *Adapter) handleObservation(location, topic string, payload []byte, retained bool) {
 	var p observationPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		if a.logger != nil {
@@ -89,12 +89,8 @@ func (a *Adapter) handleObservation(location, topic string, payload []byte) {
 	// now comes from the engine, never the wall clock: it both sanitises the
 	// publisher timestamp and stamps the reading, so it has to share a time
 	// base with the engine state derived from it.
-	now := a.engine.Now()
-	ts := now
-	if p.Timestamp != 0 {
-		ts = timeutil.UnixSeconds(p.Timestamp, now)
-	}
-	r := model.Reading{Timestamp: ts}
+	ts, dated := timeutil.UnixSecondsDated(p.Timestamp, a.engine.Now())
+	r := model.Reading{Timestamp: ts, UndatedReplay: retained && !dated}
 	if p.TemperatureC != nil {
 		if validate.FiniteInRange(*p.TemperatureC, -50, 80) {
 			r.TemperatureC = p.TemperatureC
@@ -152,7 +148,7 @@ func (a *Adapter) handleObservation(location, topic string, payload []byte) {
 	a.engine.IngestReading(id, topic, r)
 }
 
-func (a *Adapter) handleDeviceStatus(location, topic string, payload []byte) {
+func (a *Adapter) handleDeviceStatus(location, topic string, payload []byte, retained bool) {
 	var p deviceStatusPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		if a.logger != nil {
@@ -163,12 +159,8 @@ func (a *Adapter) handleDeviceStatus(location, topic string, payload []byte) {
 	// now comes from the engine, never the wall clock: it both sanitises the
 	// publisher timestamp and stamps the reading, so it has to share a time
 	// base with the engine state derived from it.
-	now := a.engine.Now()
-	ts := now
-	if p.Timestamp != 0 {
-		ts = timeutil.UnixSeconds(p.Timestamp, now)
-	}
-	r := model.Reading{Timestamp: ts, RSSI: p.RSSI}
+	ts, dated := timeutil.UnixSecondsDated(p.Timestamp, a.engine.Now())
+	r := model.Reading{Timestamp: ts, RSSI: p.RSSI, UndatedReplay: retained && !dated}
 	id := a.identity(location)
 	a.engine.EnsureDiscovered(id, topic)
 	a.engine.IngestReading(id, topic, r)

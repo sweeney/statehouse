@@ -381,3 +381,92 @@ func checkExtremum(t *testing.T, name string, got *model.Extremum, want *float64
 		t.Errorf("%s: expected a recorded timestamp, got zero", name)
 	}
 }
+
+// TestAdapter_SilentSensorFixture replays #93: the sensor's last live
+// observation and dying device/status on 27 Oct, then nothing until a
+// restart on 12 Nov, when the broker replays both as retained messages.
+// Lines marked retained are that replay; the rest were published live.
+func TestAdapter_SilentSensorFixture(t *testing.T) {
+	events, err := testutil.LoadFixture(filepath.Join("..", "..", "testdata", "fixtures", "climate_silent_sensor.jsonl"))
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	var live, replay []testutil.FixtureEvent
+	for _, e := range events {
+		if e.Retained {
+			replay = append(replay, e)
+		} else if e.Topic != "climate/home/status" {
+			live = append(live, e)
+		}
+	}
+	if len(live) == 0 || len(replay) == 0 {
+		t.Fatalf("fixture needs live and retained lines, got %d and %d", len(live), len(replay))
+	}
+	lastSeen := time.Date(2026, 10, 27, 11, 6, 11, 0, time.UTC)
+	restart := replay[0].Timestamp
+
+	feed := func(a *Adapter, clock *testutil.FakeClock, evs []testutil.FixtureEvent) {
+		for _, e := range evs {
+			clock.Set(e.Timestamp)
+			a.HandleMessage(e.Topic, e.PayloadBytes(), e.Retained)
+		}
+	}
+	check := func(t *testing.T, store *state.Store) {
+		t.Helper()
+		d, ok := store.Get("home")
+		if !ok {
+			t.Fatal("climate/home not found")
+		}
+		if d.Availability != model.AvailabilityUnknown {
+			t.Errorf("availability = %s, want unknown", d.Availability)
+		}
+		if d.Activity.State != model.ActivityUnknown {
+			t.Errorf("activity = %s, want unknown", d.Activity.State)
+		}
+		if !d.Latest.LastSeen.Equal(lastSeen) {
+			t.Errorf("last_seen = %v, want %v", d.Latest.LastSeen, lastSeen)
+		}
+		if d.Latest.TemperatureC == nil || d.Latest.RSSI == nil || *d.Latest.RSSI != -127 {
+			t.Errorf("latest values not kept: temperature=%v rssi=%v", d.Latest.TemperatureC, d.Latest.RSSI)
+		}
+	}
+
+	t.Run("running through the silence", func(t *testing.T) {
+		a, store, clock := mkAdapterAt(t, live[0].Timestamp)
+		feed(a, clock, live)
+		if d, _ := store.Get("home"); d.Availability != model.AvailabilityOnline {
+			t.Fatalf("while live: availability = %s, want online", d.Availability)
+		}
+		clock.Set(restart)
+		a.engine.Tick()
+		check(t, store)
+	})
+
+	t.Run("restarted into the retained replay", func(t *testing.T) {
+		a, store, clock := mkAdapterAt(t, restart)
+		feed(a, clock, replay)
+		a.engine.Tick()
+		check(t, store)
+	})
+}
+
+// A retained observation with no timestamp has no known age: its values
+// are kept, but it does not bring the device online.
+func TestAdapter_UndatedRetainedObservationIsNotLive(t *testing.T) {
+	a, store, _ := mkAdapter(t)
+	a.HandleMessage("climate/home/observation", []byte(`{"temperature_c":7.5}`), true)
+	d, ok := store.Get("home")
+	if !ok {
+		t.Fatal("climate/home not found")
+	}
+	if d.Availability != model.AvailabilityUnknown {
+		t.Errorf("availability = %s, want unknown", d.Availability)
+	}
+	if d.Latest.TemperatureC == nil {
+		t.Error("value from the retained observation was dropped")
+	}
+	a.HandleMessage("climate/home/observation", []byte(`{"temperature_c":7.6}`), false)
+	if d, _ := store.Get("home"); d.Availability != model.AvailabilityOnline {
+		t.Errorf("after a live observation: availability = %s, want online", d.Availability)
+	}
+}

@@ -57,6 +57,9 @@ mqtt:
 	if cfg.Availability.OfflineDebounce != 30*time.Second {
 		t.Errorf("expected default OfflineDebounce=30s, got %v", cfg.Availability.OfflineDebounce)
 	}
+	if cfg.Availability.SilenceMultiplier != 10 {
+		t.Errorf("expected default SilenceMultiplier=10, got %v", cfg.Availability.SilenceMultiplier)
+	}
 	if len(cfg.Devices) != 0 || len(cfg.DeviceClasses) != 0 {
 		t.Errorf("Load filled remote-only fields: devices %v, classes %v", cfg.Devices, cfg.DeviceClasses)
 	}

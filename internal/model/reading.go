@@ -9,6 +9,12 @@ type Reading struct {
 	Timestamp   time.Time
 	SourceTopic string
 
+	// UndatedReplay marks a broker-retained message that carried no usable
+	// publisher timestamp, so Timestamp is only the time statehouse received
+	// it. Its real age is unknown: the engine records its values but does not
+	// take it as a sign the device is alive or advance Latest.LastSeen (#93).
+	UndatedReplay bool
+
 	// Power / energy (plugs, smart meter, UPS)
 	State     *string  // "ON"/"OFF" for binary-state devices
 	PowerW    *float64 // instantaneous power watts

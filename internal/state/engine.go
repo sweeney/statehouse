@@ -207,6 +207,8 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 	}
 	e.emitCanonicalForReading(id, identity, sourceTopic, reading)
 
+	now := e.clock.Now()
+
 	var (
 		outcome device.Outcome
 		profile device.Profile
@@ -214,14 +216,29 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		divergencePct   float64
 		divergenceHit   bool
 		staleCounterHit bool
+		// The public activity before and after this reading, which can
+		// differ from the runtime's while the silence rule holds it.
+		prevActivity, newActivity model.DeviceActivityState
+		cameOnline                bool
 	)
 	e.store.withEntry(id, func(ent *deviceEntry) {
 		profile = ent.Runtime.Profile
-		// Mark availability online if any data arrives — the device is
-		// clearly speaking.
-		if ent.Device.Availability != model.AvailabilityOnline {
-			ent.Device.Availability = model.AvailabilityOnline
-			ent.availabilityOfflineAt = nil
+		prevActivity = ent.Device.Activity.State
+		// A current reading means the device is speaking, so it is online.
+		// One whose age is unknown (a retained replay with no publisher
+		// timestamp), or which is already older than the silence window
+		// (a retained message replayed after a restart, #93), says nothing
+		// about now: record its values but leave availability alone, and
+		// hold activity at unknown if we have no current word either.
+		if isLive(reading, now, silenceWindow(snap.cfg, ent.Device.Class)) {
+			if ent.Device.Availability != model.AvailabilityOnline {
+				ent.Device.Availability = model.AvailabilityOnline
+				ent.availabilityOfflineAt = nil
+				cameOnline = true
+			}
+			ent.silent = false
+		} else if ent.Device.Availability == model.AvailabilityUnknown {
+			ent.silent = true
 		}
 		// Seed counter baseline before any activity so first cycle has
 		// a baseline. SeedCounter is a no-op while a cycle is active.
@@ -231,7 +248,9 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 		outcome = ent.Runtime.OnReading(reading.Timestamp, reading)
 		// Push latest measurements onto the public record.
 		l := &ent.Device.Latest
-		l.LastSeen = reading.Timestamp
+		if !reading.UndatedReplay {
+			l.LastSeen = reading.Timestamp
+		}
 		// Accumulate all-time extremes for the measurements this device
 		// reports. Copy-on-write (like Cycle below): readers get a shallow
 		// Device copy that shares this *Lifetime pointer and dereference it
@@ -334,8 +353,16 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			v := *reading.RSSI
 			l.RSSI = &v
 		}
-		// Activity sub-state.
-		if outcome.NewActivity != outcome.PrevActivity {
+		// Activity sub-state. While silent the public activity stays
+		// unknown; the runtime carries on and is restored from once the
+		// device is heard from again.
+		if ent.silent {
+			if ent.Device.Activity.State != model.ActivityUnknown {
+				ent.Device.Activity.State = model.ActivityUnknown
+				ent.Device.Activity.LastChanged = now
+				ent.Device.Activity.Since = now
+			}
+		} else if outcome.NewActivity != outcome.PrevActivity {
 			now := reading.Timestamp
 			ent.Device.Activity.Since = now
 			ent.Device.Activity.State = outcome.NewActivity
@@ -388,10 +415,14 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 			ent.Device.Cycle = &cc
 			staleCounterHit = true
 		}
+		newActivity = ent.Device.Activity.State
 	})
 
-	if outcome.PrevActivity != outcome.NewActivity {
-		e.emitActivityChange(id, profile, outcome, reading.Timestamp)
+	if cameOnline {
+		e.emitAvailabilityChange(id, now, model.AvailabilityOnline)
+	}
+	if prevActivity != newActivity {
+		e.emitActivityChange(id, profile, device.Outcome{PrevActivity: prevActivity, NewActivity: newActivity}, reading.Timestamp)
 	}
 	if outcome.CycleStarted {
 		e.emitCycleStarted(id, profile, reading.Timestamp)
@@ -433,7 +464,7 @@ func (e *Engine) IngestReading(identity model.DeviceIdentity, sourceTopic string
 	}
 
 	// Re-derive whole-house state on every activity transition.
-	if outcome.PrevActivity != outcome.NewActivity || outcome.CycleStarted || outcome.CycleFinished {
+	if prevActivity != newActivity || outcome.CycleStarted || outcome.CycleFinished {
 		e.RecomputeHouse()
 	}
 
@@ -454,8 +485,12 @@ func (e *Engine) SetAvailability(identity model.DeviceIdentity, sourceTopic stri
 		emitChange bool
 		newAvail   model.Availability
 		debounce   = snap.cfg.Availability.OfflineDebounce
+		restored   *activityChange
 	)
 	e.store.withEntry(id, func(ent *deviceEntry) {
+		// The adapter has its own availability signal for this device, so
+		// silence never overrides it (#93).
+		ent.explicitAvailability = true
 		switch a {
 		case model.AvailabilityOnline:
 			if ent.Device.Availability != model.AvailabilityOnline {
@@ -464,6 +499,7 @@ func (e *Engine) SetAvailability(identity model.DeviceIdentity, sourceTopic stri
 				emitChange = true
 				newAvail = model.AvailabilityOnline
 			}
+			restored = ent.unsilence(now)
 		case model.AvailabilityOffline:
 			if debounce > 0 {
 				if ent.availabilityOfflineAt == nil {
@@ -491,14 +527,79 @@ func (e *Engine) SetAvailability(identity model.DeviceIdentity, sourceTopic stri
 		}
 	})
 	if emitChange {
-		e.emitDerived(model.DerivedEvent{
-			ID:        newEventID(),
-			Timestamp: now,
-			Type:      model.EvtDeviceAvailabilityChanged,
-			DeviceID:  id,
-			Evidence:  map[string]any{"availability": string(newAvail)},
-		})
+		e.emitAvailabilityChange(id, now, newAvail)
 	}
+	if restored != nil {
+		e.emitActivityChange(id, restored.profile, restored.outcome, now)
+		e.RecomputeHouse()
+	}
+}
+
+// activityChange is a public activity transition made under the store lock
+// and announced after it is released.
+type activityChange struct {
+	id      string
+	profile device.Profile
+	outcome device.Outcome
+}
+
+// unsilence lifts the silence rule's hold on ent, restoring the public
+// activity from the runtime. It returns the activity change to announce, or
+// nil when there is none. The caller holds the store lock.
+func (ent *deviceEntry) unsilence(now time.Time) *activityChange {
+	if !ent.silent {
+		return nil
+	}
+	ent.silent = false
+	if ent.Runtime == nil {
+		return nil
+	}
+	prev, next := ent.Device.Activity.State, ent.Runtime.Activity()
+	if prev == next {
+		return nil
+	}
+	ent.Device.Activity.State = next
+	ent.Device.Activity.LastChanged = now
+	ent.Device.Activity.Since = now
+	ent.Device.Activity.Confidence = 0.9
+	return &activityChange{
+		profile: ent.Runtime.Profile,
+		outcome: device.Outcome{PrevActivity: prev, NewActivity: next},
+	}
+}
+
+// silenceWindow is how long a device of class may send nothing before the
+// silence rule takes it to unknown: its class staleness window times
+// availability.silence_multiplier. 0 means the rule is off.
+func silenceWindow(cfg config.Config, class string) time.Duration {
+	m := cfg.Availability.SilenceMultiplier
+	if m <= 0 {
+		return 0
+	}
+	var override *int
+	if c, ok := cfg.DeviceClasses[class]; ok {
+		override = c.StalenessSeconds
+	}
+	return time.Duration(device.StalenessSecondsForClass(class, override) * m * float64(time.Second))
+}
+
+// isLive reports whether reading is evidence the device is up now: it has a
+// known age, and that age is within the silence window (when one is set).
+func isLive(reading model.Reading, now time.Time, window time.Duration) bool {
+	if reading.UndatedReplay {
+		return false
+	}
+	return window <= 0 || now.Sub(reading.Timestamp) <= window
+}
+
+func (e *Engine) emitAvailabilityChange(id string, ts time.Time, a model.Availability) {
+	e.emitDerived(model.DerivedEvent{
+		ID:        newEventID(),
+		Timestamp: ts,
+		Type:      model.EvtDeviceAvailabilityChanged,
+		DeviceID:  id,
+		Evidence:  map[string]any{"availability": string(a)},
+	})
 }
 
 // IngestSignal asserts an ActivitySignal. If a signal with the same ID
@@ -579,50 +680,68 @@ func (e *Engine) Tick() {
 	snap := e.snap()
 	now := e.clock.Now()
 	debounce := snap.cfg.Availability.OfflineDebounce
-	type maturedAvail struct {
-		id   string
-		from model.Availability
+	type availChange struct {
+		id string
+		to model.Availability
 	}
-	type maturedActivity struct {
-		id      string
-		profile device.Profile
-		outcome device.Outcome
-	}
-	var availChanged []maturedAvail
-	var activityChanged []maturedActivity
+	var availChanged []availChange
+	var activityChanged []activityChange
 	devices := e.store.Devices()
 	for id := range devices {
 		e.store.withEntry(id, func(ent *deviceEntry) {
 			if ent.availabilityOfflineAt != nil &&
 				ent.Device.Availability == model.AvailabilityOfflinePending &&
 				now.Sub(*ent.availabilityOfflineAt) >= debounce {
-				from := ent.Device.Availability
 				ent.Device.Availability = model.AvailabilityOffline
-				availChanged = append(availChanged, maturedAvail{id: id, from: from})
+				availChanged = append(availChanged, availChange{id: id, to: model.AvailabilityOffline})
 			}
 			if ent.Runtime != nil {
 				tickOut := ent.Runtime.Tick(now)
-				if tickOut.PrevActivity != tickOut.NewActivity {
+				if tickOut.PrevActivity != tickOut.NewActivity && !ent.silent {
 					ent.Device.Activity.State = tickOut.NewActivity
 					ent.Device.Activity.LastChanged = now
 					ent.Device.Activity.Since = now
-					activityChanged = append(activityChanged, maturedActivity{
+					activityChanged = append(activityChanged, activityChange{
 						id:      id,
 						profile: ent.Runtime.Profile,
 						outcome: tickOut,
 					})
 				}
 			}
+			// Silence rule (#93): a device with no availability signal of
+			// its own that has sent nothing for the silence window is no
+			// longer known to be up, or to be doing what it last did.
+			if ent.explicitAvailability || ent.silent || ent.Device.Latest.LastSeen.IsZero() {
+				return
+			}
+			window := silenceWindow(snap.cfg, ent.Device.Class)
+			if window <= 0 || now.Sub(ent.Device.Latest.LastSeen) <= window {
+				return
+			}
+			ent.silent = true
+			if ent.Device.Availability != model.AvailabilityUnknown {
+				ent.Device.Availability = model.AvailabilityUnknown
+				ent.availabilityOfflineAt = nil
+				availChanged = append(availChanged, availChange{id: id, to: model.AvailabilityUnknown})
+			}
+			if prev := ent.Device.Activity.State; prev != model.ActivityUnknown {
+				ent.Device.Activity.State = model.ActivityUnknown
+				ent.Device.Activity.LastChanged = now
+				ent.Device.Activity.Since = now
+				var profile device.Profile
+				if ent.Runtime != nil {
+					profile = ent.Runtime.Profile
+				}
+				activityChanged = append(activityChanged, activityChange{
+					id:      id,
+					profile: profile,
+					outcome: device.Outcome{PrevActivity: prev, NewActivity: model.ActivityUnknown},
+				})
+			}
 		})
 	}
 	for _, c := range availChanged {
-		e.emitDerived(model.DerivedEvent{
-			ID:        newEventID(),
-			Timestamp: now,
-			Type:      model.EvtDeviceAvailabilityChanged,
-			DeviceID:  c.id,
-			Evidence:  map[string]any{"availability": string(model.AvailabilityOffline)},
-		})
+		e.emitAvailabilityChange(c.id, now, c.to)
 	}
 	for _, c := range activityChanged {
 		e.emitActivityChange(c.id, c.profile, c.outcome, now)

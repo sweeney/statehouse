@@ -247,3 +247,41 @@ func summary(evs []model.DerivedEvent) []string {
 	}
 	return out
 }
+
+// boiler-sensor's own timestamp stamps the reading, so a cycle is timed by
+// when the boiler switched, not when statehouse heard about it (#93).
+func TestAdapter_EventsUsePublisherTimestamp(t *testing.T) {
+	a, store, _, clock := mkAdapter(t)
+	clock.Set(time.Date(2026, 5, 13, 7, 2, 20, 0, time.UTC)) // 5s after the switch
+	a.HandleMessage("energy/boiler/sensor/events",
+		[]byte(`{"boiler":{"timestamp":"2026-05-13T07:02:15Z","event":"CH_ON","ch":{"state":"ON"},"hw":{"state":"OFF"}}}`), false)
+	ch, ok := store.Get("central_heating")
+	if !ok {
+		t.Fatal("central_heating not in store")
+	}
+	want := time.Date(2026, 5, 13, 7, 2, 15, 0, time.UTC)
+	if !ch.Latest.LastSeen.Equal(want) {
+		t.Errorf("last_seen = %v, want the publisher's %v", ch.Latest.LastSeen, want)
+	}
+	if ch.Cycle == nil || !ch.Cycle.StartedAt.Equal(want) {
+		t.Errorf("cycle = %+v, want started at %v", ch.Cycle, want)
+	}
+}
+
+// A retained events payload without a usable timestamp is recorded but does
+// not bring the channels online (#93).
+func TestAdapter_UndatedRetainedEventsAreNotLive(t *testing.T) {
+	a, store, _, _ := mkAdapter(t)
+	a.HandleMessage("energy/boiler/sensor/events",
+		[]byte(`{"boiler":{"timestamp":"...","event":"CH_ON","ch":{"state":"ON"},"hw":{"state":"OFF"}}}`), true)
+	ch, ok := store.Get("central_heating")
+	if !ok {
+		t.Fatal("central_heating not in store")
+	}
+	if ch.Availability != model.AvailabilityUnknown {
+		t.Errorf("availability = %s, want unknown", ch.Availability)
+	}
+	if ch.Activity.State != model.ActivityUnknown {
+		t.Errorf("activity = %s, want unknown until the device is heard from", ch.Activity.State)
+	}
+}

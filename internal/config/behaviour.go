@@ -143,9 +143,16 @@ func (e EnergyConfig) validate() error {
 	return nonNegative("max_integration_gap", e.MaxIntegrationGap)
 }
 
-// validate reports a negative offline_debounce. 0 is valid: no debounce.
+// validate reports a negative offline_debounce or silence_multiplier. 0 is
+// valid for both: no debounce, and no silence rule.
 func (a AvailabilityConfig) validate() error {
-	return nonNegative("offline_debounce", a.OfflineDebounce)
+	if err := nonNegative("offline_debounce", a.OfflineDebounce); err != nil {
+		return err
+	}
+	if a.SilenceMultiplier < 0 {
+		return fmt.Errorf("silence_multiplier must not be negative, got %v", a.SilenceMultiplier)
+	}
+	return nil
 }
 
 // validate reports the first house value statehouse cannot use. A negative

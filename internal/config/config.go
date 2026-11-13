@@ -372,6 +372,12 @@ type EnergyConfig struct {
 
 type AvailabilityConfig struct {
 	OfflineDebounce time.Duration `yaml:"offline_debounce" json:"-"`
+	// SilenceMultiplier scales a device's class staleness window into the
+	// silence window (#93). A device with no explicit availability signal
+	// that sends nothing for that long goes to availability and activity
+	// "unknown", and a reading already older than it does not mark the
+	// device online. 0 turns both rules off.
+	SilenceMultiplier float64 `yaml:"silence_multiplier" json:"silence_multiplier"`
 }
 
 type HouseConfig struct {
@@ -447,7 +453,8 @@ func Default() Config {
 			MaxIntegrationGap:    30 * time.Minute,
 		},
 		Availability: AvailabilityConfig{
-			OfflineDebounce: 30 * time.Second,
+			OfflineDebounce:   30 * time.Second,
+			SilenceMultiplier: 10,
 		},
 		House: HouseConfig{
 			QuietAfter:    30 * time.Minute,
