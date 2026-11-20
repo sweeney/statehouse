@@ -54,7 +54,7 @@ const SchemeName = "tanktemp"
 
 // DefaultBase is tanktemp's production topic prefix. config.Load fills the
 // same default for adapters.tanktemp.base_topic; keep the two in step.
-const DefaultBase = "energy/hot_water"
+const DefaultBase = "water/hot/tanktemp"
 
 // staleAfter is how old a retained state may be and still be taken as the
 // current value: three of tanktemp's 30 s sweeps. It is also how far ahead
@@ -99,7 +99,7 @@ type Adapter struct {
 }
 
 // New returns an Adapter for the given base topic (typically
-// "energy/hot_water"). Logger may be nil.
+// "water/hot/tanktemp"). Logger may be nil.
 func New(engine *state.Engine, base string, logger *slog.Logger) *Adapter {
 	if base == "" {
 		base = DefaultBase

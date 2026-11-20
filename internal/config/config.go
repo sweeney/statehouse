@@ -310,7 +310,7 @@ func (i IntercomConfig) IsEnabled() bool {
 
 // TanktempConfig configures the sweeney/tanktemp adapter for hot water
 // cylinder probes. It subscribes to {base}/+/state and {base}/status.
-// BaseTopic defaults to "energy/hot_water". Off by default: enable it only
+// BaseTopic defaults to "water/hot/tanktemp". Off by default: enable it only
 // once the devices namespace has entries for the cylinder and its probes,
 // or the probes resolve as unclassified.
 type TanktempConfig struct {
@@ -481,7 +481,7 @@ func (a *AdaptersConfig) fillDefaults() {
 		{&a.Meter.BaseTopic, "energy"},
 		{&a.Intercom.BaseTopic, "asterisk"},
 		// Mirrors tanktemp.DefaultBase; config must not import an adapter.
-		{&a.Tanktemp.BaseTopic, "energy/hot_water"},
+		{&a.Tanktemp.BaseTopic, "water/hot/tanktemp"},
 	} {
 		if *f.topic == "" {
 			*f.topic = f.def

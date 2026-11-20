@@ -113,7 +113,7 @@ func TestProbeRelaysPartOfWithoutInheritingARoom(t *testing.T) {
 
 	id := engine.EnsureDiscovered(
 		model.DeviceIdentity{Scheme: "tanktemp", Primary: "hot-water-cylinder.top"},
-		"energy/hot_water/hot-water-cylinder/state",
+		"water/hot/tanktemp/hot-water-cylinder/state",
 	)
 
 	for _, path := range []string{"/state/devices/" + id, "/config/devices/" + id} {

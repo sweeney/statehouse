@@ -42,7 +42,7 @@ func TestEngine_TelemetryFalseEntryNeverEntersStore(t *testing.T) {
 	engine := NewEngine(cfg, store, clock)
 
 	probe := model.DeviceIdentity{Scheme: "tanktemp", Primary: "hot-water-cylinder.top", Display: "hot-water-cylinder.top"}
-	engine.IngestReading(probe, "energy/hot_water/hot-water-cylinder/state",
+	engine.IngestReading(probe, "water/hot/tanktemp/hot-water-cylinder/state",
 		model.Reading{Timestamp: clock.Now(), TemperatureC: ptr(61.2)})
 	clock.Advance(10 * time.Minute)
 	engine.Tick()
