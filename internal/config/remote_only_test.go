@@ -169,7 +169,7 @@ func TestApplyRemoteFillsAdapterBaseTopicDefaults(t *testing.T) {
 		"climate":     "climate",
 		"meter":       "energy",
 		"intercom":    "asterisk",
-		"tanktemp":    "energy/hot_water",
+		"tanktemp":    "water/hot/tanktemp",
 	}
 	for name, got := range want {
 		if got != defaults[name] {

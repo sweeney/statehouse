@@ -108,7 +108,7 @@ unless `enabled` is `false`.
 | `climate` | `climate` | `{base}/#` (weather station observations) |
 | `meter` | `energy` | `{base}/+/SENSOR/...` (Glow/SMETS2 smart meter) |
 | `intercom` | `asterisk` | `{base}/#` (Asterisk via MQTT; in-flight calls as activity signals) |
-| `tanktemp` | `energy/hot_water` | `{base}/+/state`, `{base}/status` (sweeney/tanktemp cylinder probes; one device per probe, scheme `tanktemp`, primary `<cylinder id>.<position>`; the cylinder and probe entries must be in the devices namespace first) |
+| `tanktemp` | `water/hot/tanktemp` | `{base}/+/state`, `{base}/status` (sweeney/tanktemp cylinder probes; one device per probe, scheme `tanktemp`, primary `<cylinder id>.<position>`; the cylinder and probe entries must be in the devices namespace first) |
 
 ### `energy`
 

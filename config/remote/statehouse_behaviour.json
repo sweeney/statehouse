@@ -25,7 +25,7 @@
       "enabled": false
     },
     "tanktemp": {
-      "base_topic": "energy/hot_water",
+      "base_topic": "water/hot/tanktemp",
       "enabled": false
     }
   },

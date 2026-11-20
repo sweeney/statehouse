@@ -21,7 +21,7 @@ import (
 // internal/payload/testdata, which pins the wire contract.
 
 const (
-	base        = "energy/hot_water"
+	base        = "water/hot/tanktemp"
 	stateTopic  = base + "/hot-water-cylinder/state"
 	statusTopic = base + "/status"
 )
@@ -103,7 +103,7 @@ func TestSubscriptions(t *testing.T) {
 }
 
 func TestDefaultBase(t *testing.T) {
-	if got := New(nil, "", nil).Subscriptions()[1]; got != "energy/hot_water/status" {
+	if got := New(nil, "", nil).Subscriptions()[1]; got != "water/hot/tanktemp/status" {
 		t.Fatalf("default status topic = %q", got)
 	}
 }
@@ -235,8 +235,10 @@ func TestRejects(t *testing.T) {
 	}{
 		{"device_id differs from topic", base + "/other/state", ok, false},
 		{"bad device_id in topic", base + "/Bad.Id/state", ok, false},
-		{"other prefix", "test/energy/hot_water/hot-water-cylinder/state", ok, false},
+		{"other prefix", "test/water/hot/tanktemp/hot-water-cylinder/state", ok, false},
 		{"deeper topic", base + "/hot-water-cylinder/x/state", ok, false},
+		// tanktemp's raw meter topic shares the base; it is not a probe state.
+		{"meter topic", base + "/meter", ok, false},
 		{"not json", stateTopic, "{", false},
 		{"bad position", stateTopic, one("Top.x", "60"), false},
 		{"far out of range", stateTopic, one("top", "300"), true},

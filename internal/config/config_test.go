@@ -172,7 +172,7 @@ mqtt:
 		{"Climate", cfg.Adapters.Climate.BaseTopic, "climate"},
 		{"Meter", cfg.Adapters.Meter.BaseTopic, "energy"},
 		{"Intercom", cfg.Adapters.Intercom.BaseTopic, "asterisk"},
-		{"Tanktemp", cfg.Adapters.Tanktemp.BaseTopic, "energy/hot_water"},
+		{"Tanktemp", cfg.Adapters.Tanktemp.BaseTopic, "water/hot/tanktemp"},
 	}
 	for _, c := range checks {
 		if c.got != c.exp {
